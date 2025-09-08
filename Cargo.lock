@@ -43,6 +43,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fd99930f64d146689264c637b5af2f0233a933bef0d8570e2526bf9e083192d"
 
 [[package]]
+name = "fst"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ab85b9b05e3978cc9a9cf8fea7f01b494e1a09ed3037e16ba39edc7a29eb61a"
+
+[[package]]
 name = "getrandom"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -406,10 +412,12 @@ dependencies = [
 name = "tiletangle-engine"
 version = "0.1.0"
 dependencies = [
+ "fst",
  "getrandom",
  "rand",
  "rand_chacha",
  "serde",
+ "serde_json",
  "smallvec",
  "thiserror",
  "unicode-normalization",

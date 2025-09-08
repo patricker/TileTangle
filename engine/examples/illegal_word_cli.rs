@@ -41,7 +41,7 @@ fn main() {
         free_word_mode: false,
         ..Default::default()
     };
-    state.dictionary = Some(SetDictionary::from_words(vec!["AB".to_string()], true));
+    state.dictionary = Some(Box::new(SetDictionary::from_words(vec!["AB".to_string()], true)));
     // Try to place A at center -> invalid dictionary
     let c = CrosswordRules::center_cell(&state.board.geom);
     let mv = MoveDraft {

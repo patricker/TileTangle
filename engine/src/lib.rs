@@ -1,6 +1,7 @@
 //! TileTangle Engine — Core Model (Phase 1)
 
 use rand::{Rng, SeedableRng, rngs::StdRng};
+use fst::{Automaton, Streamer};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::collections::{BTreeSet, HashMap};
@@ -340,7 +341,7 @@ pub struct GameConfig {
     pub tile_counts: HashMap<String, u32>,
 }
 
-#[derive(Debug, Clone)]
+#[derive()]
 pub struct GameState {
     pub board: Board<RectGridGeometry>,
     pub players: Vec<Player>,
@@ -348,7 +349,7 @@ pub struct GameState {
     pub bag: Bag,
     pub turn_num: u32,
     pub tileset: Tileset,
-    pub dictionary: Option<SetDictionary>,
+    pub dictionary: Option<Box<dyn Dictionary + Send + Sync>>, 
 }
 
 impl GameState {
@@ -762,6 +763,165 @@ impl Rules for CrosswordRules {
     }
 }
 
+// -------- Move Generation (Phase 12 start) --------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CandidateMove {
+    pub placements: Vec<(CellId, Tile)>,
+    pub word: String,
+    pub score: i32,
+}
+
+/// Generate naive horizontal moves at anchors (place to the right only).
+/// Rack is a multiset of `kind_id` strings available to play.
+pub fn generate_moves(
+    state: &GameState,
+    rules: &impl Rules,
+    rack: &[String],
+    max_len: usize,
+) -> Vec<CandidateMove> {
+    // find anchors: empty cells adjacent to any existing tile; if board empty, use center
+    let mut anchors: Vec<CellId> = Vec::new();
+    let any_on_board = state.board.cells.iter().any(|c| !c.stack.is_empty());
+    if !any_on_board {
+        anchors.push(CrosswordRules::center_cell(&state.board.geom));
+    } else {
+        for (idx, cell) in state.board.cells.iter().enumerate() {
+            if !cell.stack.is_empty() { continue; }
+            let id = CellId(idx as u32);
+            if CrosswordRules::adjacent_to_existing(&state.board, &[id]) {
+                anchors.push(id);
+            }
+        }
+    }
+
+    fn get_symbol<'a>(tileset: &'a Tileset, kind_id: &str) -> Option<(&'a TileKind, &'a str)> {
+        for tk in &tileset.tile_kinds { if tk.id == kind_id { return Some((tk, tk.symbol.as_str())); } }
+        None
+    }
+
+    // build helper to read cell including overlay
+    #[derive(Default, Clone)]
+    struct Overlay(std::collections::HashMap<CellId, Tile>);
+    impl Overlay {
+        fn get<'a>(&'a self, id: CellId, state: &'a GameState) -> Option<&'a Tile> {
+            if let Some(t) = self.0.get(&id) { return Some(t); }
+            let cell = &state.board.cells[id.0 as usize];
+            cell.stack.last()
+        }
+    }
+
+    fn vertical_word(state: &GameState, ov: &Overlay, at: CellId) -> String {
+        let c0 = state.board.geom.from_cell_id(at).unwrap();
+        // move up
+        let mut c = c0;
+        loop {
+            let prev = Coord2D { x: c.x, y: c.y - 1 };
+            if let Some(id) = state.board.geom.to_cell_id(prev) {
+                if ov.get(id, state).is_some() { c = prev; continue; }
+            }
+            break;
+        }
+        let mut s = String::new();
+        loop {
+            if let Some(id) = state.board.geom.to_cell_id(c) {
+                if let Some(tile) = ov.get(id, state) {
+                    let (_, sym) = CrosswordRules::tileset_lookup_score_symbol(&state.tileset, &tile.kind_id);
+                    s.push_str(sym);
+                    c = Coord2D { x: c.x, y: c.y + 1 };
+                    continue;
+                }
+            }
+            break;
+        }
+        s
+    }
+
+    // DFS to the right from anchor only (simplified); ensure anchor included
+    fn dfs_from(
+        state: &GameState,
+        rules: &impl Rules,
+        anchor: CellId,
+        rack: &mut std::collections::HashMap<String, usize>,
+        built: String,
+        pos: Coord2D,
+        used: &mut Vec<(CellId, Tile)>,
+        out: &mut Vec<CandidateMove>,
+        max_len: usize,
+    ) {
+        if built.chars().count() >= max_len { return; }
+        // if cell has fixed tile, append and continue
+        if let Some(id) = state.board.geom.to_cell_id(pos) {
+            let cell = &state.board.cells[id.0 as usize];
+            if let Some(t) = cell.stack.last() {
+                let mut nb = built.clone();
+                let (_, sym) = CrosswordRules::tileset_lookup_score_symbol(&state.tileset, &t.kind_id);
+                nb.push_str(sym);
+                let next = Coord2D { x: pos.x + 1, y: pos.y };
+                dfs_from(state, rules, anchor, rack, nb, next, used, out, max_len);
+                return;
+            }
+        } else { return; }
+
+        // Try placing from rack
+        for (kind_id, cnt) in rack.clone() { // iterate snapshot
+            if cnt == 0 { continue; }
+            // place here
+            let id = state.board.geom.to_cell_id(pos).unwrap();
+            // Only place if empty
+            if !state.board.cells[id.0 as usize].stack.is_empty() { continue; }
+            // Resolve symbol
+            let Some((tk, sym)) = get_symbol(&state.tileset, &kind_id) else { continue; };
+            // Cross-check vertical
+            let mut ov = Overlay::default();
+            for (cid, tile) in used.iter() { ov.0.insert(*cid, tile.clone()); }
+            ov.0.insert(id, Tile { kind_id: kind_id.clone(), mark: None });
+            let vword = vertical_word(state, &ov, id);
+            if vword.chars().count() > 1 {
+                if let Some(dict) = &state.dictionary {
+                    if !dict.contains(&vword) { continue; }
+                }
+            }
+            // Append and recurse / also consider committing as a move end
+            let mut nb = built.clone(); nb.push_str(sym);
+            // Prepare used/rack
+            *rack.get_mut(&kind_id).unwrap() -= 1;
+            used.push((id, Tile { kind_id: kind_id.clone(), mark: None }));
+
+            // Attempt to finalize this sequence as a play covering anchor
+            // Build draft and validate+score
+            if used.iter().any(|(cid, _)| *cid == anchor) || state.board.cells[anchor.0 as usize].stack.last().is_some() {
+                let draft = MoveDraft { placements: used.clone() };
+                if let Ok(v) = rules.validate(state, &draft) {
+                    let sc = rules.score(state, &v);
+                    if sc.total >= 0 { // valid dict words
+                        out.push(CandidateMove { placements: used.clone(), word: sc.main_word.clone(), score: sc.total });
+                    }
+                }
+            }
+
+            // Recurse to the right
+            let next = Coord2D { x: pos.x + 1, y: pos.y };
+            dfs_from(state, rules, anchor, rack, nb, next, used, out, max_len);
+
+            // backtrack
+            used.pop();
+            *rack.get_mut(&kind_id).unwrap() += 1;
+        }
+    }
+
+    let mut out: Vec<CandidateMove> = Vec::new();
+    for a in anchors {
+        let start = state.board.geom.from_cell_id(a).unwrap();
+        let mut rack_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for k in rack { *rack_counts.entry(k.clone()).or_default() += 1; }
+        dfs_from(state, rules, a, &mut rack_counts, String::new(), start, &mut Vec::new(), &mut out, max_len);
+    }
+    // de-duplicate identical placement sets (simple)
+    out.sort_by_key(|cm| (cm.score, cm.word.clone(), cm.placements.len()));
+    out
+}
+
 impl Player {
     fn rack_size(&self) -> Option<usize> {
         Some(7)
@@ -847,6 +1007,197 @@ impl Dictionary for SetDictionary {
             s = s.to_lowercase();
         }
         self.words.contains(&s)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FstDictionary {
+    set: fst::Set<Vec<u8>>,
+    case_fold: bool,
+}
+
+impl FstDictionary {
+    pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut v: Vec<String> = iter
+            .into_iter()
+            .map(|w| {
+                let mut s = nfc(w.into());
+                if case_fold {
+                    s = s.to_lowercase();
+                }
+                s
+            })
+            .collect();
+        v.sort();
+        v.dedup();
+        let set = fst::Set::from_iter(v.iter()).expect("build fst set");
+        Self { set, case_fold }
+    }
+
+    pub fn from_file<P: AsRef<std::path::Path>>(
+        path: P,
+        opts: DictionaryOptions,
+    ) -> std::io::Result<Self> {
+        use std::io::{BufRead, BufReader};
+        let f = std::fs::File::open(path)?;
+        let reader = BufReader::new(f);
+        let mut v: Vec<String> = Vec::new();
+        for line in reader.lines() {
+            let s = line?;
+            let s = s.trim();
+            if s.is_empty() || s.starts_with('#') {
+                continue;
+            }
+            let mut w = nfc(s);
+            if opts.case_fold {
+                w = w.to_lowercase();
+            }
+            let len = w.chars().count();
+            if let Some(min) = opts.min_len
+                && len < min
+            {
+                continue;
+            }
+            if let Some(max) = opts.max_len
+                && len > max
+            {
+                continue;
+            }
+            v.push(w);
+        }
+        v.sort();
+        v.dedup();
+        let set = fst::Set::from_iter(v.iter()).expect("build fst set");
+        Ok(Self { set, case_fold: opts.case_fold })
+    }
+}
+
+impl Dictionary for FstDictionary {
+    fn contains(&self, word: &str) -> bool {
+        let mut s = nfc(word);
+        if self.case_fold {
+            s = s.to_lowercase();
+        }
+        self.set.contains(&s)
+    }
+    fn has_prefix(&self, prefix: &str) -> bool {
+        use fst::{automaton::Str, IntoStreamer};
+        let mut p = nfc(prefix);
+        if self.case_fold {
+            p = p.to_lowercase();
+        }
+        let aut = Str::new(&p).starts_with();
+        let mut stream = self.set.search(aut).into_stream();
+        stream.next().is_some()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GaddagDictionary {
+    // Forward lexicon for contains/has_prefix
+    forward: FstDictionary,
+    // GADDAG trie for move generation (internal, not yet used by Rules)
+    g_nodes: Vec<GNode>,
+    sep: char,
+}
+
+#[derive(Debug, Clone, Default)]
+struct GNode {
+    // transitions on chars (letters or separator)
+    edges: std::collections::HashMap<char, usize>,
+    terminal: bool,
+}
+
+impl GaddagDictionary {
+    pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let sep = '+';
+        let mut g_nodes = vec![GNode::default()]; // root at 0
+        let mut words: Vec<String> = Vec::new();
+        for w in iter.into_iter() {
+            let mut s = nfc(w.into());
+            if case_fold {
+                s = s.to_lowercase();
+            }
+            if s.is_empty() {
+                continue;
+            }
+            words.push(s.clone());
+            let chars: Vec<char> = s.chars().collect();
+            let n = chars.len();
+            for split in 0..=n {
+                let prefix = &chars[..split];
+                let suffix = &chars[split..];
+                // Build REV(prefix) + sep + suffix
+                let mut seq: Vec<char> = prefix.iter().rev().copied().collect();
+                seq.push(sep);
+                seq.extend_from_slice(suffix);
+                // insert into trie
+                let mut node = 0usize;
+                for ch in seq {
+                    let next = if let Some(&id) = g_nodes[node].edges.get(&ch) {
+                        id
+                    } else {
+                        let id = g_nodes.len();
+                        g_nodes.push(GNode::default());
+                        g_nodes[node].edges.insert(ch, id);
+                        id
+                    };
+                    node = next;
+                }
+                g_nodes[node].terminal = true;
+            }
+        }
+        let forward = FstDictionary::from_words(words, case_fold);
+        Self { forward, g_nodes, sep }
+    }
+
+    pub fn from_file<P: AsRef<std::path::Path>>(
+        path: P,
+        opts: DictionaryOptions,
+    ) -> std::io::Result<Self> {
+        use std::io::{BufRead, BufReader};
+        let f = std::fs::File::open(path)?;
+        let reader = BufReader::new(f);
+        let mut words: Vec<String> = Vec::new();
+        for line in reader.lines() {
+            let mut s = nfc(line?.trim().to_string());
+            if s.is_empty() || s.starts_with('#') {
+                continue;
+            }
+            if opts.case_fold {
+                s = s.to_lowercase();
+            }
+            let len = s.chars().count();
+            if let Some(min) = opts.min_len
+                && len < min
+            {
+                continue;
+            }
+            if let Some(max) = opts.max_len
+                && len > max
+            {
+                continue;
+            }
+            words.push(s);
+        }
+        Ok(Self::from_words(words, opts.case_fold))
+    }
+}
+
+impl Dictionary for GaddagDictionary {
+    fn contains(&self, word: &str) -> bool {
+        self.forward.contains(word)
+    }
+    fn has_prefix(&self, prefix: &str) -> bool {
+        self.forward.has_prefix(prefix)
     }
 }
 
@@ -1341,6 +1692,134 @@ mod tests {
     }
 
     #[test]
+    fn fst_dictionary_contains_and_prefix() {
+        let dict = FstDictionary::from_words(vec!["AB".to_string(), "ABC".to_string(), "BEE".to_string()], true);
+        assert!(dict.contains("ab"));
+        assert!(dict.has_prefix("ab"));
+        assert!(dict.contains("abc"));
+        assert!(!dict.contains("abd"));
+        assert!(!dict.has_prefix("zz"));
+    }
+
+    #[test]
+    fn gaddag_dictionary_basic() {
+        let dict = GaddagDictionary::from_words(vec!["CARE".to_string(), "CARES".to_string()], true);
+        assert!(dict.contains("care"));
+        assert!(dict.has_prefix("ca"));
+    }
+
+    #[test]
+    fn gaddag_forms_for_cares() {
+        // Validate GADDAG encoded forms exist in the internal trie
+        let gd = GaddagDictionary::from_words(vec!["CARES".to_string()], true);
+        // helper to check presence of a sequence in internal g_nodes
+        fn has_seq(gd: &GaddagDictionary, s: &str) -> bool {
+            let mut node = 0usize;
+            for ch in s.chars() {
+                if let Some(&nxt) = gd.g_nodes[node].edges.get(&ch) {
+                    node = nxt;
+                } else {
+                    return false;
+                }
+            }
+            gd.g_nodes[node].terminal
+        }
+        // Our builder includes split positions 0..=n, so it includes "+CARES"
+        assert!(has_seq(&gd, "+cares"));
+        assert!(has_seq(&gd, "c+ares"));
+        assert!(has_seq(&gd, "ac+res"));
+        assert!(has_seq(&gd, "rac+es"));
+        assert!(has_seq(&gd, "erac+s"));
+        assert!(has_seq(&gd, "serac+"));
+    }
+
+    #[test]
+    fn gaddag_normalization_and_casefold() {
+        // composed vs decomposed + casefold behavior
+        let composed = "Café".to_string();
+        let decomposed = "Cafe\u{301}".nfc().collect::<String>();
+        let gd = GaddagDictionary::from_words(vec![decomposed.clone()], true);
+        assert!(gd.contains(&composed));
+        assert!(gd.has_prefix("caf"));
+    }
+
+    #[test]
+    fn rules_with_fst_dictionary() {
+        use std::collections::HashMap;
+        let tileset = Tileset {
+            tile_kinds: vec![
+                TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
+                TileKind { id: "B".into(), symbol: "B".into(), score: 3, is_blank: false, aliases: vec![] },
+            ],
+        };
+        let mut counts = HashMap::new();
+        counts.insert("A".to_string(), 10);
+        counts.insert("B".to_string(), 10);
+        let cfg = GameConfig {
+            tileset,
+            rack_size: 7,
+            board_layout: RectBoardLayout { width: 5, height: 5 },
+            ruleset_id: "cross".into(),
+            dictionary_id: "en".into(),
+            rng_seed: 5,
+            tile_counts: counts,
+        };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        st.dictionary = Some(Box::new(FstDictionary::from_words(vec!["AB".to_string(), "B".to_string()], true)));
+        let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
+        // First move: single A invalid (not in dict)
+        let c = CrosswordRules::center_cell(&st.board.geom);
+        let mv1 = MoveDraft { placements: vec![(c, Tile { kind_id: "A".into(), mark: None })] };
+        let v1 = rules.validate(&st, &mv1).unwrap();
+        let sc1 = rules.score(&st, &v1);
+        assert!(sc1.main_score < 0);
+        // Place AB horizontally: allowed
+        let right = st.board.geom.to_cell_id(Coord2D { x: st.board.geom.from_cell_id(c).unwrap().x + 1, y: st.board.geom.from_cell_id(c).unwrap().y }).unwrap();
+        let mv2 = MoveDraft { placements: vec![
+            (c, Tile { kind_id: "A".into(), mark: None }),
+            (right, Tile { kind_id: "B".into(), mark: None }),
+        ] };
+        let v2 = rules.validate(&st, &mv2).unwrap();
+        let sc2 = rules.score(&st, &v2);
+        assert!(sc2.total >= 0);
+    }
+
+    #[test]
+    fn cross_word_validation_with_dict() {
+        use std::collections::HashMap;
+        let tileset = Tileset {
+            tile_kinds: vec![
+                TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
+                TileKind { id: "B".into(), symbol: "B".into(), score: 3, is_blank: false, aliases: vec![] },
+            ],
+        };
+        let mut counts = HashMap::new(); counts.insert("A".to_string(), 10); counts.insert("B".to_string(), 10);
+        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 5, height: 5 }, ruleset_id: "cross".into(), dictionary_id: "en".into(), rng_seed: 7, tile_counts: counts };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        // dict only allows AB
+        st.dictionary = Some(Box::new(FstDictionary::from_words(vec!["AB".to_string()], true)));
+        let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
+        // First move: place A at center
+        let c = CrosswordRules::center_cell(&st.board.geom);
+        let mv1 = MoveDraft { placements: vec![(c, Tile { kind_id: "A".into(), mark: None })] };
+        let v1 = rules.validate(&st, &mv1).unwrap();
+        let sc1 = rules.score(&st, &v1);
+        assert!(sc1.main_score < 0); // A alone not in dict
+        // Still commit A to set up cross check
+        let free_rules = CrosswordRules { free_word_mode: true, ..Default::default() };
+        let v1b = free_rules.validate(&st, &mv1).unwrap();
+        let sc1b = free_rules.score(&st, &v1b);
+        free_rules.commit(&mut st, v1b, &sc1b).unwrap();
+        // Second move: place B to the right to form main word "AB"
+        let c_coord = st.board.geom.from_cell_id(c).unwrap();
+        let right = st.board.geom.to_cell_id(Coord2D { x: c_coord.x + 1, y: c_coord.y }).unwrap();
+        let mv2 = MoveDraft { placements: vec![(right, Tile { kind_id: "B".into(), mark: None })] };
+        let v2 = rules.validate(&st, &mv2).unwrap();
+        let sc2 = rules.score(&st, &v2);
+        assert!(sc2.total >= 0); // cross word AB is valid
+    }
+
+    #[test]
     fn dictionary_integration_in_rules() {
         let tileset = Tileset {
             tile_kinds: vec![
@@ -1377,7 +1856,7 @@ mod tests {
         };
         let mut st = GameState::new(&cfg, 2).unwrap();
         // Dictionary only allows "AB"
-        st.dictionary = Some(SetDictionary::from_words(vec!["AB".to_string()], true));
+        st.dictionary = Some(Box::new(SetDictionary::from_words(vec!["AB".to_string()], true)));
         let rules = CrosswordRules {
             free_word_mode: false,
             ..Default::default()

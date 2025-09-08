@@ -34,6 +34,14 @@ jobs:
         run: |
           cargo install cbindgen --locked
           cd engine_ffi && mkdir -p include && cbindgen --config cbindgen.toml --crate tiletangle-engine-ffi --output include/engine.h
+      - name: C smoke test (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          gcc -v
+          cargo build -p tiletangle-engine-ffi
+          gcc engine_ffi/tests/smoke.c -I engine_ffi/include -L target/debug -l tiletangle_ffi -o /tmp/ffi_smoke
+          export LD_LIBRARY_PATH=$PWD/target/debug:$LD_LIBRARY_PATH
+          /tmp/ffi_smoke
   wasm:
     runs-on: ubuntu-latest
     steps:
@@ -111,3 +119,34 @@ jobs:
           assert sc['total'] >= 0
           print('Python smoke OK')
           PY
+  python-wheels:
+    name: Build Python wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - name: Linux manylinux wheels
+        if: matrix.os == 'ubuntu-latest'
+        uses: messense/maturin-action@v1
+        with:
+          manylinux: auto
+          args: --release -m bindings/python/Cargo.toml -o dist
+      - name: macOS/Windows wheels
+        if: matrix.os != 'ubuntu-latest'
+        run: |
+          python -m pip install --upgrade pip maturin
+          maturin build --release -m bindings/python/Cargo.toml -o dist
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheels-${{ matrix.os }}
+          path: dist/*
+      - name: Run Python pytest
+        run: |
+          pip install pytest
+          pytest -q bindings/python/tests

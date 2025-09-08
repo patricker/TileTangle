@@ -1,0 +1,14 @@
+{
+  "tileset": {"tile_kinds": [
+    {"id": "A", "symbol": "A", "score": 1},
+    {"id": "B", "symbol": "B", "score": 3}
+  ]},
+  "rack_size": 7,
+  "board_layout": {"width": 5, "height": 5},
+  "ruleset_id": "cross",
+  "dictionary_id": "en",
+  "rng_seed": 42,
+  "tile_counts": {"A": 10, "B": 10},
+  "free_word_mode": true
+}
+

@@ -7,34 +7,35 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 > **Goal:** Build a **universal, Rust‑based, fully configurable word‑game engine** supporting arbitrary board geometries (incl. 3D), stackable/multi‑char/emoji tiles, pluggable rules and dictionaries, fast solvers/AI, and complete bindings (Python, WASM/JS, Unity/C#, Godot/GDExtension).
 > **Docs UX:** Docusaurus site with **live, in‑browser demos** using WASM + cross‑language examples.
 
+> Execution order: Focus backend first. After Phase 4 (WASM + Playground), prioritize Advanced Lexica, Move Generation, Persistence, and Performance. Defer additional bindings (FFI/Python updates, Unity, Godot) until the backend is more mature.
+
 ---
 
 ## Table of Contents
 
-* [Conventions](#conventions)
-* [Monorepo Layout](#monorepo-layout)
-* [Phase 0 — Project Scaffolding & CI/CD](#phase-0--project-scaffolding--cicd)
-* [Phase 1 — Core Domain Model (2D MVP)](#phase-1--core-domain-model-2d-mvp)
-* [Phase 2 — Rules & Scoring (Classic Crossword MVP)](#phase-2--rules--scoring-classic-crossword-mvp)
-* [Phase 3 — Dictionary Engine (Unicode-first)](#phase-3--dictionary-engine-unicode-first)
-* [Phase 4 — WASM Packaging & Docusaurus Playground](#phase-4--wasm-packaging--docusaurus-playground)
-* [Phase 5 — FFI/C ABI & Python Bindings](#phase-5--ffic-abi--python-bindings)
-* [Phase 6 — Unity & Godot Bindings](#phase-6--unity--godot-bindings)
-* [Phase 7 — Non-Rectangular Boards & Custom Adjacency](#phase-7--non-rectangular-boards--custom-adjacency)
-* [Phase 8 — 3D Boards](#phase-8--3d-boards)
-* [Phase 9 — Stacking & Multi-Character/Emoji Tiles](#phase-9--stacking--multi-characteremoji-tiles)
-* [Phase 10 — Arbitrary Move Types & Rule Plugins](#phase-10--arbitrary-move-types--rule-plugins)
-* [Phase 11 — Advanced Lexica (DAWG/GADDAG), RTL, Normalization](#phase-11--advanced-lexica-dawggaddag-rtl-normalization)
-* [Phase 12 — Move Generation & Solvers](#phase-12--move-generation--solvers)
-* [Phase 13 — AI Opponents (Eval, Search, Difficulty)](#phase-13--ai-opponents-eval-search-difficulty)
-* [Phase 14 — Persistence, Replays, Determinism](#phase-14--persistence-replays-determinism)
-* [Phase 15 — Performance, Benchmarks, Fuzz](#phase-15--performance-benchmarks-fuzz)
-* [Phase 16 — Packaging & Distribution](#phase-16--packaging--distribution)
-* [Phase 17 — Demos (Showcase Suite)](#phase-17--demos-showcase-suite)
-* [Phase 18 — Documentation Completion & Tutorials](#phase-18--documentation-completion--tutorials)
-* [Appendix A — Sample Configs](#appendix-a--sample-configs)
-* [Appendix B — FFI Guidelines](#appendix-b--ffi-guidelines)
-* [Appendix C — Testing Strategy Overview](#appendix-c--testing-strategy-overview)
+- [Conventions](#conventions)
+- [Monorepo Layout](#monorepo-layout)
+- [Phase 0 — Project Scaffolding & CI/CD](#phase-0--project-scaffolding--cicd)
+- [Phase 1 — Core Domain Model (2D MVP)](#phase-1--core-domain-model-2d-mvp)
+- [Phase 2 — Rules & Scoring (Classic Crossword MVP)](#phase-2--rules--scoring-classic-crossword-mvp)
+- [Phase 3 — Dictionary Engine (Unicode-first)](#phase-3--dictionary-engine-unicode-first)
+- [Phase 4 — WASM Packaging & Docusaurus Playground](#phase-4--wasm-packaging--docusaurus-playground)
+- [Phase 11 — Advanced Lexica (DAWG/GADDAG), RTL, Normalization](#phase-11--advanced-lexica-dawggaddag-rtl-normalization)
+- [Phase 12 — Move Generation & Solvers](#phase-12--move-generation--solvers)
+- [Phase 14 — Persistence, Replays, Determinism](#phase-14--persistence-replays-determinism)
+- [Phase 15 — Performance, Benchmarks, Fuzz](#phase-15--performance-benchmarks-fuzz)
+- [Phase 7 — Non-Rectangular Boards & Custom Adjacency](#phase-7--non-rectangular-boards--custom-adjacency)
+- [Phase 9 — Stacking & Multi-Character/Emoji Tiles](#phase-9--stacking--multi-characteremoji-tiles)
+- [Phase 10 — Arbitrary Move Types & Rule Plugins](#phase-10--arbitrary-move-types--rule-plugins)
+- [Phase 8 — 3D Boards](#phase-8--3d-boards)
+- [Phase 5 — FFI/C ABI & Python Bindings](#phase-5--ffic-abi--python-bindings)
+- [Phase 6 — Unity & Godot Bindings](#phase-6--unity--godot-bindings)
+- [Phase 16 — Packaging & Distribution](#phase-16--packaging--distribution)
+- [Phase 17 — Demos (Showcase Suite)](#phase-17--demos-showcase-suite)
+- [Phase 18 — Documentation Completion & Tutorials](#phase-18--documentation-completion--tutorials)
+- [Appendix A — Sample Configs](#appendix-a--sample-configs)
+- [Appendix B — FFI Guidelines](#appendix-b--ffi-guidelines)
+- [Appendix C — Testing Strategy Overview](#appendix-c--testing-strategy-overview)
 
 ---
 
@@ -78,7 +79,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 * [x] Create Cargo workspace with crates above; shared `rust-toolchain.toml`.
 * [x] Add `justfile` or `Makefile` with common tasks (`just build`, `just test`, `just fmt`, …).
 * [x] Setup `clippy`, `rustfmt`, `cargo-deny` (licenses), `cargo-udeps`.
-* [ ] GitHub Actions:
+* [x] GitHub Actions:
 
   * [x] Matrix builds (ubuntu-latest, macos-latest, windows-latest).
   * [x] `cargo test --all-features` + `clippy` + `fmt --check`.
@@ -256,16 +257,16 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
   * Expose: `new_game(configJson, players)`, `play_move(json) -> result`, `get_board()`.
   * JSON-serialized interop; artifacts copied to docs/static.
 * [x] Build script: `make wasm` (`wasm-pack build --target web`); copies artifacts into `/docs/static/wasm/engine/`.
-* [ ] Docusaurus:
+* [x] Docusaurus:
 
-  * Custom **React Playground component** that loads WASM, renders a board (Canvas/SVG), supports drag‑drop placement.
+  * Custom **React Playground component** that loads WASM, renders a board, and supports drag‑drop placement.
   * Add code tabs (Rust / JS usage).
-* [ ] Web worker optional: move compute to worker if needed.
+* [x] Web worker optional: move compute to worker if needed.
 
 ### Unit Tests
 
 * [x] `wasm-bindgen-test` smoke test for exported API.
-* [ ] Golden tests: `getBoard()` JSON snapshots for known states.
+* [x] Golden tests: `getBoard()` JSON snapshots for known states.
 
 ### Docs
 
@@ -303,9 +304,9 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Unit Tests
 
-* [ ] C smoke test: link against shared lib, call `new_game`, `play_move`.
+* [x] C smoke test: link against shared lib, call `new_game`, `play_move`.
 * [x] Python `pytest`: create/commit moves; error paths.
-* [ ] Conformance suite: load shared JSON fixtures and assert identical results (Rust vs Python vs WASM).
+* [x] Conformance suite: load shared JSON fixtures and assert identical results (Rust vs Python vs WASM).
 
 ### Docs
 
@@ -315,7 +316,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 ### Demo
 
 * [x] `examples/python/mini_cli.py`: human vs human on terminal.
-* [ ] Docs page with runnable Python snippets (via embedded code + output screenshots).
+* [x] Docs page with runnable Python snippets (via embedded code + output screenshots).
 
 ### Exit Criteria
 
@@ -683,7 +684,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 ### Implementation
 
 * [ ] Rust crate publish (crates.io).
-* [ ] Python wheels (manylinux, macOS, Windows) via maturin; upload to PyPI.
+* [x] Python wheels (manylinux, macOS, Windows) via maturin; upload to PyPI.
 * [ ] WASM npm package with TS types.
 * [ ] Unity package: `.unitypackage` or UPM; platform libs prebuilt.
 * [ ] Godot: prebuilt GDExtension for common OS; template project.
