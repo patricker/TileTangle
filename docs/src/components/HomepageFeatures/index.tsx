@@ -11,33 +11,24 @@ type FeatureItem = {
 
 const FeatureList: FeatureItem[] = [
   {
-    title: 'Easy to Use',
+    title: 'Live Playground',
     Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
     description: (
-      <>
-        Docusaurus was designed from the ground up to be easily installed and
-        used to get your website up and running quickly.
-      </>
+      <>Try the engine in-browser via WASM. Place tiles, inspect board JSON, and iterate quickly.</>
     ),
   },
   {
-    title: 'Focus on What Matters',
+    title: 'Rust Core + WASM',
     Svg: require('@site/static/img/undraw_docusaurus_tree.svg').default,
     description: (
-      <>
-        Docusaurus lets you focus on your docs, and we&apos;ll do the chores. Go
-        ahead and move your docs into the <code>docs</code> directory.
-      </>
+      <>Deterministic Rust engine, packaged for web with wasm-bindgen. Clean API for JS and other bindings.</>
     ),
   },
   {
-    title: 'Powered by React',
+    title: 'Unicode & Rules',
     Svg: require('@site/static/img/undraw_docusaurus_react.svg').default,
     description: (
-      <>
-        Extend or customize your website layout by reusing React. Docusaurus can
-        be extended while reusing the same header and footer.
-      </>
+      <>Unicode-first dictionary, configurable boards/bonuses, and classic crossword validation & scoring.</>
     ),
   },
 ];

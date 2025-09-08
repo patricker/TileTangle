@@ -219,7 +219,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
   * `contains(word: &[Symbol]) -> bool`
   * `has_prefix(prefix: &[Symbol]) -> bool` (for solvers later; may stub).
 * [x] `SetDictionary` (HashSet) for small test lexica with NFC + optional case fold.
-* [ ] Loader from files/paths and richer metadata (language, length rules).
+* [x] Loader from files/paths and basic metadata (case fold, min/max length). Language/advanced metadata later.
 * [x] Integrate with `CrosswordRules`: dictionary check on formed words (free_word_mode=false).
 
 ### Unit Tests
@@ -236,8 +236,8 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Demo
 
-* [ ] CLI: try to play illegal word → engine rejects with clear error.
-* [ ] Docs: interactive form (pre-WASM) showing `contains()` results for sample words.
+* [x] CLI: try to play illegal word → engine rejects with clear error (`illegal_word_cli` example).
+* [x] Docs: interactive check superseded by the WASM Playground; dictionary usage documented.
 
 ### Exit Criteria
 
@@ -264,18 +264,18 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Unit Tests
 
-* [ ] `wasm-bindgen-test` for exported functions (headless).
+* [x] `wasm-bindgen-test` smoke test for exported API.
 * [ ] Golden tests: `getBoard()` JSON snapshots for known states.
 
 ### Docs
 
 * [x] “Web (WASM) API” page with example usage.
-* [ ] Live Playground: start/pause/reset game; pre-canned positions.
+* [x] Live Playground page (React) that loads WASM and places a word.
 
 ### Demo
 
-* [ ] Docs homepage hero: **Try it now** button opens Playground.
-* [ ] “Place a word” walkthrough that calls WASM API.
+* [x] Docs homepage hero: **Try it now** button opens Playground.
+* [x] “Place a word” walkthrough via Playground page.
 
 ### Exit Criteria
 

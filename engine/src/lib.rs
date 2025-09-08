@@ -784,6 +784,42 @@ pub struct SetDictionary {
 }
 
 impl SetDictionary {
+    pub fn from_file<P: AsRef<std::path::Path>>(
+        path: P,
+        opts: DictionaryOptions,
+    ) -> std::io::Result<Self> {
+        use std::io::{BufRead, BufReader};
+        let f = std::fs::File::open(path)?;
+        let mut set = std::collections::HashSet::new();
+        let reader = BufReader::new(f);
+        for line in reader.lines() {
+            let s = line?;
+            let s = s.trim();
+            if s.is_empty() || s.starts_with('#') {
+                continue;
+            }
+            let mut w = nfc(s);
+            if opts.case_fold {
+                w = w.to_lowercase();
+            }
+            let len = w.chars().count();
+            if let Some(min) = opts.min_len
+                && len < min
+            {
+                continue;
+            }
+            if let Some(max) = opts.max_len
+                && len > max
+            {
+                continue;
+            }
+            set.insert(w);
+        }
+        Ok(Self {
+            words: set,
+            case_fold: opts.case_fold,
+        })
+    }
     pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -812,6 +848,13 @@ impl Dictionary for SetDictionary {
         }
         self.words.contains(&s)
     }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DictionaryOptions {
+    pub case_fold: bool,
+    pub min_len: Option<usize>,
+    pub max_len: Option<usize>,
 }
 
 // -------- Tests --------
@@ -1272,6 +1315,29 @@ mod tests {
         assert!(dict_cf.contains("CAFÉ"));
         let dict_no = SetDictionary::from_words(vec!["café".to_string()], false);
         assert!(!dict_no.contains("CAFÉ"));
+    }
+
+    #[test]
+    fn dictionary_loader_from_file() {
+        // Create a temporary word list
+        let dir = std::env::temp_dir();
+        let path = dir.join("tiletangle_dict_test.txt");
+        let content = "# sample\nHELLO\nworld\n \nCafé\n";
+        std::fs::write(&path, content).unwrap();
+        let dict = SetDictionary::from_file(
+            &path,
+            DictionaryOptions {
+                case_fold: true,
+                min_len: Some(2),
+                max_len: None,
+            },
+        )
+        .unwrap();
+        assert!(dict.contains("hello"));
+        assert!(dict.contains("WORLD"));
+        assert!(dict.contains("cafe\u{301}")); // decomposed
+        assert!(!dict.contains("x"));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
