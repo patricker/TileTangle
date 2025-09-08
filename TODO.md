@@ -214,25 +214,24 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] `Dictionary` trait:
+* [x] `Dictionary` trait:
 
   * `contains(word: &[Symbol]) -> bool`
   * `has_prefix(prefix: &[Symbol]) -> bool` (for solvers later; may stub).
-* [ ] `SetDictionary` (HashSet) for small test lexica.
-* [ ] Loader: read UTF‑8 wordlists; apply Unicode **NFC** normalization; optional case folding per language.
-* [ ] Config: dictionary metadata (language, normalization, min/max length, tokenization rules).
-* [ ] Integrate with `CrosswordRules` (Phase 2): dictionary check on formed words.
+* [x] `SetDictionary` (HashSet) for small test lexica with NFC + optional case fold.
+* [ ] Loader from files/paths and richer metadata (language, length rules).
+* [x] Integrate with `CrosswordRules`: dictionary check on formed words (free_word_mode=false).
 
 ### Unit Tests
 
-* [ ] Word membership positive/negative.
-* [ ] Normalization: composed vs decomposed forms equal.
-* [ ] Case folding toggles (e.g., “Café” with accent rules).
-* [ ] Integration: invalid word move rejected; valid accepted.
+* [x] Word membership positive/negative.
+* [x] Normalization: composed vs decomposed forms equal.
+* [x] Case folding toggles.
+* [x] Integration: invalid word move rejected; valid accepted.
 
 ### Docs
 
-* [ ] “Lexicon Integration” page: formats, normalization, memory notes.
+* [x] “Lexicon Integration” stub page: normalization + case folding notes.
 * [ ] Guidance on licensing/packaging word lists (ship tiny test lists, document how to plug real ones).
 
 ### Demo

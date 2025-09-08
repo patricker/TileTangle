@@ -348,6 +348,7 @@ pub struct GameState {
     pub bag: Bag,
     pub turn_num: u32,
     pub tileset: Tileset,
+    pub dictionary: Option<SetDictionary>,
 }
 
 impl GameState {
@@ -391,6 +392,7 @@ impl GameState {
             bag,
             turn_num: 0,
             tileset,
+            dictionary: None,
         })
     }
 
@@ -650,6 +652,56 @@ impl Rules for CrosswordRules {
             }
         }
         let mut total = main_score + cross_words.iter().map(|(_, s)| *s).sum::<i32>();
+        // dictionary checks if enabled
+        if !self.free_word_mode
+            && let Some(dict) = &state.dictionary
+        {
+            if !dict.contains(&main_word) {
+                return ScoreBreakdown {
+                    total: -1,
+                    main_word,
+                    main_score: -1,
+                    cross_words: vec![],
+                    bingo: false,
+                };
+            }
+            for (w, _) in &cross_words {
+                if !dict.contains(w) {
+                    return ScoreBreakdown {
+                        total: -1,
+                        main_word,
+                        main_score: -1,
+                        cross_words: vec![],
+                        bingo: false,
+                    };
+                }
+            }
+        }
+        // dictionary checks if enabled
+        if !self.free_word_mode
+            && let Some(dict) = &state.dictionary
+        {
+            if !dict.contains(&main_word) {
+                return ScoreBreakdown {
+                    total: -1,
+                    main_word,
+                    main_score: -1,
+                    cross_words: vec![],
+                    bingo: false,
+                };
+            }
+            for (w, _) in &cross_words {
+                if !dict.contains(w) {
+                    return ScoreBreakdown {
+                        total: -1,
+                        main_word,
+                        main_score: -1,
+                        cross_words: vec![],
+                        bingo: false,
+                    };
+                }
+            }
+        }
         // bingo
         let bingo = mv.placements.len() >= state.players[state.to_move.0].rack.tiles.len()
             && !mv.placements.is_empty()
@@ -716,11 +768,58 @@ impl Player {
     }
 }
 
+// -------- Dictionary Engine (Phase 3) --------
+
+pub trait Dictionary {
+    fn contains(&self, word: &str) -> bool;
+    fn has_prefix(&self, _prefix: &str) -> bool {
+        false
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SetDictionary {
+    words: std::collections::HashSet<String>,
+    case_fold: bool,
+}
+
+impl SetDictionary {
+    pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut set = std::collections::HashSet::new();
+        for w in iter {
+            let mut s = nfc(w.into());
+            if case_fold {
+                s = s.to_lowercase();
+            }
+            set.insert(s);
+        }
+        Self {
+            words: set,
+            case_fold,
+        }
+    }
+}
+
+impl Dictionary for SetDictionary {
+    fn contains(&self, word: &str) -> bool {
+        let mut s = nfc(word);
+        if self.case_fold {
+            s = s.to_lowercase();
+        }
+        self.words.contains(&s)
+    }
+}
+
 // -------- Tests --------
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use unicode_normalization::UnicodeNormalization;
 
     fn rect(w: u32, h: u32) -> RectGridGeometry {
         RectGridGeometry {
@@ -1159,5 +1258,107 @@ mod tests {
         // main word AB: A(1 existing) + B(3*3=9) = 10
         assert_eq!(sc2.main_score, 10);
         assert!(sc2.total >= 10);
+    }
+
+    #[test]
+    fn dictionary_normalization_and_casefold() {
+        // composed vs decomposed
+        let composed = "Café".to_string();
+        let decomposed = "Cafe\u{301}".nfc().collect::<String>();
+        let dict = SetDictionary::from_words(vec![decomposed.clone()], false);
+        assert!(dict.contains(&composed));
+        // case fold
+        let dict_cf = SetDictionary::from_words(vec!["café".to_string()], true);
+        assert!(dict_cf.contains("CAFÉ"));
+        let dict_no = SetDictionary::from_words(vec!["café".to_string()], false);
+        assert!(!dict_no.contains("CAFÉ"));
+    }
+
+    #[test]
+    fn dictionary_integration_in_rules() {
+        let tileset = Tileset {
+            tile_kinds: vec![
+                TileKind {
+                    id: "A".into(),
+                    symbol: "A".into(),
+                    score: 1,
+                    is_blank: false,
+                    aliases: vec![],
+                },
+                TileKind {
+                    id: "B".into(),
+                    symbol: "B".into(),
+                    score: 3,
+                    is_blank: false,
+                    aliases: vec![],
+                },
+            ],
+        };
+        let mut counts = HashMap::new();
+        counts.insert("A".to_string(), 10);
+        counts.insert("B".to_string(), 10);
+        let cfg = GameConfig {
+            tileset,
+            rack_size: 7,
+            board_layout: RectBoardLayout {
+                width: 5,
+                height: 5,
+            },
+            ruleset_id: "cross".into(),
+            dictionary_id: "en".into(),
+            rng_seed: 5,
+            tile_counts: counts,
+        };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        // Dictionary only allows "AB"
+        st.dictionary = Some(SetDictionary::from_words(vec!["AB".to_string()], true));
+        let rules = CrosswordRules {
+            free_word_mode: false,
+            ..Default::default()
+        };
+        // First move: A at center not in dict alone → scoring returns sentinel (-1)
+        let c = CrosswordRules::center_cell(&st.board.geom);
+        let mv1 = MoveDraft {
+            placements: vec![(
+                c,
+                Tile {
+                    kind_id: "A".into(),
+                    mark: None,
+                },
+            )],
+        };
+        let v1 = rules.validate(&st, &mv1).unwrap();
+        let sc1 = rules.score(&st, &v1);
+        assert_eq!(sc1.main_score, -1);
+        // Place AB horizontally: should be allowed
+        let right = st
+            .board
+            .geom
+            .to_cell_id(Coord2D {
+                x: st.board.geom.from_cell_id(c).unwrap().x + 1,
+                y: st.board.geom.from_cell_id(c).unwrap().y,
+            })
+            .unwrap();
+        let mv2 = MoveDraft {
+            placements: vec![
+                (
+                    c,
+                    Tile {
+                        kind_id: "A".into(),
+                        mark: None,
+                    },
+                ),
+                (
+                    right,
+                    Tile {
+                        kind_id: "B".into(),
+                        mark: None,
+                    },
+                ),
+            ],
+        };
+        let v2 = rules.validate(&st, &mv2).unwrap();
+        let sc2 = rules.score(&st, &v2);
+        assert!(sc2.total > 0);
     }
 }
