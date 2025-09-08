@@ -251,11 +251,11 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] `wasm/` crate with `wasm-bindgen` wrappers:
+* [x] `wasm/` crate with `wasm-bindgen` wrappers:
 
-  * Expose: `newGame(configJson)`, `drawRack(playerId)`, `playMove(json) -> result`, `getBoard()`, `getScoreboard()`.
-  * Serialize types to compact JSON for interop.
-* [ ] Build script: `wasm-pack build --target web`; copy artifacts into `/docs/static/wasm/engine/`.
+  * Expose: `new_game(configJson, players)`, `play_move(json) -> result`, `get_board()`.
+  * JSON-serialized interop; artifacts copied to docs/static.
+* [x] Build script: `make wasm` (`wasm-pack build --target web`); copies artifacts into `/docs/static/wasm/engine/`.
 * [ ] Docusaurus:
 
   * Custom **React Playground component** that loads WASM, renders a board (Canvas/SVG), supports drag‑drop placement.
@@ -269,7 +269,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Docs
 
-* [ ] “Web (WASM) API” reference page with function signatures & examples.
+* [x] “Web (WASM) API” page with example usage.
 * [ ] Live Playground: start/pause/reset game; pre-canned positions.
 
 ### Demo

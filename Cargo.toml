@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "engine",
+    "wasm",
 ]
 resolver = "2"
 
@@ -9,4 +10,3 @@ edition = "2024"
 
 [workspace.metadata]
 ci = { rust_toolchain = "stable" }
-
