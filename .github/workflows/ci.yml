@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        toolchain: [stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: rustfmt, clippy
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --workspace --all-features
+      - name: Test
+        run: cargo test --workspace --all-features
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Rustfmt
+        run: cargo fmt --all -- --check
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: License and advisory checks
+        run: cargo deny check --hide-inclusion-graph
+      - name: Install cargo-udeps
+        run: cargo install cargo-udeps --locked
+      - name: Install nightly toolchain for udeps
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+      - name: Unused dependencies check
+        run: cargo +nightly udeps --workspace --all-targets

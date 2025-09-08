@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "engine",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+
+[workspace.metadata]
+ci = { rust_toolchain = "stable" }
+

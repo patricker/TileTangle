@@ -1,0 +1,19 @@
+[package]
+name = "tiletangle-engine"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Core engine for universal, configurable word-game logic"
+repository = "https://example.com/TileTangle" 
+keywords = ["games", "word", "engine"]
+categories = ["game-engines"]
+
+[lib]
+name = "engine"
+path = "src/lib.rs"
+
+[dependencies]
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
