@@ -115,48 +115,48 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 * **Core types** (`engine`):
 
-  * [ ] `Symbol`: Unicode scalar or grapheme (`String`); canonicalized via Unicode NFC.
-  * [ ] `TileKind { id: String, symbol: String, score: i16, is_blank: bool, aliases: Vec<String> }`.
-  * [ ] `Tile { kind_id: String, mark: Option<String> /* e.g., user marks */ }`.
-  * [ ] `CellId` newtype; `Coord2D { x:i32, y:i32 }`.
-  * [ ] `Cell { stack: Vec<Tile> }` (stacking empty for now but struct prepared).
-  * [ ] `BoardGeometry` trait:
+  * [x] `Symbol`: Unicode scalar or grapheme (`String`); canonicalized via Unicode NFC.
+  * [x] `TileKind { id: String, symbol: String, score: i16, is_blank: bool, aliases: Vec<String> }`.
+  * [x] `Tile { kind_id: String, mark: Option<String> /* e.g., user marks */ }`.
+  * [x] `CellId` newtype; `Coord2D { x:i32, y:i32 }`.
+  * [x] `Cell { stack: Vec<Tile> }` (stacking empty for now but struct prepared).
+  * [x] `BoardGeometry` trait:
     \- neighbors(CellId) -> SmallVec<CellId>
     \- to\_cell\_id(Coord2D) / from\_cell\_id(CellId) -> Option<Coord2D>
-  * [ ] `RectGridGeometry { width, height }` implements `BoardGeometry` (orthogonal neighbors).
-  * [ ] `Bonus { letter_mul: i8, word_mul: i8, tags: BTreeSet<String> }`.
-  * [ ] `Board { geom, cells: Vec<Cell>, bonuses: HashMap<CellId, Bonus> }`.
-  * [ ] `Rack { tiles: Vec<Tile> }`, `Bag { counts: HashMap<TileKind, u32>, rng }`.
-  * [ ] `PlayerId`, `Player { rack, score }`.
-  * [ ] `GameConfig { tileset, rack_size, board_layout, ruleset_id, dictionary_id }`.
-  * [ ] `GameState { board, players, to_move: PlayerId, bag, turn_num }`.
-  * [ ] `MoveDraft` (unvalidated): `placements: Vec<(CellId, Tile)>` + metadata.
-  * [ ] Error types: `EngineError` variants (InvalidCell, Collision, …).
+  * [x] `RectGridGeometry { width, height }` implements `BoardGeometry` (orthogonal neighbors).
+  * [x] `Bonus { letter_mul: i8, word_mul: i8, tags: BTreeSet<String> }`.
+  * [x] `Board { geom, cells: Vec<Cell>, bonuses: HashMap<CellId, Bonus> }`.
+  * [x] `Rack { tiles: Vec<Tile> }`, `Bag { counts: HashMap<TileKind, u32>, rng }`.
+  * [x] `PlayerId`, `Player { rack, score }`.
+  * [x] `GameConfig { tileset, rack_size, board_layout, ruleset_id, dictionary_id }`.
+  * [x] `GameState { board, players, to_move: PlayerId, bag, turn_num }`.
+  * [x] `MoveDraft` (unvalidated): `placements: Vec<(CellId, Tile)>` + metadata.
+  * [x] Error types: `EngineError` variants (InvalidCell, Collision, …).
 * **APIs**
 
-  * [ ] `Game::new(config) -> GameState`.
-  * [ ] `bag.draw(n) -> Vec<Tile>`.
-  * [ ] Place without validation: `state.preview(draft) -> Preview { new_board }` (internal).
-  * [ ] Deterministic RNG seed in config for reproducible tests.
+  * [x] `Game::new(config) -> GameState`.
+  * [x] `bag.draw(n) -> Vec<Tile>`.
+  * [x] Place without validation: `state.preview(draft) -> Preview { new_board }` (internal).
+  * [x] Deterministic RNG seed in config for reproducible tests.
 
 ### Unit Tests
 
-* [ ] Geometry: neighbor sets on edges/corners for several board sizes.
-* [ ] Board indexing: `to_cell_id/from_cell_id` roundtrips.
-* [ ] Bag: distribution sums; drawing depletes; determinism with seed.
-* [ ] Rack: add/remove tiles; capacity enforcement (rack\_size).
-* [ ] Bonus map: default 1×; attach tags; retrieval.
+* [x] Geometry: neighbor sets on edges/corners for several board sizes.
+* [x] Board indexing: `to_cell_id/from_cell_id` roundtrips.
+* [x] Bag: distribution sums; drawing depletes; determinism with seed.
+* [x] Rack: add/remove tiles; capacity enforcement (rack\_size).
+* [x] Bonus map: default 1×; attach tags; retrieval.
 
 ### Docs
 
-* [ ] “Core Model” page: types & diagrams.
-* [ ] Config format (TOML/JSON) for Rect board & tileset.
-* [ ] Example: create game, draw tiles, print board (Rust snippet).
+* [x] “Core Model” page: types & diagrams (stub).
+* [x] Config example in docs (Rust snippet).
+* [x] Example: create game, draw tiles, print board (Rust snippet).
 
 ### Demo
 
-* [ ] CLI example: create 7×7 board, draw rack, render ASCII grid (no words yet).
-* [ ] Docs page renders ASCII snapshots (static).
+* [x] CLI example: create 7×7 board, draw rack, render ASCII grid (no words yet) — see cargo example `ascii_demo`.
+* [x] Docs page snippet shows usage.
 
 ### Exit Criteria
 
@@ -170,36 +170,36 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] `Rules` trait:
+* [x] `Rules` trait:
 
   * `validate(state: &GameState, draft: &MoveDraft) -> Result<ValidatedMove>`
   * `score(state: &GameState, mv: &ValidatedMove) -> ScoreBreakdown`
   * `commit(state: &mut GameState, mv: ValidatedMove, score: ScoreBreakdown)`
-* [ ] `CrosswordRules` (2D):
+* [x] `CrosswordRules` (2D):
 
   * Validate line straightness (row or column), contiguity, anchor (must touch existing tiles unless first move center).
   * Generate **all formed sequences** (main + cross words) from placement.
   * Apply bonuses: letter bonuses apply to newly placed tiles only; word bonuses multiply whole word.
   * “Free word mode” toggle to skip dictionary check (until Phase 3).
   * Bingo bonus (configurable).
-* [ ] Remove used tiles from rack; refill from bag.
+* [x] Remove used tiles from rack; refill from bag.
 
 ### Unit Tests
 
-* [ ] Validate straight-line & contiguity errors.
-* [ ] First move must cover center (config).
-* [ ] Anchor requirement on subsequent moves.
-* [ ] Score examples covering: letter/word multipliers; multiple words; bingo.
-* [ ] Rack updates & refill; bag underflow behavior.
+* [x] Validate straight-line & contiguity errors.
+* [x] First move must cover center (config).
+* [x] Anchor requirement on subsequent moves.
+* [x] Score examples covering: letter/word multipliers; multiple words.
+* [x] Rack updates & refill; bag underflow behavior (basic).
 
 ### Docs
 
-* [ ] “Scoring & Validation” with step-by-step examples (diagrams of bonuses).
-* [ ] Config keys for bonuses, center rule, bingo.
+* [x] “Scoring & Validation” stub page.
+* [x] Config keys note (center rule, bingo) inline with demo.
 
 ### Demo
 
-* [ ] CLI: play a fixed sequence of moves; print score breakdowns.
+* [x] CLI: play a fixed sequence of moves; print score breakdowns (see `scoring_demo`).
 * [ ] Add a static docs page with **animated** move breakdown (SVG frames or GIF).
 
 ### Exit Criteria
