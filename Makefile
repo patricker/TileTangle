@@ -24,3 +24,13 @@ wasm:
 	cd wasm && wasm-pack build --target web --out-dir pkg
 	mkdir -p docs/static/wasm/engine
 	rm -rf docs/static/wasm/engine/pkg && cp -r wasm/pkg docs/static/wasm/engine/
+
+.PHONY: ffi-header
+ffi-header:
+	cargo install cbindgen --locked || true
+	cd engine_ffi && mkdir -p include && cbindgen --config cbindgen.toml --crate tiletangle-engine-ffi --output include/engine.h
+
+.PHONY: python-dev
+python-dev:
+	python3 -m pip install --upgrade maturin pytest || true
+	cd bindings/python && maturin develop --release

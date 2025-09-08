@@ -1,0 +1,78 @@
+---
+sidebar_position: 7
+---
+
+# Web (WASM) API
+
+Build the WASM package:
+
+```
+make wasm
+```
+
+Load in the browser (example):
+
+import Tabs from '@theme/Tabs'
+import TabItem from '@theme/TabItem'
+
+<Tabs>
+  <TabItem value="js" label="JavaScript">
+
+```js
+import init, { new_game, play_move, get_board } from '/wasm/engine/pkg/tiletangle_wasm.js';
+await init();
+const config = {
+  tileset: { tile_kinds: [{ id: 'A', symbol: 'A', score: 1 }] },
+  rack_size: 7,
+  board_layout: { width: 7, height: 7 },
+  ruleset_id: 'cross',
+  dictionary_id: 'en_demo',
+  rng_seed: 42,
+  tile_counts: { A: 10 },
+  free_word_mode: true
+};
+const game = new_game(JSON.stringify(config), 2);
+console.log('board', get_board(game));
+const placements = [{ x: 3, y: 3, kind_id: 'A' }];
+const result = play_move(game, JSON.stringify(placements));
+console.log('score', JSON.parse(result));
+console.log('board after', get_board(game));
+```
+
+  </TabItem>
+  <TabItem value="rust" label="Rust">
+
+```rust
+use engine::*;
+let tileset = Tileset { tile_kinds: vec![TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] }] };
+let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 7, height: 7 }, ruleset_id: "cross".into(), dictionary_id: "en".into(), rng_seed: 42, tile_counts: std::collections::HashMap::from([(String::from("A"), 10u32)]) };
+let state = GameState::new(&cfg, 2)?;
+```
+
+  </TabItem>
+  <TabItem value="worker" label="Worker (JS)">
+
+```js
+// main thread
+const worker = new Worker('/wasm/engine/worker.js', { type: 'module' });
+function call(action, payload) {
+  return new Promise((resolve, reject) => {
+    const id = Math.random().toString(36).slice(2);
+    const onMsg = (e) => {
+      if (e.data?.id === id) {
+        worker.removeEventListener('message', onMsg);
+        e.data.ok ? resolve(e.data) : reject(new Error(e.data.error));
+      }
+    };
+    worker.addEventListener('message', onMsg);
+    worker.postMessage({ id, action, payload });
+  });
+}
+await call('new_game', { config, players: 2 });
+const { board } = await call('get_board');
+```
+
+  </TabItem>
+</Tabs>
+
+Artifacts are copied to `docs/static/wasm/engine/pkg` by `make wasm`.

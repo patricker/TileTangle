@@ -1,16 +1,10 @@
-# Python Bindings (PyO3)
-
-Python package exposing a minimal API mirroring the WASM wrapper.
-
-Build for development:
-
-- pip install maturin
-- cd bindings/python && maturin develop --release
-
-Usage:
-
-```
-from tiletangle import Game
+#!/usr/bin/env python3
+import json
+try:
+    from tiletangle import Game
+except ImportError:
+    print("ERR: run `maturin develop` in bindings/python first.")
+    raise
 
 cfg = {
     "tileset": {"tile_kinds": [
@@ -25,11 +19,12 @@ cfg = {
     "tile_counts": {"A": 10, "B": 10},
     "free_word_mode": True,
 }
+
 g = Game(json.dumps(cfg), 2)
-print(g.get_board_json())
-print(g.play_move(json.dumps([
+print("Board:", g.get_board_json())
+mv = json.dumps([
     {"x": 2, "y": 2, "kind_id": "A"},
     {"x": 3, "y": 2, "kind_id": "B"},
-])))
-```
+])
+print("Score:", g.play_move(mv))
 

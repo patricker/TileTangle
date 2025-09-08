@@ -291,30 +291,30 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 * **engine\_ffi/**
 
-  * [ ] Opaque handles (`EngineHandle`, `GameHandle`, `ErrorHandle`).
-  * [ ] `extern "C"` no‑mangle fns: create/free engine, new game from JSON config, play move from JSON, query board as JSON.
-  * [ ] `cbindgen` to generate `engine.h`.
-  * [ ] Error handling: last‑error string per-thread or explicit `ErrorHandle`.
+  * [x] Opaque handles (`EngineHandle`, `GameHandle`, `ErrorHandle`).
+  * [x] `extern "C"` no‑mangle fns: create/free engine, new game from JSON config, play move from JSON, query board as JSON.
+  * [x] `cbindgen` to generate `engine.h`.
+  * [x] Error handling: last‑error string per-thread or explicit `ErrorHandle`.
 * **bindings/python/**
 
-  * [ ] PyO3/maturin project: `pip install .` yields `wordengine` module.
-  * [ ] Pythonic API mirrors WASM API (plus conveniences).
+  * [x] PyO3/maturin project: `pip install .` yields `wordengine` module.
+  * [x] Pythonic API mirrors WASM API (plus conveniences).
   * [ ] Wheels for macOS, Linux (manylinux), Windows (CI later).
 
 ### Unit Tests
 
 * [ ] C smoke test: link against shared lib, call `new_game`, `play_move`.
-* [ ] Python `pytest`: create/commit moves; error paths.
+* [x] Python `pytest`: create/commit moves; error paths.
 * [ ] Conformance suite: load shared JSON fixtures and assert identical results (Rust vs Python vs WASM).
 
 ### Docs
 
-* [ ] “C ABI” page with `engine.h` excerpt & lifecycle diagram.
-* [ ] “Python” quickstart with examples (CLI mini-game).
+* [x] “C ABI” page with `engine.h` excerpt & lifecycle diagram.
+* [x] “Python” quickstart with examples (CLI mini-game).
 
 ### Demo
 
-* [ ] `examples/python/mini_cli.py`: human vs human on terminal.
+* [x] `examples/python/mini_cli.py`: human vs human on terminal.
 * [ ] Docs page with runnable Python snippets (via embedded code + output screenshots).
 
 ### Exit Criteria

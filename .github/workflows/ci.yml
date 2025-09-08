@@ -29,6 +29,30 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Rustfmt
         run: cargo fmt --all -- --check
+      - name: Generate C header (cbindgen)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cargo install cbindgen --locked
+          cd engine_ffi && mkdir -p include && cbindgen --config cbindgen.toml --crate tiletangle-engine-ffi --output include/engine.h
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+      - name: Build wasm (nodejs target)
+        run: |
+          cd wasm
+          wasm-pack build --target nodejs --out-dir pkg-node
+      - name: Run WASM smoke test (Node)
+        run: node wasm/ci_smoke.mjs
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
       - name: License and advisory checks
@@ -41,3 +65,49 @@ jobs:
           toolchain: nightly
       - name: Unused dependencies check
         run: cargo +nightly udeps --workspace --all-targets
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install maturin and pytest
+        run: python -m pip install --upgrade pip maturin pytest
+      - name: Build Python extension (develop)
+        run: |
+          cd bindings/python
+          maturin develop --release
+      - name: Python smoke test
+        run: |
+          python - << 'PY'
+          import json
+          from tiletangle import Game
+          cfg = {
+              "tileset": {"tile_kinds": [
+                  {"id": "A", "symbol": "A", "score": 1},
+                  {"id": "B", "symbol": "B", "score": 3},
+              ]},
+              "rack_size": 7,
+              "board_layout": {"width": 5, "height": 5},
+              "ruleset_id": "cross",
+              "dictionary_id": "en",
+              "rng_seed": 42,
+              "tile_counts": {"A": 10, "B": 10},
+              "free_word_mode": True,
+          }
+          g = Game(json.dumps(cfg), 2)
+          b = json.loads(g.get_board_json())
+          assert b['width'] == 5 and b['height'] == 5
+          sc = g.play_move(json.dumps([
+              {"x": 2, "y": 2, "kind_id": "A"},
+              {"x": 3, "y": 2, "kind_id": "B"},
+          ]))
+          assert sc['total'] >= 0
+          print('Python smoke OK')
+          PY
