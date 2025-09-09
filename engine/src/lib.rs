@@ -811,12 +811,13 @@ pub fn generate_moves(
         }
     }
 
-    fn vertical_word(state: &GameState, ov: &Overlay, at: CellId) -> String {
+    fn perp_word(state: &GameState, ov: &Overlay, at: CellId, dir: (i32,i32)) -> String {
         let c0 = state.board.geom.from_cell_id(at).unwrap();
-        // move up
+        let (dx,dy) = dir;
+        // move negative direction
         let mut c = c0;
         loop {
-            let prev = Coord2D { x: c.x, y: c.y - 1 };
+            let prev = Coord2D { x: c.x - dx, y: c.y - dy };
             if let Some(id) = state.board.geom.to_cell_id(prev) {
                 if ov.get(id, state).is_some() { c = prev; continue; }
             }
@@ -828,7 +829,7 @@ pub fn generate_moves(
                 if let Some(tile) = ov.get(id, state) {
                     let (_, sym) = CrosswordRules::tileset_lookup_score_symbol(&state.tileset, &tile.kind_id);
                     s.push_str(sym);
-                    c = Coord2D { x: c.x, y: c.y + 1 };
+                    c = Coord2D { x: c.x + dx, y: c.y + dy };
                     continue;
                 }
             }
@@ -838,7 +839,7 @@ pub fn generate_moves(
     }
 
     // DFS to the right from anchor only (simplified); ensure anchor included
-    fn dfs_from(
+    fn dfs_right(
         state: &GameState,
         rules: &impl Rules,
         anchor: CellId,
@@ -848,6 +849,8 @@ pub fn generate_moves(
         used: &mut Vec<(CellId, Tile)>,
         out: &mut Vec<CandidateMove>,
         max_len: usize,
+        dir: (i32,i32),
+        pdir: (i32,i32),
     ) {
         if built.chars().count() >= max_len { return; }
         // if cell has fixed tile, append and continue
@@ -857,8 +860,10 @@ pub fn generate_moves(
                 let mut nb = built.clone();
                 let (_, sym) = CrosswordRules::tileset_lookup_score_symbol(&state.tileset, &t.kind_id);
                 nb.push_str(sym);
-                let next = Coord2D { x: pos.x + 1, y: pos.y };
-                dfs_from(state, rules, anchor, rack, nb, next, used, out, max_len);
+                // prefix prune
+                if let Some(dict) = &state.dictionary { if !dict.has_prefix(&nb) { return; } }
+                let next = Coord2D { x: pos.x + dir.0, y: pos.y + dir.1 };
+                dfs_right(state, rules, anchor, rack, nb, next, used, out, max_len, dir, pdir);
                 return;
             }
         } else { return; }
@@ -871,12 +876,12 @@ pub fn generate_moves(
             // Only place if empty
             if !state.board.cells[id.0 as usize].stack.is_empty() { continue; }
             // Resolve symbol
-            let Some((tk, sym)) = get_symbol(&state.tileset, &kind_id) else { continue; };
+            let Some((_tk, sym)) = get_symbol(&state.tileset, &kind_id) else { continue; };
             // Cross-check vertical
             let mut ov = Overlay::default();
             for (cid, tile) in used.iter() { ov.0.insert(*cid, tile.clone()); }
             ov.0.insert(id, Tile { kind_id: kind_id.clone(), mark: None });
-            let vword = vertical_word(state, &ov, id);
+            let vword = perp_word(state, &ov, id, pdir);
             if vword.chars().count() > 1 {
                 if let Some(dict) = &state.dictionary {
                     if !dict.contains(&vword) { continue; }
@@ -884,6 +889,7 @@ pub fn generate_moves(
             }
             // Append and recurse / also consider committing as a move end
             let mut nb = built.clone(); nb.push_str(sym);
+            if let Some(dict) = &state.dictionary { if !dict.has_prefix(&nb) { continue; } }
             // Prepare used/rack
             *rack.get_mut(&kind_id).unwrap() -= 1;
             used.push((id, Tile { kind_id: kind_id.clone(), mark: None }));
@@ -901,8 +907,8 @@ pub fn generate_moves(
             }
 
             // Recurse to the right
-            let next = Coord2D { x: pos.x + 1, y: pos.y };
-            dfs_from(state, rules, anchor, rack, nb, next, used, out, max_len);
+            let next = Coord2D { x: pos.x + dir.0, y: pos.y + dir.1 };
+            dfs_right(state, rules, anchor, rack, nb, next, used, out, max_len, dir, pdir);
 
             // backtrack
             used.pop();
@@ -911,11 +917,91 @@ pub fn generate_moves(
     }
 
     let mut out: Vec<CandidateMove> = Vec::new();
+    fn dfs_left_then_right(
+        state: &GameState,
+        rules: &impl Rules,
+        anchor: CellId,
+        rack: &mut std::collections::HashMap<String, usize>,
+        built: String,
+        start: Coord2D,
+        used: &mut Vec<(CellId, Tile)>,
+        out: &mut Vec<CandidateMove>,
+        max_len: usize,
+        dir: (i32,i32),
+        pdir: (i32,i32),
+    ) {
+        // First, try right expansion with current built
+        dfs_right(state, rules, anchor, rack, built.clone(), start, used, out, max_len, dir, pdir);
+        // Then, attempt to place one more letter to the left and recurse
+        let left = Coord2D { x: start.x - dir.0, y: start.y - dir.1 };
+        if let Some(left_id) = state.board.geom.to_cell_id(left) {
+            // stop if left cell occupied by board tile
+            if !state.board.cells[left_id.0 as usize].stack.is_empty() {
+                return;
+            }
+            // try rack letters at left
+            for (kind_id, cnt) in rack.clone() {
+                if cnt == 0 { continue; }
+                // cross-check perpendicular at left position
+                let Some((_tk, sym)) = get_symbol(&state.tileset, &kind_id) else { continue; };
+                let mut ov = Overlay::default();
+                for (cid, tile) in used.iter() { ov.0.insert(*cid, tile.clone()); }
+                ov.0.insert(left_id, Tile { kind_id: kind_id.clone(), mark: None });
+                let vword = perp_word(state, &ov, left_id, pdir);
+                if vword.chars().count() > 1 {
+                    if let Some(dict) = &state.dictionary { if !dict.contains(&vword) { continue; } }
+                }
+                // prepend symbol to built
+                let mut nb = String::new(); nb.push_str(sym); nb.push_str(&built);
+                if let Some(dict) = &state.dictionary { if !dict.has_prefix(&nb) { continue; } }
+                // place and recurse
+                *rack.get_mut(&kind_id).unwrap() -= 1;
+                used.push((left_id, Tile { kind_id: kind_id.clone(), mark: None }));
+                dfs_left_then_right(state, rules, anchor, rack, nb, left, used, out, max_len, dir, pdir);
+                used.pop();
+                *rack.get_mut(&kind_id).unwrap() += 1;
+            }
+        }
+    }
+    fn context_prefix(state: &GameState, pos: Coord2D, dir: (i32,i32)) -> String {
+        // find beginning of contiguous run ending just before pos
+        let mut c = pos;
+        loop {
+            let prev = Coord2D { x: c.x - dir.0, y: c.y - dir.1 };
+            if let Some(id) = state.board.geom.to_cell_id(prev) {
+                if let Some(t) = state.board.cells[id.0 as usize].stack.last() {
+                    c = prev; continue;
+                }
+            }
+            break;
+        }
+        // build until pos (excluding pos)
+        let mut s = String::new();
+        loop {
+            if c.x == pos.x && c.y == pos.y { break; }
+            if let Some(id) = state.board.geom.to_cell_id(c) {
+                if let Some(t) = state.board.cells[id.0 as usize].stack.last() {
+                    let (_, sym) = CrosswordRules::tileset_lookup_score_symbol(&state.tileset, &t.kind_id);
+                    s.push_str(sym);
+                    c = Coord2D { x: c.x + dir.0, y: c.y + dir.1 };
+                    continue;
+                }
+            }
+            break;
+        }
+        s
+    }
+
     for a in anchors {
         let start = state.board.geom.from_cell_id(a).unwrap();
         let mut rack_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for k in rack { *rack_counts.entry(k.clone()).or_default() += 1; }
-        dfs_from(state, rules, a, &mut rack_counts, String::new(), start, &mut Vec::new(), &mut out, max_len);
+        // horizontal with left context
+        let h_prefix = context_prefix(state, start, (1,0));
+        dfs_left_then_right(state, rules, a, &mut rack_counts.clone(), h_prefix, start, &mut Vec::new(), &mut out, max_len, (1,0), (0,1));
+        // vertical with up context
+        let v_prefix = context_prefix(state, start, (0,1));
+        dfs_left_then_right(state, rules, a, &mut rack_counts.clone(), v_prefix, start, &mut Vec::new(), &mut out, max_len, (0,1), (1,0));
     }
     // de-duplicate identical placement sets (simple)
     out.sort_by_key(|cm| (cm.score, cm.word.clone(), cm.placements.len()));
@@ -1074,6 +1160,10 @@ impl FstDictionary {
         let set = fst::Set::from_iter(v.iter()).expect("build fst set");
         Ok(Self { set, case_fold: opts.case_fold })
     }
+    pub fn from_bytes<D: AsRef<[u8]>>(bytes: D, case_fold: bool) -> Result<Self, fst::Error> {
+        let set = fst::Set::new(bytes.as_ref().to_vec())?;
+        Ok(Self { set, case_fold })
+    }
 }
 
 impl Dictionary for FstDictionary {
@@ -1189,6 +1279,62 @@ impl GaddagDictionary {
             words.push(s);
         }
         Ok(Self::from_words(words, opts.case_fold))
+    }
+
+    pub fn root(&self) -> usize { 0 }
+    pub fn sep(&self) -> char { self.sep }
+    pub fn step(&self, node: usize, ch: char) -> Option<usize> {
+        self.g_nodes.get(node)?.edges.get(&ch).copied()
+    }
+    pub fn is_terminal(&self, node: usize) -> bool {
+        self.g_nodes.get(node).map(|n| n.terminal).unwrap_or(false)
+    }
+
+    /// Enumerate simple rightward suffixes from an anchor with given left context using rack letters.
+    /// left_context is the contiguous string immediately to the left of anchor (not reversed).
+    /// Returns full words (left_context + suffix) that are in the dictionary.
+    pub fn enumerate_suffixes_simple(
+        &self,
+        left_context: &str,
+        rack: &mut std::collections::HashMap<char, usize>,
+        max_len: usize,
+    ) -> Vec<String> {
+        // traverse reversed left to node
+        let mut node = self.root();
+        for ch in left_context.chars().rev() {
+            if let Some(n2) = self.step(node, ch) { node = n2; } else { return vec![]; }
+        }
+        // split
+        if let Some(n2) = self.step(node, self.sep()) { node = n2; } else { return vec![]; }
+        let mut out = Vec::new();
+        fn dfs(
+            dict: &GaddagDictionary,
+            node: usize,
+            built: &mut String,
+            rack: &mut std::collections::HashMap<char, usize>,
+            out: &mut Vec<String>,
+            left_context: &str,
+            max_len: usize,
+        ) {
+            if built.chars().count() >= max_len { return; }
+            // if current node is terminal, record word (requires at least one letter placed)
+            if !built.is_empty() && dict.is_terminal(node) {
+                out.push(format!("{}{}", left_context, built));
+            }
+            // try placing another rack letter
+            let keys: Vec<char> = rack.iter().filter_map(|(k, c)| if *c>0 { Some(*k) } else { None }).collect();
+            for ch in keys {
+                if let Some(n2) = dict.step(node, ch) {
+                    *rack.get_mut(&ch).unwrap() -= 1;
+                    built.push(ch);
+                    dfs(dict, n2, built, rack, out, left_context, max_len);
+                    built.pop();
+                    *rack.get_mut(&ch).unwrap() += 1;
+                }
+            }
+        }
+        dfs(self, node, &mut String::new(), rack, &mut out, left_context, max_len);
+        out
     }
 }
 
@@ -1731,6 +1877,17 @@ mod tests {
         assert!(has_seq(&gd, "rac+es"));
         assert!(has_seq(&gd, "erac+s"));
         assert!(has_seq(&gd, "serac+"));
+    }
+
+    #[test]
+    fn gaddag_enumerate_suffixes_simple_ab() {
+        let gd = GaddagDictionary::from_words(vec!["ab".to_string()], true);
+        let mut rack: std::collections::HashMap<char, usize> = std::collections::HashMap::from([
+            ('a', 1usize),
+            ('b', 1usize),
+        ]);
+        let words = gd.enumerate_suffixes_simple("", &mut rack, 8);
+        assert!(words.contains(&"ab".to_string()));
     }
 
     #[test]

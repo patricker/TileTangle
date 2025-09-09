@@ -1,0 +1,10 @@
+[package]
+name = "dict-build"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fst = "0.4"
+unicode-normalization = "0.1"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"

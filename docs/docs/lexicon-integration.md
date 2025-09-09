@@ -11,6 +11,7 @@ sidebar_position: 6
 Included Word List
 
 - We ship an example list at `assets/dictionaries/TWL06.txt`, sourced from https://scrabutility.com/.
+- A prebuilt `.fst` (finite state transducer) variant is generated at `docs/static/dictionaries/TWL06.fst` by `make wasm` for quick loading in the browser.
 
 Example
 
@@ -42,6 +43,18 @@ let dict = FstDictionary::from_file(
     DictionaryOptions { case_fold: true, min_len: Some(2), max_len: None },
 ).expect("load dictionary");
 assert!(dict.has_prefix("ab"));
+```
+
+WASM Loader (from bytes)
+
+```js
+// Browser: load prebuilt FST and pass bytes to WASM
+import init, { new_game, set_dictionary_from_fst_bytes } from '/wasm/engine/pkg/tiletangle_wasm.js';
+await init();
+const game = new_game(JSON.stringify(cfg), 2);
+const resp = await fetch('/dictionaries/TWL06.fst');
+const buf = new Uint8Array(await resp.arrayBuffer());
+set_dictionary_from_fst_bytes(game, buf, true);
 ```
 
 Note: richer loaders (metadata, compressed formats) can be added later.

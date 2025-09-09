@@ -508,7 +508,9 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 ### Implementation
 
 * [ ] `DawgDictionary` with prefix search.
-* [ ] `Gaddag` (for fast Scrabble move gen): word storage & iterator API.
+* [x] `FstDictionary` with NFC + optional case fold; fast contains + prefix.
+* [x] `Gaddag` (for fast Scrabble move gen): word storage (REV(prefix)+'+'+suffix) builder.
+* [ ] `Gaddag` iterator API for move generation.
 * [ ] RTL support:
 
   * Config per language: reading direction; UI rendering hints.
@@ -519,18 +521,20 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 ### Unit Tests
 
 * [ ] DAWG correctness vs SetDictionary; prefix queries.
-* [ ] GADDAG path enumeration; known word coverage.
+* [x] FST correctness vs SetDictionary; normalization + prefix queries.
+* [x] GADDAG rotation/path checks for sample words (e.g., CARE/CARES).
 * [ ] RTL word assembly tests (Hebrew/Arabic samples).
 * [ ] Normalization permutations accepted equivalently.
 
 ### Docs
 
 * [ ] “Dictionary Engines: DAWG & GADDAG”.
+* [x] Update “Lexicon Integration” with included list, FST usage, and boxing.
 * [ ] “Language Packs: RTL & Normalization”.
 
 ### Demo
 
-* [ ] Docs: benchmark chart (DAWG vs SetDictionary lookups) using precomputed data.
+* [ ] Docs: benchmark chart (DAWG/FST vs SetDictionary lookups) using precomputed data.
 * [ ] Live demo: switch dictionary engine in Playground.
 
 ### Exit Criteria
@@ -545,17 +549,20 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] Cross-check computation per open cell (legal symbols by perpendicular checks).
-* [ ] Anchor discovery on current board.
-* [ ] Enumerator:
+* [x] Cross-check computation (vertical check) for placed letters.
+* [x] Anchor discovery on current board (empty cells adjacent to tiles; center when empty).
+* [x] Enumerator (initial):
 
-  * Left/Right (or negative/positive direction) expansion using DAWG/GADDAG.
-  * Rack multiset with blanks; multi-char tile emission.
-  * Pruning via cross-checks & board bounds; scoring inline.
-* [ ] API: `generate_moves(state, rack) -> Vec<CandidateMove>` with score & metadata.
+  * Rightward expansion from anchors using rack multiset; dictionary prefix pruning.
+  * Per-letter perpendicular validation; calls Rules.validate + score.
+* [x] API: `generate_moves(state, rack, max_len) -> Vec<CandidateMove>` with score & word.
+* [ ] Full bidirectional expansion (left/right) and column-wise generation.
+* [ ] Blanks and multi-char tiles.
+* [ ] Inlined scoring to reduce per-candidate overhead.
 
 ### Unit Tests
 
+* [x] Simple horizontal generation test (seeded board, rack B → finds AB).
 * [ ] Reproduce known Scrabble positions (golden expected move lists).
 * [ ] Stress tests with long racks, many anchors.
 * [ ] 3D move gen basic correctness.

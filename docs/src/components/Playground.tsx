@@ -6,6 +6,7 @@ type Placement = { x: number; y: number; kind_id: string };
 export default function Playground(): JSX.Element {
   const [ready, setReady] = useState(false);
   const [useWorker, setUseWorker] = useState(false);
+  const [useDict, setUseDict] = useState(true);
   const [game, setGame] = useState<any>(null);
   const [board, setBoard] = useState<BoardJson | null>(null);
   const [pending, setPending] = useState<Placement[]>([]);
@@ -40,7 +41,8 @@ export default function Playground(): JSX.Element {
             w.postMessage({ id, action, payload });
           });
         }
-        await call('new_game', { config: cfg, players: 2 });
+        const cfg2 = { ...cfg, free_word_mode: !useDict } as any;
+        await call('new_game', { config: cfg2, players: 2 });
         const { board: b } = await call('get_board');
         setGame({ call });
         setBoard(JSON.parse(b as string) as BoardJson);
@@ -48,7 +50,21 @@ export default function Playground(): JSX.Element {
       } else {
         const mod = await import('/wasm/engine/pkg/tiletangle_wasm.js');
         await mod.default();
-        const g = mod.new_game(JSON.stringify(cfg), 2);
+        const cfg2 = { ...cfg, free_word_mode: !useDict } as any;
+        const g = mod.new_game(JSON.stringify(cfg2), 2);
+        if (useDict) {
+          try {
+            const resp = await fetch('/dictionaries/TWL06.fst');
+            if (resp.ok) {
+              const buf = new Uint8Array(await resp.arrayBuffer());
+              mod.set_dictionary_from_fst_bytes(g, buf, true);
+            } else {
+              const txtResp = await fetch('/dictionaries/TWL06.txt');
+              const txt = await txtResp.text();
+              mod.set_dictionary_from_text(g, txt, true);
+            }
+          } catch (e) { console.error('Failed to load dictionary', e); }
+        }
         setGame({ mod, g });
         setBoard(JSON.parse(mod.get_board(g)) as BoardJson);
         setReady(true);
@@ -60,7 +76,7 @@ export default function Playground(): JSX.Element {
         workerRef.current = null;
       }
     };
-  }, [useWorker, cfg]);
+  }, [useWorker, useDict, cfg]);
 
   const rack = useMemo(() => ['A','A','A','B','B'], []);
 
@@ -107,6 +123,7 @@ export default function Playground(): JSX.Element {
     <div>
       <div style={{display:'flex', alignItems:'center', gap:12, marginBottom: 12}}>
         <label><input type="checkbox" checked={useWorker} onChange={e => setUseWorker(e.target.checked)} /> Use Web Worker</label>
+        <label><input type="checkbox" checked={useDict} onChange={e => setUseDict(e.target.checked)} /> Dictionary checks (TWL06)</label>
         <button onClick={commit} disabled={pending.length === 0}>Commit Move ({pending.length})</button>
         <button onClick={() => setPending([])} disabled={pending.length === 0}>Reset</button>
       </div>

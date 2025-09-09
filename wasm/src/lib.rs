@@ -161,3 +161,30 @@ fn score_to_json(sc: &engine::ScoreBreakdown) -> serde_json::Value {
 fn to_js_err<E: std::fmt::Display>(e: E) -> JsValue {
     JsValue::from_str(&format!("{}", e))
 }
+
+#[wasm_bindgen]
+pub fn set_dictionary_from_text(game: &mut JsGame, text: &str, case_fold: bool) -> Result<(), JsValue> {
+    let mut words: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let s = line.trim();
+        if s.is_empty() || s.starts_with('#') { continue; }
+        let mut w = engine::nfc(s);
+        if case_fold { w = w.to_lowercase(); }
+        words.push(w);
+    }
+    let dict = engine::FstDictionary::from_words(words, case_fold);
+    game.state.dictionary = Some(Box::new(dict));
+    Ok(())
+}
+
+#[wasm_bindgen]
+pub fn set_dictionary_from_fst_bytes(game: &mut JsGame, bytes: &[u8], case_fold: bool) -> Result<(), JsValue> {
+    let dict = engine::FstDictionary::from_bytes(bytes, case_fold).map_err(to_js_err)?;
+    game.state.dictionary = Some(Box::new(dict));
+    Ok(())
+}
+
+#[wasm_bindgen]
+pub fn set_free_word_mode(game: &mut JsGame, enabled: bool) {
+    game.rules.free_word_mode = enabled;
+}

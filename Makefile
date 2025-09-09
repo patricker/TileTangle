@@ -21,9 +21,12 @@ clean:
 wasm:
 	rustup target add wasm32-unknown-unknown || true
 	cargo install wasm-pack --locked || true
+	cargo run -q -p dict-build -- assets/dictionaries/TWL06.txt docs/static/dictionaries/TWL06.fst --min-len 2 --case-fold true || true
 	cd wasm && wasm-pack build --target web --out-dir pkg
 	mkdir -p docs/static/wasm/engine
 	rm -rf docs/static/wasm/engine/pkg && cp -r wasm/pkg docs/static/wasm/engine/
+	mkdir -p docs/static/dictionaries
+	cp -f assets/dictionaries/TWL06.txt docs/static/dictionaries/TWL06.txt
 
 .PHONY: ffi-header
 ffi-header:
