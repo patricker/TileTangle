@@ -511,6 +511,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 * [x] `FstDictionary` with NFC + optional case fold; fast contains + prefix.
 * [x] `Gaddag` (for fast Scrabble move gen): word storage (REV(prefix)+'+'+suffix) builder.
 * [ ] `Gaddag` iterator API for move generation.
+* [x] Integrate GADDAG transitions in generator (right expansion), carry pre-sep node during left expansion; early delimiter tests.
 * [ ] RTL support:
 
   * Config per language: reading direction; UI rendering hints.
@@ -549,21 +550,23 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [x] Cross-check computation (vertical check) for placed letters.
+* [x] Cross-check computation (perpendicular sets) for placed letters.
 * [x] Anchor discovery on current board (empty cells adjacent to tiles; center when empty).
 * [x] Enumerator (initial):
 
   * Rightward expansion from anchors using rack multiset; dictionary prefix pruning.
   * Per-letter perpendicular validation; calls Rules.validate + score.
 * [x] API: `generate_moves(state, rack, max_len) -> Vec<CandidateMove>` with score & word.
-* [ ] Full bidirectional expansion (left/right) and column-wise generation.
-* [ ] Blanks and multi-char tiles.
+* [x] Full bidirectional expansion (left/right) and column-wise generation (initial).
+* [x] Blanks (lazy binding); de-duplicate identical plays.
+* [ ] Multi-char tiles.
 * [ ] Inlined scoring to reduce per-candidate overhead.
 
 ### Unit Tests
 
 * [x] Simple horizontal generation test (seeded board, rack B → finds AB).
 * [ ] Reproduce known Scrabble positions (golden expected move lists).
+* [x] Blank usage test (blank + B → finds AB).
 * [ ] Stress tests with long racks, many anchors.
 * [ ] 3D move gen basic correctness.
 * [ ] Stacking-aware cross-checks.

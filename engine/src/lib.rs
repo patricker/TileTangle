@@ -2,6 +2,7 @@
 
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use fst::{Automaton, Streamer};
+use std::any::Any;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::collections::{BTreeSet, HashMap};
@@ -514,13 +515,22 @@ impl CrosswordRules {
         false
     }
 
-    fn tileset_lookup_score_symbol<'a>(tileset: &'a Tileset, kind_id: &str) -> (i16, &'a str) {
-        for tk in &tileset.tile_kinds {
-            if tk.id == kind_id {
-                return (tk.score, tk.symbol.as_str());
+    fn tileset_lookup_kind<'a>(tileset: &'a Tileset, kind_id: &str) -> Option<&'a TileKind> {
+        for tk in &tileset.tile_kinds { if tk.id == kind_id { return Some(tk); } }
+        None
+    }
+
+    fn tile_symbol_and_score(tileset: &Tileset, tile: &Tile) -> (i16, String) {
+        if let Some(tk) = Self::tileset_lookup_kind(tileset, &tile.kind_id) {
+            if tk.is_blank {
+                let sym = tile.mark.clone().unwrap_or_else(|| tk.symbol.clone());
+                (tk.score, sym)
+            } else {
+                (tk.score, tk.symbol.clone())
             }
+        } else {
+            (0, "?".into())
         }
-        (0, "?")
     }
 
     fn form_word(
@@ -555,8 +565,8 @@ impl CrosswordRules {
             {
                 let cell = &board.cells[id.0 as usize];
                 let tile = cell.stack.last().unwrap();
-                let (ls, sym) = Self::tileset_lookup_score_symbol(tileset, &tile.kind_id);
-                word.push_str(sym);
+                let (ls, sym) = Self::tile_symbol_and_score(tileset, tile);
+                word.push_str(&sym);
                 let mut add = ls as i32;
                 if placed.contains(&id)
                     && let Some(b) = board.bonuses.get(&id)
@@ -799,6 +809,10 @@ pub fn generate_moves(
         for tk in &tileset.tile_kinds { if tk.id == kind_id { return Some((tk, tk.symbol.as_str())); } }
         None
     }
+    fn find_kind_for_symbol<'a>(tileset: &'a Tileset, sym: &str) -> Option<&'a TileKind> {
+        for tk in &tileset.tile_kinds { if !tk.is_blank && tk.symbol == sym { return Some(tk); } }
+        None
+    }
 
     // build helper to read cell including overlay
     #[derive(Default, Clone)]
@@ -827,8 +841,8 @@ pub fn generate_moves(
         loop {
             if let Some(id) = state.board.geom.to_cell_id(c) {
                 if let Some(tile) = ov.get(id, state) {
-                    let (_, sym) = CrosswordRules::tileset_lookup_score_symbol(&state.tileset, &tile.kind_id);
-                    s.push_str(sym);
+                    let (_, sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, tile);
+                    s.push_str(&sym);
                     c = Coord2D { x: c.x + dx, y: c.y + dy };
                     continue;
                 }
@@ -837,6 +851,59 @@ pub fn generate_moves(
         }
         s
     }
+
+    // Precompute cross-check sets (only when dictionary enforced)
+    use std::collections::{HashMap as Map, HashSet as Set};
+    fn gather_line(state: &GameState, start: Coord2D, step: (i32,i32)) -> String {
+        let mut s = String::new();
+        let mut c = start;
+        loop {
+            if let Some(id) = state.board.geom.to_cell_id(c) {
+                let cell = &state.board.cells[id.0 as usize];
+                if let Some(t) = cell.stack.last() {
+                let (_, sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, t);
+                s.push_str(&sym);
+                    c = Coord2D { x: c.x + step.0, y: c.y + step.1 };
+                    continue;
+                }
+            }
+            break;
+        }
+        s
+    }
+    fn cross_checks(state: &GameState, dir: (i32,i32)) -> Map<CellId, Set<String>> {
+        let mut out: Map<CellId, Set<String>> = Map::new();
+        for (idx, cell) in state.board.cells.iter().enumerate() {
+            if !cell.stack.is_empty() { continue; }
+            let id = CellId(idx as u32);
+            let c = state.board.geom.from_cell_id(id).unwrap();
+            let above = Coord2D { x: c.x - dir.0, y: c.y - dir.1 };
+            let below = Coord2D { x: c.x + dir.0, y: c.y + dir.1 };
+            let top = gather_line(state, above, (-dir.0, -dir.1));
+            let bot = gather_line(state, below, (dir.0, dir.1));
+            let base_len = top.chars().count() + bot.chars().count();
+            if base_len == 0 { continue; }
+            let mut set: Set<String> = Set::new();
+            // If a dictionary is attached, only include letters that produce a valid perpendicular word (length>1)
+            if let Some(dict) = &state.dictionary {
+                for tk in &state.tileset.tile_kinds {
+                    if tk.is_blank { continue; }
+                    let sym = &tk.symbol;
+                    let w = format!("{}{}{}", top, sym, bot);
+                    if w.chars().count() > 1 && dict.contains(&w) {
+                        set.insert(sym.clone());
+                    }
+                }
+            } else {
+                for tk in &state.tileset.tile_kinds { if !tk.is_blank { set.insert(tk.symbol.clone()); } }
+            }
+            out.insert(id, set);
+        }
+        out
+    }
+    // compute vertical cross checks for horizontal plays, and horizontal for vertical plays
+    let xchecks_vert = cross_checks(state, (0,1));
+    let xchecks_horz = cross_checks(state, (1,0));
 
     // DFS to the right from anchor only (simplified); ensure anchor included
     fn dfs_right(
@@ -851,6 +918,9 @@ pub fn generate_moves(
         max_len: usize,
         dir: (i32,i32),
         pdir: (i32,i32),
+        mut gaddag: Option<(&GaddagDictionary, usize)>,
+        xchecks: &Map<CellId, Set<String>>,
+        blank_kinds: &[String],
     ) {
         if built.chars().count() >= max_len { return; }
         // if cell has fixed tile, append and continue
@@ -858,38 +928,151 @@ pub fn generate_moves(
             let cell = &state.board.cells[id.0 as usize];
             if let Some(t) = cell.stack.last() {
                 let mut nb = built.clone();
-                let (_, sym) = CrosswordRules::tileset_lookup_score_symbol(&state.tileset, &t.kind_id);
-                nb.push_str(sym);
-                // prefix prune
-                if let Some(dict) = &state.dictionary { if !dict.has_prefix(&nb) { return; } }
+                let (_, sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, t);
+                nb.push_str(&sym);
+                // GADDAG step for multi-char symbols or prefix prune
+                if let Some((gd, node)) = gaddag {
+                    if let Some(n2) = gd.step_symbol(node, &sym) {
+                        gaddag = Some((gd, n2));
+                    } else { return; }
+                } else if let Some(dict) = &state.dictionary { if !dict.has_prefix(&nb) { return; } }
                 let next = Coord2D { x: pos.x + dir.0, y: pos.y + dir.1 };
-                dfs_right(state, rules, anchor, rack, nb, next, used, out, max_len, dir, pdir);
+                dfs_right(state, rules, anchor, rack, nb, next, used, out, max_len, dir, pdir, gaddag, xchecks, blank_kinds);
                 return;
             }
         } else { return; }
 
-        // Try placing from rack
-        for (kind_id, cnt) in rack.clone() { // iterate snapshot
-            if cnt == 0 { continue; }
+        // Try placing from rack: first, optional blank placements for letters not available as normal tiles
+        // Compute candidate symbols set
+        let id = state.board.geom.to_cell_id(pos).unwrap();
+        if state.board.cells[id.0 as usize].stack.is_empty() {
+            let mut cand_syms: Set<String> = Set::new();
+            // base from cross-checks or all symbols
+            if let Some(set) = xchecks.get(&id) {
+                for s in set { cand_syms.insert(s.clone()); }
+            } else {
+                // derive from dictionary prefixes if available; else from tileset symbols
+                if let Some(dict) = &state.dictionary {
+                    for tk in &state.tileset.tile_kinds {
+                        if tk.is_blank { continue; }
+                        if dict.has_prefix(&tk.symbol) { cand_syms.insert(tk.symbol.clone()); }
+                    }
+                } else {
+                    for tk in &state.tileset.tile_kinds { if !tk.is_blank { cand_syms.insert(tk.symbol.clone()); } }
+                }
+            }
+            // filter by gaddag child arcs if available
+            if let Some((gd, node)) = gaddag {
+                cand_syms = cand_syms
+                    .into_iter()
+                    .filter(|s| gd.step_symbol(node, s).is_some())
+                    .collect();
+            }
+            // For each symbol, if no normal tile available in rack, but a blank exists, place blank
+            // Augment candidate symbols for blanks with A..Z dictionary prefixes
+            let mut blank_syms = cand_syms.clone();
+            if let Some(dict) = &state.dictionary {
+                for ch in 'A'..='Z' { let s = ch.to_string(); if dict.has_prefix(&s) { blank_syms.insert(s); } }
+            }
+            for sym in blank_syms.into_iter() {
+                // normal tile kind for symbol
+                let normal_kind = find_kind_for_symbol(&state.tileset, &sym).map(|k| k.id.clone());
+                let normal_avail = normal_kind
+                    .as_ref()
+                    .and_then(|kid| rack.get(kid))
+                    .copied()
+                    .unwrap_or(0) > 0;
+                if normal_avail { continue; }
+                // find a blank
+                let mut chosen_blank: Option<String> = None;
+                for bk in blank_kinds { if rack.get(bk).copied().unwrap_or(0) > 0 { chosen_blank = Some(bk.clone()); break; } }
+                if let Some(bid) = chosen_blank {
+                    // perpendicular check via overlay
+                    let mut ov = Overlay::default();
+                    for (cid, tile) in used.iter() { ov.0.insert(*cid, tile.clone()); }
+                    ov.0.insert(id, Tile { kind_id: bid.clone(), mark: Some(sym.clone()) });
+                    let vword = perp_word(state, &ov, id, pdir);
+                    let vtiles = {
+                        let c0 = id; // reuse helper logic inline to avoid borrow issues
+                        let mut count = 0usize;
+                        let mut c = state.board.geom.from_cell_id(c0).unwrap();
+                        let (dx,dy) = pdir;
+                        loop {
+                            let prev = Coord2D { x: c.x - dx, y: c.y - dy };
+                            if let Some(pid) = state.board.geom.to_cell_id(prev) { if ov.get(pid, state).is_some() { c = prev; continue; } }
+                            break;
+                        }
+                        loop {
+                            if let Some(pid) = state.board.geom.to_cell_id(c) { if ov.get(pid, state).is_some() { count += 1; c = Coord2D { x: c.x + dx, y: c.y + dy }; continue; } }
+                            break;
+                        }
+                        count
+                    };
+                    if vtiles > 1 {
+                        if let Some(dict) = &state.dictionary { if !dict.contains(&vword) { continue; } }
+                    }
+                    // Append symbol and recurse
+                    let mut nb = built.clone(); nb.push_str(&sym);
+                    // GADDAG step or prefix check
+                    let mut next_gaddag = gaddag;
+                    if let Some((gd, node)) = next_gaddag {
+                    if let Some(n2) = gd.step_symbol(node, &sym) { next_gaddag = Some((gd, n2)); } else { continue; }
+                } else if let Some(dict) = &state.dictionary { if !dict.has_prefix(&nb) { continue; } }
+                    // consume blank
+                    *rack.get_mut(&bid).unwrap() -= 1;
+                    used.push((id, Tile { kind_id: bid.clone(), mark: Some(sym.clone()) }));
+                    let next = Coord2D { x: pos.x + dir.0, y: pos.y + dir.1 };
+                    dfs_right(state, rules, anchor, rack, nb, next, used, out, max_len, dir, pdir, next_gaddag, xchecks, blank_kinds);
+                    used.pop();
+                    *rack.get_mut(&bid).unwrap() += 1;
+                }
+            }
+        }
+
+        // Try placing from rack (normal tiles)
+            for (kind_id, cnt) in rack.clone() { // iterate snapshot
+                if cnt == 0 { continue; }
             // place here
             let id = state.board.geom.to_cell_id(pos).unwrap();
             // Only place if empty
             if !state.board.cells[id.0 as usize].stack.is_empty() { continue; }
             // Resolve symbol
             let Some((_tk, sym)) = get_symbol(&state.tileset, &kind_id) else { continue; };
+            // Cross-check set pruning (if present for this cell)
+            if let Some(set) = xchecks.get(&id) { if !set.contains(sym) { continue; } }
             // Cross-check vertical
             let mut ov = Overlay::default();
             for (cid, tile) in used.iter() { ov.0.insert(*cid, tile.clone()); }
             ov.0.insert(id, Tile { kind_id: kind_id.clone(), mark: None });
             let vword = perp_word(state, &ov, id, pdir);
-            if vword.chars().count() > 1 {
+            let vtiles = {
+                let c0 = id;
+                let mut count = 0usize;
+                let mut c = state.board.geom.from_cell_id(c0).unwrap();
+                let (dx,dy) = pdir;
+                loop {
+                    let prev = Coord2D { x: c.x - dx, y: c.y - dy };
+                    if let Some(pid) = state.board.geom.to_cell_id(prev) { if ov.get(pid, state).is_some() { c = prev; continue; } }
+                    break;
+                }
+                loop {
+                    if let Some(pid) = state.board.geom.to_cell_id(c) { if ov.get(pid, state).is_some() { count += 1; c = Coord2D { x: c.x + dx, y: c.y + dy }; continue; } }
+                    break;
+                }
+                count
+            };
+            if vtiles > 1 {
                 if let Some(dict) = &state.dictionary {
                     if !dict.contains(&vword) { continue; }
                 }
             }
             // Append and recurse / also consider committing as a move end
             let mut nb = built.clone(); nb.push_str(sym);
-            if let Some(dict) = &state.dictionary { if !dict.has_prefix(&nb) { continue; } }
+            // GADDAG step or prefix prune
+            let mut next_gaddag = gaddag;
+            if let Some((gd, node)) = next_gaddag {
+                if let Some(n2) = gd.step_symbol(node, sym) { next_gaddag = Some((gd, n2)); } else { continue; }
+            } else if let Some(dict) = &state.dictionary { if !dict.has_prefix(&nb) { continue; } }
             // Prepare used/rack
             *rack.get_mut(&kind_id).unwrap() -= 1;
             used.push((id, Tile { kind_id: kind_id.clone(), mark: None }));
@@ -908,7 +1091,7 @@ pub fn generate_moves(
 
             // Recurse to the right
             let next = Coord2D { x: pos.x + dir.0, y: pos.y + dir.1 };
-            dfs_right(state, rules, anchor, rack, nb, next, used, out, max_len, dir, pdir);
+            dfs_right(state, rules, anchor, rack, nb, next, used, out, max_len, dir, pdir, next_gaddag, xchecks, blank_kinds);
 
             // backtrack
             used.pop();
@@ -929,9 +1112,16 @@ pub fn generate_moves(
         max_len: usize,
         dir: (i32,i32),
         pdir: (i32,i32),
+        gaddag_pre: Option<(&GaddagDictionary, usize)>,
+        xchecks: &Map<CellId, Set<String>>,
+        blank_kinds: &[String],
     ) {
-        // First, try right expansion with current built
-        dfs_right(state, rules, anchor, rack, built.clone(), start, used, out, max_len, dir, pdir);
+        // First, try right expansion with current built, using GADDAG post-sep node if available
+        let mut post_sep = None;
+        if let Some((gd, node)) = gaddag_pre {
+            if let Some(n2) = gd.step(node, gd.sep()) { post_sep = Some((gd, n2)); }
+        }
+        dfs_right(state, rules, anchor, rack, built.clone(), start, used, out, max_len, dir, pdir, post_sep, xchecks, blank_kinds);
         // Then, attempt to place one more letter to the left and recurse
         let left = Coord2D { x: start.x - dir.0, y: start.y - dir.1 };
         if let Some(left_id) = state.board.geom.to_cell_id(left) {
@@ -940,6 +1130,39 @@ pub fn generate_moves(
                 return;
             }
             // try rack letters at left
+            // Try blank placements at left (letters not available as normal)
+            if let Some(id_cc) = state.board.geom.to_cell_id(left) {
+                let mut cand_syms: Set<String> = Set::new();
+                if let Some(set) = xchecks.get(&left_id) { for s in set { cand_syms.insert(s.clone()); } }
+                else {
+                    if let Some(dict) = &state.dictionary {
+                        for tk in &state.tileset.tile_kinds { if !tk.is_blank && dict.has_prefix(&tk.symbol) { cand_syms.insert(tk.symbol.clone()); } }
+                    } else { for tk in &state.tileset.tile_kinds { if !tk.is_blank { cand_syms.insert(tk.symbol.clone()); } } }
+                }
+                if let Some((gd, base)) = gaddag_pre { cand_syms = cand_syms.into_iter().filter(|s| gd.step_symbol(base, s).is_some()).collect(); }
+                let mut blank_syms = cand_syms.clone();
+                if let Some(dict) = &state.dictionary { for ch in 'A'..='Z' { let s = ch.to_string(); if dict.has_prefix(&s) { blank_syms.insert(s); } } }
+                for sym in blank_syms.into_iter() {
+                    let normal_kind = find_kind_for_symbol(&state.tileset, &sym).map(|k| k.id.clone());
+                    let normal_avail = normal_kind.as_ref().and_then(|kid| rack.get(kid)).copied().unwrap_or(0) > 0;
+                    if normal_avail { continue; }
+                    let mut chosen_blank: Option<String> = None;
+                    for bk in blank_kinds { if rack.get(bk).copied().unwrap_or(0) > 0 { chosen_blank = Some(bk.clone()); break; } }
+                    if let Some(bid) = chosen_blank {
+                        // cross-check perpendicular already satisfied by cand_syms/xchecks; still validate dict if longer
+                        let mut nb = String::new(); nb.push_str(&sym); nb.push_str(&built);
+                        let mut next_g_pre2 = gaddag_pre;
+                        if let Some((gd, base2)) = next_g_pre2 { if let Some(n2) = gd.step_symbol(base2, &sym) { next_g_pre2 = Some((gd, n2)); } else { continue; } }
+                        // consume blank and recurse
+                        *rack.get_mut(&bid).unwrap() -= 1;
+                        used.push((left_id, Tile { kind_id: bid.clone(), mark: Some(sym.clone()) }));
+                        dfs_left_then_right(state, rules, anchor, rack, nb, left, used, out, max_len, dir, pdir, next_g_pre2, xchecks, blank_kinds);
+                        used.pop();
+                        *rack.get_mut(&bid).unwrap() += 1;
+                    }
+                }
+            }
+
             for (kind_id, cnt) in rack.clone() {
                 if cnt == 0 { continue; }
                 // cross-check perpendicular at left position
@@ -948,16 +1171,35 @@ pub fn generate_moves(
                 for (cid, tile) in used.iter() { ov.0.insert(*cid, tile.clone()); }
                 ov.0.insert(left_id, Tile { kind_id: kind_id.clone(), mark: None });
                 let vword = perp_word(state, &ov, left_id, pdir);
-                if vword.chars().count() > 1 {
+                // count perpendicular tiles (not characters)
+                let vtiles = {
+                    let mut count = 0usize;
+                    let mut c = state.board.geom.from_cell_id(left_id).unwrap();
+                    let (dx,dy) = pdir;
+                    loop {
+                        let prev = Coord2D { x: c.x - dx, y: c.y - dy };
+                        if let Some(pid) = state.board.geom.to_cell_id(prev) { if ov.get(pid, state).is_some() { c = prev; continue; } }
+                        break;
+                    }
+                    loop {
+                        if let Some(pid) = state.board.geom.to_cell_id(c) { if ov.get(pid, state).is_some() { count += 1; c = Coord2D { x: c.x + dx, y: c.y + dy }; continue; } }
+                        break;
+                    }
+                    count
+                };
+                if vtiles > 1 {
                     if let Some(dict) = &state.dictionary { if !dict.contains(&vword) { continue; } }
                 }
                 // prepend symbol to built
                 let mut nb = String::new(); nb.push_str(sym); nb.push_str(&built);
-                if let Some(dict) = &state.dictionary { if !dict.has_prefix(&nb) { continue; } }
+                // If GADDAG available, step pre-sep with this char; else fallback to prefix check
+                let mut next_g_pre = gaddag_pre;
+                if let Some((gd, base)) = next_g_pre { if let Some(n2) = gd.step_symbol(base, sym) { next_g_pre = Some((gd, n2)); } else { continue; } }
+                else if let Some(dict) = &state.dictionary { if !dict.has_prefix(&nb) { continue; } }
                 // place and recurse
                 *rack.get_mut(&kind_id).unwrap() -= 1;
                 used.push((left_id, Tile { kind_id: kind_id.clone(), mark: None }));
-                dfs_left_then_right(state, rules, anchor, rack, nb, left, used, out, max_len, dir, pdir);
+                dfs_left_then_right(state, rules, anchor, rack, nb, left, used, out, max_len, dir, pdir, next_g_pre, xchecks, blank_kinds);
                 used.pop();
                 *rack.get_mut(&kind_id).unwrap() += 1;
             }
@@ -981,8 +1223,8 @@ pub fn generate_moves(
             if c.x == pos.x && c.y == pos.y { break; }
             if let Some(id) = state.board.geom.to_cell_id(c) {
                 if let Some(t) = state.board.cells[id.0 as usize].stack.last() {
-                    let (_, sym) = CrosswordRules::tileset_lookup_score_symbol(&state.tileset, &t.kind_id);
-                    s.push_str(sym);
+                    let (_, sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, t);
+                    s.push_str(&sym);
                     c = Coord2D { x: c.x + dir.0, y: c.y + dir.1 };
                     continue;
                 }
@@ -992,20 +1234,63 @@ pub fn generate_moves(
         s
     }
 
+    // Try to obtain GADDAG dictionary reference for automaton-guided search
+    let gaddag_pre_seed: Option<&GaddagDictionary> = state
+        .dictionary
+        .as_deref()
+        .and_then(|d| d.as_any().downcast_ref::<GaddagDictionary>());
+
+    // Identify blank kind IDs
+    let blank_kinds: Vec<String> = state
+        .tileset
+        .tile_kinds
+        .iter()
+        .filter(|tk| tk.is_blank)
+        .map(|tk| tk.id.clone())
+        .collect();
+
     for a in anchors {
         let start = state.board.geom.from_cell_id(a).unwrap();
         let mut rack_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for k in rack { *rack_counts.entry(k.clone()).or_default() += 1; }
         // horizontal with left context
         let h_prefix = context_prefix(state, start, (1,0));
-        dfs_left_then_right(state, rules, a, &mut rack_counts.clone(), h_prefix, start, &mut Vec::new(), &mut out, max_len, (1,0), (0,1));
+        // Compute initial GADDAG pre-sep node for left context
+        let mut pre: Option<(&GaddagDictionary, usize)> = None;
+        if let Some(gd) = gaddag_pre_seed {
+            let mut node = gd.root();
+            let mut ok = true;
+            for ch in h_prefix.chars().rev() { if let Some(n2) = gd.step(node, ch) { node = n2; } else { ok = false; break; } }
+            if ok { pre = Some((gd, node)); }
+        }
+        dfs_left_then_right(state, rules, a, &mut rack_counts.clone(), h_prefix, start, &mut Vec::new(), &mut out, max_len, (1,0), (0,1), pre, &xchecks_vert, &blank_kinds);
         // vertical with up context
         let v_prefix = context_prefix(state, start, (0,1));
-        dfs_left_then_right(state, rules, a, &mut rack_counts.clone(), v_prefix, start, &mut Vec::new(), &mut out, max_len, (0,1), (1,0));
+        let mut pre_v: Option<(&GaddagDictionary, usize)> = None;
+        if let Some(gd) = gaddag_pre_seed {
+            let mut node = gd.root();
+            let mut ok = true;
+            for ch in v_prefix.chars().rev() { if let Some(n2) = gd.step(node, ch) { node = n2; } else { ok = false; break; } }
+            if ok { pre_v = Some((gd, node)); }
+        }
+        dfs_left_then_right(state, rules, a, &mut rack_counts.clone(), v_prefix, start, &mut Vec::new(), &mut out, max_len, (0,1), (1,0), pre_v, &xchecks_horz, &blank_kinds);
     }
-    // de-duplicate identical placement sets (simple)
-    out.sort_by_key(|cm| (cm.score, cm.word.clone(), cm.placements.len()));
-    out
+    // de-duplicate identical placement sets (same cells and assigned symbols)
+    use std::collections::HashSet;
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut dedup: Vec<CandidateMove> = Vec::new();
+    for cm in out.into_iter() {
+        let mut key_parts: Vec<String> = cm
+            .placements
+            .iter()
+            .map(|(cid, t)| format!("{}:{}:{}", cid.0, t.kind_id, t.mark.clone().unwrap_or_default()))
+            .collect();
+        key_parts.sort();
+        let key = format!("{}|{}", cm.word, key_parts.join(","));
+        if seen.insert(key) { dedup.push(cm); }
+    }
+    dedup.sort_by_key(|cm| (-cm.score, cm.word.clone(), cm.placements.len()));
+    dedup
 }
 
 impl Player {
@@ -1021,6 +1306,7 @@ pub trait Dictionary {
     fn has_prefix(&self, _prefix: &str) -> bool {
         false
     }
+    fn as_any(&self) -> &dyn Any;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1094,6 +1380,7 @@ impl Dictionary for SetDictionary {
         }
         self.words.contains(&s)
     }
+    fn as_any(&self) -> &dyn Any { self }
 }
 
 #[derive(Debug, Clone)]
@@ -1184,6 +1471,7 @@ impl Dictionary for FstDictionary {
         let mut stream = self.set.search(aut).into_stream();
         stream.next().is_some()
     }
+    fn as_any(&self) -> &dyn Any { self }
 }
 
 #[derive(Debug, Clone)]
@@ -1336,6 +1624,14 @@ impl GaddagDictionary {
         dfs(self, node, &mut String::new(), rack, &mut out, left_context, max_len);
         out
     }
+
+    pub fn step_symbol(&self, node: usize, sym: &str) -> Option<usize> {
+        let mut n = node;
+        for ch in sym.chars() {
+            n = self.step(n, ch)?;
+        }
+        Some(n)
+    }
 }
 
 impl Dictionary for GaddagDictionary {
@@ -1345,6 +1641,7 @@ impl Dictionary for GaddagDictionary {
     fn has_prefix(&self, prefix: &str) -> bool {
         self.forward.has_prefix(prefix)
     }
+    fn as_any(&self) -> &dyn Any { self }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
