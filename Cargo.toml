@@ -4,6 +4,7 @@ members = [
     "engine_ffi",
     "wasm",
     "bindings/python",
+    "bindings/godot",
     "tools/dict-build",
 ]
 resolver = "2"

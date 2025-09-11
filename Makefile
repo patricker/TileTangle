@@ -17,6 +17,18 @@ check: fmt lint test
 clean:
 	cargo clean
 
+.PHONY: unity-libs
+unity-libs:
+	cargo build -p tiletangle-engine-ffi --release
+	@echo "Built shared library at:"
+	@echo "  Linux:  target/release/libtiletangle_ffi.so"
+	@echo "  macOS:  target/release/libtiletangle_ffi.dylib"
+	@echo "  Windows: target/release/tiletangle_ffi.dll"
+
+.PHONY: godot-build
+godot-build:
+	cargo build -p tiletangle-godot --release
+
 .PHONY: wasm
 wasm:
 	rustup target add wasm32-unknown-unknown || true

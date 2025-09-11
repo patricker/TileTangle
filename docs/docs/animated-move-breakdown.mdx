@@ -1,0 +1,108 @@
+---
+id: animated-move-breakdown
+title: Animated Move Breakdown
+description: Visual, step-by-step scoring breakdown for a classic crossword move.
+slug: /animated-move-breakdown
+---
+
+This page shows a static, self-contained SVG animation of a classic crossword-style move.
+It highlights tiles as they are placed, shows per-letter scores, applies a word multiplier,
+and then reveals the total. No JavaScript is required; it’s pure SVG animation.
+
+Tip: Also see Scoring & Validation for rules and details.
+
+<div>
+  <div>
+    <svg viewBox="0 0 420 360" width="420" height="360" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+      <title id="title">Animated Move Breakdown</title>
+      <desc id="desc">A 7x7 grid. The word READ is placed across row 4. Cells highlight sequentially, scores add up, and a word multiplier applies.</desc>
+
+      
+
+      <!-- Board background and grid lines -->
+      <rect x="0" y="0" width="280" height="280" fill="#f7f7f7" rx="8" />
+      <!-- vertical lines -->
+      <path d="M40 0 V280 M80 0 V280 M120 0 V280 M160 0 V280 M200 0 V280 M240 0 V280" stroke="#ccc" fill="none" />
+      <!-- horizontal lines -->
+      <path d="M0 40 H280 M0 80 H280 M0 120 H280 M0 160 H280 M0 200 H280 M0 240 H280" stroke="#ccc" fill="none" />
+
+      <!-- 2× word bonus at row 4, col 4 (0-indexed row 3, col 3) -->
+      <rect x="120" y="120" width="40" height="40" fill="#e8f4ff" stroke="#6aa7e8" />
+      <text x="140" y="142" textAnchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10" fill="#237">2× WORD</text>
+
+      <!-- Tiles placed left→right with staggered animation: READ at row 4, cols 2..5 -->
+      <g transform="translate(40, 120)" opacity="0">
+        <rect x="2" y="2" width="36" height="36" rx="4" fill="#fff9e6" stroke="#b88c00" />
+        <text x="20" y="26" textAnchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="20" font-weight="700" fill="#222">R</text>
+        <text x="33" y="34" textAnchor="end" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10" fill="#444">1</text>
+        <animate attributeName="opacity" from="0" to="1" begin="0s" dur="0.3s" fill="freeze" />
+      </g>
+      <g transform="translate(80, 120)" opacity="0">
+        <rect x="2" y="2" width="36" height="36" rx="4" fill="#fff9e6" stroke="#b88c00" />
+        <text x="20" y="26" textAnchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="20" font-weight="700" fill="#222">E</text>
+        <text x="33" y="34" textAnchor="end" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10" fill="#444">1</text>
+        <animate attributeName="opacity" from="0" to="1" begin="0.8s" dur="0.3s" fill="freeze" />
+      </g>
+      <g transform="translate(120, 120)" opacity="0">
+        <rect x="2" y="2" width="36" height="36" rx="4" fill="#fff9e6" stroke="#b88c00" />
+        <text x="20" y="26" textAnchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="20" font-weight="700" fill="#222">A</text>
+        <text x="33" y="34" textAnchor="end" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10" fill="#444">1</text>
+        <animate attributeName="opacity" from="0" to="1" begin="1.6s" dur="0.3s" fill="freeze" />
+      </g>
+      <g transform="translate(160, 120)" opacity="0">
+        <rect x="2" y="2" width="36" height="36" rx="4" fill="#fff9e6" stroke="#b88c00" />
+        <text x="20" y="26" textAnchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="20" font-weight="700" fill="#222">D</text>
+        <text x="33" y="34" textAnchor="end" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10" fill="#444">2</text>
+        <animate attributeName="opacity" from="0" to="1" begin="2.4s" dur="0.3s" fill="freeze" />
+      </g>
+
+      <!-- Sum of letter scores: 1+1+1+2 = 5 → then ×2 word bonus → 10 -->
+      <g transform="translate(300, 40)">
+        <rect x="-8" y="-8" width="140" height="140" fill="#fff" stroke="#ddd" rx="6" />
+        <text x="0" y="12" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14" fill="#444">Letter scores</text>
+
+        <text id="t1" x="0" y="32" opacity="0" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14" font-weight="700" fill="#111">1</text>
+        <text id="tPlus1" x="20" y="32" opacity="0" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14" font-weight="700" fill="#111">+</text>
+        <text id="t2" x="40" y="32" opacity="0" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14" font-weight="700" fill="#111">1</text>
+        <text id="tPlus2" x="60" y="32" opacity="0" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14" font-weight="700" fill="#111">+</text>
+        <text id="t3" x="80" y="32" opacity="0" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14" font-weight="700" fill="#111">1</text>
+        <text id="tPlus3" x="100" y="32" opacity="0" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14" font-weight="700" fill="#111">+</text>
+        <text id="t4" x="120" y="32" opacity="0" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14" font-weight="700" fill="#111">2</text>
+
+        <animate xlinkHref="#t1" attributeName="opacity" from="0" to="1" begin="0.15s" dur="0.2s" fill="freeze" />
+        <animate xlinkHref="#tPlus1" attributeName="opacity" from="0" to="1" begin="0.45s" dur="0.2s" fill="freeze" />
+        <animate xlinkHref="#t2" attributeName="opacity" from="0" to="1" begin="0.75s" dur="0.2s" fill="freeze" />
+        <animate xlinkHref="#tPlus2" attributeName="opacity" from="0" to="1" begin="1.05s" dur="0.2s" fill="freeze" />
+        <animate xlinkHref="#t3" attributeName="opacity" from="0" to="1" begin="1.35s" dur="0.2s" fill="freeze" />
+        <animate xlinkHref="#tPlus3" attributeName="opacity" from="0" to="1" begin="1.65s" dur="0.2s" fill="freeze" />
+        <animate xlinkHref="#t4" attributeName="opacity" from="0" to="1" begin="1.95s" dur="0.2s" fill="freeze" />
+
+        <text x="0" y="62" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14" fill="#444">Subtotal</text>
+        <text id="tSubtotal" x="70" y="62" textAnchor="end" opacity="0" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14" font-weight="700" fill="#111">5</text>
+        <animate xlinkHref="#tSubtotal" attributeName="opacity" from="0" to="1" begin="2.8s" dur="0.2s" fill="freeze" />
+
+        <text x="0" y="86" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14" fill="#444">Word bonus</text>
+        <text id="tWordMul" x="70" y="86" textAnchor="end" opacity="0" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14" font-weight="700" fill="#111">×2</text>
+        <animate xlinkHref="#tWordMul" attributeName="opacity" from="0" to="1" begin="3.2s" dur="0.2s" fill="freeze" />
+
+        <line x1="-6" y1="96" x2="130" y2="96" stroke="#eee" />
+        <text x="0" y="114" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14" fill="#444">Total</text>
+        <text id="tTotal" x="70" y="114" textAnchor="end" font-size="20" opacity="0" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-weight="700" fill="#111">10</text>
+        <animate xlinkHref="#tTotal" attributeName="opacity" from="0" to="1" begin="3.6s" dur="0.3s" fill="freeze" />
+      </g>
+    </svg>
+  </div>
+  <div>
+    <p>
+      Scenario: place <code>READ</code> across row 4, touching existing tiles. Only newly placed tiles take letter bonuses.
+      Here, the center cell is a 2× word multiplier. Letters score 1+1+1+2 = 5, then ×2 → 10 total.
+    </p>
+    <p>
+      This is a simplified example for illustration. The engine supports multiple formed words
+      (main + cross), bingo bonuses, and per-tile letter bonuses applied to newly placed tiles only.
+    </p>
+  </div>
+</div>
+
+Accessibility note: The SVG includes a title and description for screen readers. The animation
+is time-based and completes in under 4 seconds; the final state remains visible.

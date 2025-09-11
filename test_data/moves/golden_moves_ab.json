@@ -1,0 +1,9 @@
+{
+  "preplacements": [
+    {"x": 2, "y": 2, "kind_id": "A"}
+  ],
+  "rack": ["B"],
+  "dict_words": ["AB"],
+  "expected_words": ["AB"]
+}
+

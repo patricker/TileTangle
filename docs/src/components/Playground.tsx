@@ -7,21 +7,45 @@ export default function Playground(): JSX.Element {
   const [ready, setReady] = useState(false);
   const [useWorker, setUseWorker] = useState(false);
   const [useDict, setUseDict] = useState(true);
+  const [useHex, setUseHex] = useState(false);
   const [game, setGame] = useState<any>(null);
   const [board, setBoard] = useState<BoardJson | null>(null);
   const [pending, setPending] = useState<Placement[]>([]);
   const workerRef = useRef<Worker | null>(null);
 
-  const cfg = useMemo(() => ({
-    tileset: { tile_kinds: [
-      { id: 'A', symbol: 'A', score: 1 },
-      { id: 'B', symbol: 'B', score: 3 },
-    ] },
-    rack_size: 7,
-    board_layout: { width: 9, height: 9 },
-    ruleset_id: 'cross', dictionary_id: 'en', rng_seed: 1,
-    tile_counts: { A: 30, B: 12 }, free_word_mode: true,
-  }), []);
+  const cfg = useMemo(() => {
+    const width = 9, height = 9;
+    const base = {
+      tileset: { tile_kinds: [
+        { id: 'A', symbol: 'A', score: 1 },
+        { id: 'B', symbol: 'B', score: 3 },
+      ] },
+      rack_size: 7,
+      ruleset_id: 'cross', dictionary_id: 'en', rng_seed: 1,
+      tile_counts: { A: 30, B: 12 }, free_word_mode: true,
+    } as any;
+    if (!useHex) return { ...base, board_layout: { width, height } };
+    // Build hex-style adjacency on a rectangular grid (even-r offset)
+    const nodes: {x:number;y:number}[] = [];
+    for (let y=0;y<height;y++) for (let x=0;x<width;x++) nodes.push({x,y});
+    const index = (x:number,y:number) => y*width + x;
+    const edges: {a:number;b:number;dir:string}[] = [];
+    const tryEdge = (x1:number,y1:number,x2:number,y2:number,dir:string) => {
+      if (x2<0||x2>=width||y2<0||y2>=height) return;
+      edges.push({ a:index(x1,y1), b:index(x2,y2), dir });
+    };
+    for (let y=0;y<height;y++) {
+      for (let x=0;x<width;x++) {
+        const even = (y % 2) === 0;
+        // Use only forward directions; overlay builds reverse links
+        tryEdge(x,y,x+1,y,'E');
+        // NE and SE (reverse links provide NW/SW)
+        tryEdge(x,y, x + (even?0:1), y-1, 'NE');
+        tryEdge(x,y, x + (even?0:1), y+1, 'SE');
+      }
+    }
+    return { ...base, board_layout: { width, height, type: 'graph', nodes, edges } };
+  }, [useHex]);
 
   useEffect(() => {
     (async () => {
@@ -123,6 +147,7 @@ export default function Playground(): JSX.Element {
     <div>
       <div style={{display:'flex', alignItems:'center', gap:12, marginBottom: 12}}>
         <label><input type="checkbox" checked={useWorker} onChange={e => setUseWorker(e.target.checked)} /> Use Web Worker</label>
+        <label><input type="checkbox" checked={useHex} onChange={e => setUseHex(e.target.checked)} /> Hex adjacency</label>
         <label><input type="checkbox" checked={useDict} onChange={e => setUseDict(e.target.checked)} /> Dictionary checks (TWL06)</label>
         <button onClick={commit} disabled={pending.length === 0}>Commit Move ({pending.length})</button>
         <button onClick={() => setPending([])} disabled={pending.length === 0}>Reset</button>

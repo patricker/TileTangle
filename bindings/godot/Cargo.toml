@@ -1,0 +1,16 @@
+[package]
+name = "tiletangle-godot"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Godot (GDExtension) bindings for TileTangle engine"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+godot = "0.3"
+engine = { package = "tiletangle-engine", path = "../../engine" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"

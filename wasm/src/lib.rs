@@ -26,16 +26,28 @@ struct JsTileset {
 }
 
 #[derive(Deserialize)]
-struct JsRectBoardLayout {
+struct JsNode { x: i32, y: i32 }
+
+#[derive(Deserialize)]
+struct JsEdge { a: usize, b: usize, #[serde(default)] dir: Option<String> }
+
+#[derive(Deserialize)]
+struct JsBoardLayout {
     width: u32,
     height: u32,
+    #[serde(default)]
+    r#type: Option<String>,
+    #[serde(default)]
+    nodes: Vec<JsNode>,
+    #[serde(default)]
+    edges: Vec<JsEdge>,
 }
 
 #[derive(Deserialize)]
 struct JsConfig {
     tileset: JsTileset,
     rack_size: usize,
-    board_layout: JsRectBoardLayout,
+    board_layout: JsBoardLayout,
     ruleset_id: String,
     dictionary_id: String,
     rng_seed: u64,
@@ -74,7 +86,13 @@ pub fn new_game(config_json: &str, players: usize) -> Result<JsGame, JsValue> {
         rng_seed: cfg.rng_seed,
         tile_counts: cfg.tile_counts,
     };
-    let state = engine::GameState::new(&eng_cfg, players).map_err(to_js_err)?;
+    let mut state = engine::GameState::new(&eng_cfg, players).map_err(to_js_err)?;
+    if cfg.board_layout.r#type.as_deref() == Some("graph") || !cfg.board_layout.nodes.is_empty() {
+        let nodes: Vec<engine::Coord2D> = cfg.board_layout.nodes.iter().map(|n| engine::Coord2D { x: n.x, y: n.y }).collect();
+        let edges: Vec<(usize, usize, String)> = cfg.board_layout.edges.iter().map(|e| (e.a, e.b, e.dir.clone().unwrap_or_else(|| "L".into()))).collect();
+        let ov = engine::GraphOverlay { nodes, edges };
+        state.apply_graph_overlay(ov).map_err(to_js_err)?;
+    }
     let rules = engine::CrosswordRules {
         free_word_mode: cfg.free_word_mode,
         ..Default::default()
@@ -129,19 +147,13 @@ pub fn get_board(game: &JsGame) -> String {
     for y in 0..h {
         let mut row = Vec::new();
         for x in 0..w {
-            let id = game
-                .state
-                .board
-                .geom
-                .to_cell_id(engine::Coord2D { x, y })
-                .unwrap();
-            let cell = &game.state.board.cells[id.0 as usize];
-            let s = if let Some(t) = cell.stack.last() {
-                t.kind_id.clone()
+            if let Some(id) = game.state.board.geom.to_cell_id(engine::Coord2D { x, y }) {
+                let cell = &game.state.board.cells[id.0 as usize];
+                let s = if let Some(t) = cell.stack.last() { t.kind_id.clone() } else { String::from("") };
+                row.push(s);
             } else {
-                String::from("")
-            };
-            row.push(s);
+                row.push(String::from(""));
+            }
         }
         rows.push(row);
     }

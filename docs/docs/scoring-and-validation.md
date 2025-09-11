@@ -21,3 +21,5 @@ rules.commit(&mut state, v1, &sc1)?;
 ```
 
 See example: `cargo run --example scoring_demo -p tiletangle-engine`.
+
+Animated breakdown: See the companion page Animated Move Breakdown for a step-by-step visual of letter sums and word multipliers.

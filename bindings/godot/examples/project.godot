@@ -1,0 +1,7 @@
+; Minimal Godot project config (edit as needed)
+config_version=5
+
+[application]
+config/name="TileTangle Example"
+run/main_scene="res://scenes/Main.tscn"
+

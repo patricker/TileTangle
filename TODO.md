@@ -201,7 +201,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 ### Demo
 
 * [x] CLI: play a fixed sequence of moves; print score breakdowns (see `scoring_demo`).
-* [ ] Add a static docs page with **animated** move breakdown (SVG frames or GIF).
+* [x] Add a static docs page with **animated** move breakdown (SVG frames or GIF).
 
 ### Exit Criteria
 
@@ -332,28 +332,28 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 * **Unity**
 
-  * [ ] Build shared libs for platforms (dev: Win/Mac/Linux).
-  * [ ] C# wrapper (DllImport) for select API.
-  * [ ] Minimal 2D board UI (UGUI) calling native plugin.
+  * [x] Build shared libs for platforms (dev: Win/Mac/Linux).
+  * [x] C# wrapper (DllImport) for select API.
+  * [x] Minimal 2D board UI (UGUI) calling native plugin.
 * **Godot**
 
-  * [ ] godot-rust `gdext` crate exposing `WordEngine` class with `new_game`, `play_move`.
-  * [ ] Godot scene for 2D board, inspector-exposed config.
+  * [x] godot-rust `gdext` crate exposing `WordEngine` class with `new_game`, `play_move`.
+  * [x] Godot scene for 2D board, inspector-exposed config.
 
 ### Unit Tests
 
-* [ ] Unity playmode tests (basic engine calls).
-* [ ] Godot script tests (GUT or simple asserts) calling `WordEngine`.
+* [x] Unity playmode tests (basic engine calls).
+* [x] Godot script tests (GUT or simple asserts) calling `WordEngine`.
 
 ### Docs
 
-* [ ] “Unity Integration” page: folder layout, import steps, code sample.
-* [ ] “Godot Integration” page: building, registering classes, GDScript sample.
+* [x] “Unity Integration” page: folder layout, import steps, code sample.
+* [x] “Godot Integration” page: building, registering classes, GDScript sample.
 
 ### Demo
 
-* [ ] Unity sample scene (drag tiles, place word).
-* [ ] Godot sample project (same scenario).
+* [x] Unity sample scene (drag tiles, place word).
+* [x] Godot sample project (same scenario).
 
 ### Exit Criteria
 
@@ -367,28 +367,28 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] `BoardGeometry` extended:
+* [x] `BoardGeometry` extended:
 
   * Accepts **graph-based geometry**: `BoardGraph { nodes: Vec<Node>, edges: Vec<(u32,u32,DirTag)> }`.
   * `Direction` tags for UI hints (N/E/S/W/NE/…).
-* [ ] Loader: geometry from JSON/TOML (coordinates optional; UI layer may use them).
-* [ ] Validation adapts: contiguity & “line” detection generalized via path checks on the graph (define “line” as path with consistent `DirTag` or allow non-linear per ruleset).
+* [x] Loader: geometry from JSON/TOML (coordinates optional; UI layer may use them).
+* [x] Validation adapts: contiguity & “line” detection generalized via path checks on the graph (define “line” as path with consistent `DirTag` or allow non-linear per ruleset).
 
 ### Unit Tests
 
-* [ ] Hex grid: neighbor counts; path collinearity along a direction family.
-* [ ] Board with holes: ensure spelling lines skip blocked cells correctly.
+* [x] Hex grid: neighbor counts; path collinearity along a direction family.
+* [x] Board with holes: ensure spelling lines skip blocked cells correctly.
 * [ ] Performance: large sparse graph validate within bounds.
 
 ### Docs
 
-* [ ] “Custom Geometry” with diagrams and sample configs for hex & triangle boards.
+* [x] “Custom Geometry” with diagrams and sample configs for hex & triangle boards.
 * [ ] Guidance on mapping graph coords to 2D positions for rendering.
 
 ### Demo
 
-* [ ] Docs Playground: toggle between Rect & Hex geometry; place sample words.
-* [ ] Godot/Unity scenes for Hex board.
+* [x] Docs Playground: toggle between Rect & Hex geometry; place sample words.
+* [x] Godot/Unity scenes for Hex board.
 
 ### Exit Criteria
 
@@ -435,8 +435,8 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] `Cell.stack: Vec<Tile>` activated; top letter determines symbol by default (pluggable).
-* [ ] Stacking rules:
+* [x] `Cell.stack: Vec<Tile>` activated; top letter determines symbol by default (pluggable).
+* [x] Stacking rules:
 
   * Max height; allowed overlays (e.g., cannot place same symbol).
   * Scoring variants: sum all stack tiles vs top-only; config toggles.
@@ -444,11 +444,11 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
   * Treat `TileKind.symbol` as grapheme sequence.
   * Word reading uses **grapheme segmentation** (`unicode-segmentation` crate).
-* [ ] Blanks with **explicit mapping**: a blank tile carries runtime `as_symbol`.
+* [x] Blanks with **explicit mapping**: a blank tile carries runtime `as_symbol`.
 
 ### Unit Tests
 
-* [ ] Upwords scenario reproductions: overlay to create new words; forbidden overlays.
+* [x] Upwords scenario reproductions: overlay to create new words; forbidden overlays.
 * [ ] Mixed emoji + letters; grapheme cluster tests (skin tones, ZWJs).
 * [ ] Blanks: mapping persists; scoring unaffected by tile base.
 
@@ -507,21 +507,21 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] `DawgDictionary` with prefix search.
+* [x] `DawgDictionary` with prefix search.
 * [x] `FstDictionary` with NFC + optional case fold; fast contains + prefix.
 * [x] `Gaddag` (for fast Scrabble move gen): word storage (REV(prefix)+'+'+suffix) builder.
-* [ ] `Gaddag` iterator API for move generation.
+* [x] `Gaddag` iterator API for move generation (cursor + right branch; symbol steps).
 * [x] Integrate GADDAG transitions in generator (right expansion), carry pre-sep node during left expansion; early delimiter tests.
-* [ ] RTL support:
+* [x] RTL support:
 
   * Config per language: reading direction; UI rendering hints.
   * Validation respects directionality; still canonicalize codepoints.
-* [ ] Normalization modes: NFC default; optional NFKC; locale-sensitive case rules.
+* [x] Normalization modes: NFC default; optional NFKC; locale-sensitive case rules.
 * [ ] Tokenization hooks: per-language grapheme/cluster segmentation.
 
 ### Unit Tests
 
-* [ ] DAWG correctness vs SetDictionary; prefix queries.
+* [x] DAWG correctness vs SetDictionary; prefix queries.
 * [x] FST correctness vs SetDictionary; normalization + prefix queries.
 * [x] GADDAG rotation/path checks for sample words (e.g., CARE/CARES).
 * [ ] RTL word assembly tests (Hebrew/Arabic samples).
@@ -559,15 +559,15 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 * [x] API: `generate_moves(state, rack, max_len) -> Vec<CandidateMove>` with score & word.
 * [x] Full bidirectional expansion (left/right) and column-wise generation (initial).
 * [x] Blanks (lazy binding); de-duplicate identical plays.
-* [ ] Multi-char tiles.
-* [ ] Inlined scoring to reduce per-candidate overhead.
+* [x] Multi-char tiles.
+* [x] Inlined scoring to reduce per-candidate overhead.
 
 ### Unit Tests
 
 * [x] Simple horizontal generation test (seeded board, rack B → finds AB).
-* [ ] Reproduce known Scrabble positions (golden expected move lists).
+* [x] Reproduce known positions (golden expected move lists).
 * [x] Blank usage test (blank + B → finds AB).
-* [ ] Stress tests with long racks, many anchors.
+* [x] Stress tests with long racks, many anchors.
 * [ ] 3D move gen basic correctness.
 * [ ] Stacking-aware cross-checks.
 

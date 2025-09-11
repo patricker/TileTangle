@@ -6,6 +6,7 @@ use std::any::Any;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::collections::{BTreeSet, HashMap};
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use thiserror::Error;
 use unicode_normalization::UnicodeNormalization;
@@ -51,6 +52,20 @@ pub type Symbol = String; // NFC-normalized grapheme string
 
 pub fn nfc<S: AsRef<str>>(s: S) -> Symbol {
     s.as_ref().nfc().collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NormalizationMode { NFC, NFKC }
+
+impl Default for NormalizationMode {
+    fn default() -> Self { NormalizationMode::NFC }
+}
+
+fn normalize_with_mode<S: AsRef<str>>(s: S, mode: NormalizationMode) -> String {
+    match mode {
+        NormalizationMode::NFC => s.as_ref().nfc().collect(),
+        NormalizationMode::NFKC => s.as_ref().nfkc().collect(),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +121,9 @@ pub trait BoardGeometry {
 pub struct RectGridGeometry {
     pub width: u32,
     pub height: u32,
+    // Optional graph overlay: restrict present cells and override adjacency with direction tags
+    adj: Option<HashMap<CellId, SmallVec<[(CellId, String); 8]>>>,
+    present: Option<HashSet<CellId>>,
 }
 
 impl RectGridGeometry {
@@ -120,29 +138,112 @@ impl RectGridGeometry {
             None
         }
     }
-}
 
-impl BoardGeometry for RectGridGeometry {
-    fn neighbors(&self, id: CellId) -> SmallVec<[CellId; 4]> {
-        let mut out: SmallVec<[CellId; 4]> = SmallVec::new();
-        if let Some(c) = self.from_cell_id(id) {
-            let dirs = [
-                Coord2D { x: c.x - 1, y: c.y },
-                Coord2D { x: c.x + 1, y: c.y },
-                Coord2D { x: c.x, y: c.y - 1 },
-                Coord2D { x: c.x, y: c.y + 1 },
-            ];
-            for d in dirs {
-                if let Some(n) = self.to_cell_id(d) {
-                    out.push(n);
+    pub fn has_graph(&self) -> bool { self.adj.is_some() }
+
+    pub fn apply_graph_overlay(&mut self, overlay: GraphOverlay) -> Result<(), EngineError> {
+        let mut present = HashSet::new();
+        let mut id_for: Vec<CellId> = Vec::with_capacity(overlay.nodes.len());
+        for c in overlay.nodes.iter() {
+            if let Some(id) = self.index(*c).map(CellId) {
+                present.insert(id);
+                id_for.push(id);
+            } else {
+                return Err(EngineError::Config("overlay node outside bounds"));
+            }
+        }
+        let mut adj: HashMap<CellId, SmallVec<[(CellId, String); 8]>> = HashMap::new();
+        for (ai, bi, dir) in overlay.edges.into_iter() {
+            if ai >= id_for.len() || bi >= id_for.len() { return Err(EngineError::Config("edge index out of range")); }
+            let a = id_for[ai];
+            let b = id_for[bi];
+            if !present.contains(&a) || !present.contains(&b) { return Err(EngineError::Config("edge references missing node")); }
+            adj.entry(a).or_default().push((b, dir.clone()));
+            adj.entry(b).or_default().push((a, dir));
+        }
+        self.present = Some(present);
+        self.adj = Some(adj);
+        Ok(())
+    }
+
+    pub fn neighbors_with_tags<'a>(&'a self, id: CellId) -> SmallVec<[(CellId, &'a str); 8]> {
+        let mut out: SmallVec<[(CellId, &str); 8]> = SmallVec::new();
+        if let Some(adj) = &self.adj {
+            if let Some(v) = adj.get(&id) {
+                for (n, tag) in v {
+                    out.push((*n, tag.as_str()));
+                }
+            }
+        } else {
+            // default grid with implicit direction tags
+            if let Some(c) = self.from_cell_id(id) {
+                let dirs = [
+                    (Coord2D { x: c.x - 1, y: c.y }, "W"),
+                    (Coord2D { x: c.x + 1, y: c.y }, "E"),
+                    (Coord2D { x: c.x, y: c.y - 1 }, "N"),
+                    (Coord2D { x: c.x, y: c.y + 1 }, "S"),
+                ];
+                for (d, tag) in dirs {
+                    if let Some(n) = self.to_cell_id(d) {
+                        out.push((n, tag));
+                    }
                 }
             }
         }
         out
     }
 
+    pub fn dir_tag_between(&self, a: CellId, b: CellId) -> Option<&str> {
+        if let Some(adj) = &self.adj {
+            if let Some(v) = adj.get(&a) {
+                for (n, tag) in v {
+                    if *n == b { return Some(tag.as_str()); }
+                }
+            }
+            None
+        } else {
+            let ac = self.from_cell_id(a)?;
+            let bc = self.from_cell_id(b)?;
+            if ac.x == bc.x {
+                if ac.y + 1 == bc.y { Some("S") } else if ac.y - 1 == bc.y { Some("N") } else { None }
+            } else if ac.y == bc.y {
+                if ac.x + 1 == bc.x { Some("E") } else if ac.x - 1 == bc.x { Some("W") } else { None }
+            } else { None }
+        }
+    }
+}
+
+impl BoardGeometry for RectGridGeometry {
+    fn neighbors(&self, id: CellId) -> SmallVec<[CellId; 4]> {
+        if let Some(adj) = &self.adj {
+            let mut out: SmallVec<[CellId; 4]> = SmallVec::new();
+            if let Some(v) = adj.get(&id) { for (n, _) in v { out.push(*n); } }
+            out
+        } else {
+            let mut out: SmallVec<[CellId; 4]> = SmallVec::new();
+            if let Some(c) = self.from_cell_id(id) {
+                let dirs = [
+                    Coord2D { x: c.x - 1, y: c.y },
+                    Coord2D { x: c.x + 1, y: c.y },
+                    Coord2D { x: c.x, y: c.y - 1 },
+                    Coord2D { x: c.x, y: c.y + 1 },
+                ];
+                for d in dirs {
+                    if let Some(n) = self.to_cell_id(d) {
+                        out.push(n);
+                    }
+                }
+            }
+            out
+        }
+    }
+
     fn to_cell_id(&self, c: Coord2D) -> Option<CellId> {
-        self.index(c).map(CellId)
+        let id = self.index(c).map(CellId)?;
+        if let Some(p) = &self.present {
+            if !p.contains(&id) { return None; }
+        }
+        Some(id)
     }
 
     fn from_cell_id(&self, id: CellId) -> Option<Coord2D> {
@@ -161,6 +262,14 @@ impl BoardGeometry for RectGridGeometry {
     fn len(&self) -> usize {
         (self.width * self.height) as usize
     }
+}
+
+// -------- Graph Overlay --------
+
+#[derive(Debug, Clone)]
+pub struct GraphOverlay {
+    pub nodes: Vec<Coord2D>,
+    pub edges: Vec<(usize, usize, String)>,
 }
 
 // -------- Board & Bonuses --------
@@ -361,6 +470,8 @@ impl GameState {
         let geom = RectGridGeometry {
             width: config.board_layout.width,
             height: config.board_layout.height,
+            adj: None,
+            present: None,
         };
         let board = Board::new(geom);
 
@@ -411,6 +522,11 @@ impl GameState {
         }
         Ok(nb)
     }
+
+    /// Apply a graph overlay (custom adjacency and present cells) to the current rectangular geometry.
+    pub fn apply_graph_overlay(&mut self, overlay: GraphOverlay) -> Result<(), EngineError> {
+        self.board.geom.apply_graph_overlay(overlay)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -440,11 +556,24 @@ pub trait Rules {
     ) -> Result<(), EngineError>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadingDirection { LTR, RTL }
+impl Default for ReadingDirection { fn default() -> Self { ReadingDirection::LTR } }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StackScoring { TopOnly, SumStack }
+impl Default for StackScoring { fn default() -> Self { StackScoring::TopOnly } }
+
 #[derive(Debug, Clone)]
 pub struct CrosswordRules {
     pub free_word_mode: bool,
     pub bingo_bonus: i32,
     pub require_center_first_move: bool,
+    pub reading_dir: ReadingDirection,
+    pub stacking_enabled: bool,
+    pub stacking_max_height: usize,
+    pub forbid_same_symbol_overlay: bool,
+    pub stacking_scoring: StackScoring,
 }
 
 impl Default for CrosswordRules {
@@ -453,6 +582,11 @@ impl Default for CrosswordRules {
             free_word_mode: true,
             bingo_bonus: 50,
             require_center_first_move: true,
+            reading_dir: ReadingDirection::LTR,
+            stacking_enabled: false,
+            stacking_max_height: 7,
+            forbid_same_symbol_overlay: true,
+            stacking_scoring: StackScoring::TopOnly,
         }
     }
 }
@@ -506,6 +640,8 @@ impl CrosswordRules {
 
     fn adjacent_to_existing(board: &Board<RectGridGeometry>, ids: &[CellId]) -> bool {
         for id in ids {
+            // Stacking on an existing tile is inherently touching the board
+            if !board.cells[id.0 as usize].stack.is_empty() { return true; }
             for n in board.geom.neighbors(*id) {
                 if Self::cell_has_tile(board, n) {
                     return true;
@@ -539,7 +675,9 @@ impl CrosswordRules {
         start: Coord2D,
         dir: (i32, i32),
         placed: &std::collections::HashSet<CellId>,
-    ) -> (String, i32) {
+        reverse_horiz: bool,
+        stack_mode: StackScoring,
+    ) -> (String, i32, usize) {
         // move to beginning
         let mut c = start;
         loop {
@@ -555,10 +693,11 @@ impl CrosswordRules {
             }
             break;
         }
-        // build string and score
-        let mut word = String::new();
+        // build token list and score
+        let mut tokens: Vec<String> = Vec::new();
         let mut score: i32 = 0;
         let mut word_mul: i32 = 1;
+        let mut tiles_count: usize = 0;
         loop {
             if let Some(id) = board.geom.to_cell_id(c)
                 && Self::cell_has_tile(board, id)
@@ -566,15 +705,35 @@ impl CrosswordRules {
                 let cell = &board.cells[id.0 as usize];
                 let tile = cell.stack.last().unwrap();
                 let (ls, sym) = Self::tile_symbol_and_score(tileset, tile);
-                word.push_str(&sym);
-                let mut add = ls as i32;
+                tokens.push(sym);
+                let mut letter_mul = 1i32;
                 if placed.contains(&id)
                     && let Some(b) = board.bonuses.get(&id)
                 {
-                    add *= b.letter_mul as i32;
+                    letter_mul = b.letter_mul as i32;
                     word_mul *= b.word_mul as i32;
                 }
+                // compute contribution
+                let mut add = 0i32;
+                match stack_mode {
+                    StackScoring::TopOnly => {
+                        add = (ls as i32) * letter_mul;
+                    }
+                    StackScoring::SumStack => {
+                        // Sum underlying tiles (unmultiplied) + top tile with letter multiplier
+                        let mut sum_under = 0i32;
+                        if !board.cells[id.0 as usize].stack.is_empty() {
+                            // sum all scores except top
+                            for t in board.cells[id.0 as usize].stack.iter().take(board.cells[id.0 as usize].stack.len().saturating_sub(1)) {
+                                let (s_u, _) = Self::tile_symbol_and_score(tileset, t);
+                                sum_under += s_u as i32;
+                            }
+                        }
+                        add = sum_under + (ls as i32) * letter_mul;
+                    }
+                }
                 score += add;
+                tiles_count += 1;
                 c = Coord2D {
                     x: c.x + dir.0,
                     y: c.y + dir.1,
@@ -583,7 +742,53 @@ impl CrosswordRules {
             }
             break;
         }
-        (word, score * word_mul)
+        let word = if reverse_horiz { tokens.into_iter().rev().collect::<Vec<_>>().join("") } else { tokens.join("") };
+        (word, score * word_mul, tiles_count)
+    }
+
+    fn graph_adjacent_to_existing(board: &Board<RectGridGeometry>, ids: &HashSet<CellId>) -> bool {
+        for id in ids {
+            if !board.cells[id.0 as usize].stack.is_empty() { return true; }
+            for n in board.geom.neighbors(*id) {
+                if !ids.contains(&n) && Self::cell_has_tile(board, n) { return true; }
+            }
+        }
+        false
+    }
+
+    fn graph_find_main_dir_and_path(
+        board: &Board<RectGridGeometry>,
+        placed: &HashSet<CellId>,
+    ) -> Option<(String, Vec<CellId>)> {
+        // Single tile: choose arbitrary tag and path of length 1
+        if placed.len() == 1 {
+            let id = *placed.iter().next().unwrap();
+            let tag = board.geom.neighbors_with_tags(id).get(0).map(|(_,t)| t.to_string()).unwrap_or_else(|| "E".into());
+            return Some((tag, vec![id]));
+        }
+        // Collect candidate tags between placed neighbors
+        let mut tags: HashSet<String> = HashSet::new();
+        for &id in placed.iter() {
+            for (n, t) in board.geom.neighbors_with_tags(id) {
+                if placed.contains(&n) || CrosswordRules::cell_has_tile(board, n) { tags.insert(t.to_string()); }
+            }
+        }
+        // Try each tag
+        for tag in tags.into_iter() {
+            // endpoints among placed nodes using only this tag
+            let mut deg: HashMap<CellId, usize> = HashMap::new();
+            for &u in placed.iter() {
+                let mut d = 0usize;
+                for (v, t) in board.geom.neighbors_with_tags(u) { if t == tag && placed.contains(&v) { d += 1; } }
+                deg.insert(u, d);
+            }
+            let endpoints: Vec<CellId> = deg.iter().filter_map(|(k,d)| if *d <= 1 { Some(*k) } else { None }).collect();
+            if endpoints.is_empty() || endpoints.len() > 2 { continue; }
+            let start = endpoints[0];
+            let goal = if endpoints.len() == 2 { endpoints[1] } else { start };
+            if let Some(path) = bfs_path_on_dir(board, start, goal, &tag, placed) { return Some((tag, path)); }
+        }
+        None
     }
 }
 
@@ -592,10 +797,49 @@ impl Rules for CrosswordRules {
         if draft.placements.is_empty() {
             return Err(EngineError::Config("no tiles placed"));
         }
-        // no collisions: cannot place on occupied cells
-        for (cid, _) in &draft.placements {
-            if CrosswordRules::cell_has_tile(&state.board, *cid) {
-                return Err(EngineError::Collision(*cid));
+        if state.board.geom.has_graph() {
+            // Graph-based: collisions
+            for (cid, tile) in &draft.placements {
+                let occupied = Self::cell_has_tile(&state.board, *cid);
+                if occupied {
+                    if !self.stacking_enabled { return Err(EngineError::Collision(*cid)); }
+                    let cell = &state.board.cells[cid.0 as usize];
+                    if cell.stack.len() + 1 > self.stacking_max_height { return Err(EngineError::Config("stack too high")); }
+                    if self.forbid_same_symbol_overlay {
+                        if let Some(top) = cell.stack.last() {
+                            let (_, top_sym) = Self::tile_symbol_and_score(&state.tileset, top);
+                            let (_, new_sym) = Self::tile_symbol_and_score(&state.tileset, tile);
+                            if top_sym == new_sym { return Err(EngineError::Config("cannot overlay same symbol")); }
+                        }
+                    }
+                }
+            }
+            let ids_set: HashSet<CellId> = draft.placements.iter().map(|(id, _)| *id).collect();
+            // Anchor unless board empty
+            let any_on_board = state.board.cells.iter().any(|c| !c.stack.is_empty());
+            if any_on_board && !Self::graph_adjacent_to_existing(&state.board, &ids_set) {
+                return Err(EngineError::Config("must connect to existing tiles"));
+            }
+            // Line and contiguity along a single direction tag
+            if Self::graph_find_main_dir_and_path(&state.board, &ids_set).is_none() {
+                return Err(EngineError::Config("must be straight line"));
+            }
+            return Ok(ValidatedMove { placements: draft.placements.clone(), line_is_row: true });
+        }
+        // no collisions: cannot place on occupied cells (unless stacking is enabled)
+        for (cid, tile) in &draft.placements {
+            let occupied = CrosswordRules::cell_has_tile(&state.board, *cid);
+            if occupied {
+                if !self.stacking_enabled { return Err(EngineError::Collision(*cid)); }
+                let cell = &state.board.cells[cid.0 as usize];
+                if cell.stack.len() + 1 > self.stacking_max_height { return Err(EngineError::Config("stack too high")); }
+                if self.forbid_same_symbol_overlay {
+                    if let Some(top) = cell.stack.last() {
+                        let (_, top_sym) = Self::tile_symbol_and_score(&state.tileset, top);
+                        let (_, new_sym) = Self::tile_symbol_and_score(&state.tileset, tile);
+                        if top_sym == new_sym { return Err(EngineError::Config("cannot overlay same symbol")); }
+                    }
+                }
             }
         }
         // all in single row or column
@@ -637,6 +881,46 @@ impl Rules for CrosswordRules {
     }
 
     fn score(&self, state: &GameState, mv: &ValidatedMove) -> ScoreBreakdown {
+        if state.board.geom.has_graph() {
+            use std::collections::HashSet as Hs;
+            let placed_ids: Hs<CellId> = mv.placements.iter().map(|(id, _)| *id).collect();
+            // Overlay placements for scoring
+            let mut temp_board = state.board.clone();
+            for (cid, tile) in &mv.placements { temp_board.cells[cid.0 as usize].stack.push(tile.clone()); }
+            let mut main_word = String::new();
+            let mut main_score = 0;
+            let mut cross_words: Vec<(String, i32)> = Vec::new();
+            if let Some((tag, path)) = CrosswordRules::graph_find_main_dir_and_path(&state.board, &placed_ids) {
+                let (w, s) = score_word_on_path(&temp_board, &state.tileset, &path, &placed_ids, self.stacking_scoring);
+                main_word = w; main_score = s;
+                for (cid, _) in &mv.placements {
+                    // unique other dir tags at this node
+                    let mut seen: HashSet<String> = HashSet::new();
+                    for (_, t) in state.board.geom.neighbors_with_tags(*cid) {
+                        if t == tag { continue; }
+                        if !seen.insert(t.to_string()) { continue; }
+                        let line = collect_line_on_dir(&temp_board, *cid, t, &placed_ids);
+                        if line.len() > 1 {
+                            let (cw, cs) = score_word_on_path(&temp_board, &state.tileset, &line, &placed_ids, self.stacking_scoring);
+                            cross_words.push((cw, cs));
+                        }
+                    }
+                }
+            }
+            let mut total = main_score + cross_words.iter().map(|(_, s)| *s).sum::<i32>();
+            // dictionary checks if enabled
+            if !self.free_word_mode
+                && let Some(dict) = &state.dictionary
+            {
+                if !dict.contains(&main_word) {
+                    return ScoreBreakdown { total: -1, main_word, main_score: -1, cross_words: vec![], bingo: false };
+                }
+                for (w, _) in &cross_words {
+                    if !dict.contains(w) { return ScoreBreakdown { total: -1, main_word, main_score: -1, cross_words: vec![], bingo: false }; }
+                }
+            }
+            return ScoreBreakdown { total, main_word, main_score, cross_words, bingo: false };
+        }
         // Build set of placed cells
         let placed_ids: std::collections::HashSet<CellId> =
             mv.placements.iter().map(|(id, _)| *id).collect();
@@ -648,8 +932,9 @@ impl Rules for CrosswordRules {
         // main word direction
         let start_coord = temp_board.geom.from_cell_id(mv.placements[0].0).unwrap();
         let dir = if mv.line_is_row { (1, 0) } else { (0, 1) };
-        let (main_word, main_score) =
-            Self::form_word(&temp_board, &state.tileset, start_coord, dir, &placed_ids);
+        let reverse_main = self.reading_dir == ReadingDirection::RTL && dir.1 == 0;
+        let (main_word, main_score, _main_tiles) =
+            Self::form_word(&temp_board, &state.tileset, start_coord, dir, &placed_ids, reverse_main, self.stacking_scoring);
         // cross words
         let pdir = if mv.line_is_row { (0, 1) } else { (1, 0) };
         let mut cross_words = Vec::new();
@@ -657,8 +942,9 @@ impl Rules for CrosswordRules {
             let c = temp_board.geom.from_cell_id(*cid).unwrap();
             // Only if neighbors in perpendicular direction form a word length > 1
             // Build word centered at c in pdir
-            let (w, s) = Self::form_word(&temp_board, &state.tileset, c, pdir, &placed_ids);
-            if w.len() > 1 {
+            let reverse_cross = self.reading_dir == ReadingDirection::RTL && pdir.1 == 0;
+            let (w, s, t) = Self::form_word(&temp_board, &state.tileset, c, pdir, &placed_ids, reverse_cross, self.stacking_scoring);
+            if t > 1 {
                 cross_words.push((w, s));
             }
         }
@@ -773,6 +1059,139 @@ impl Rules for CrosswordRules {
     }
 }
 
+// ---- Graph helpers ----
+
+fn bfs_path_on_dir(
+    board: &Board<RectGridGeometry>,
+    start: CellId,
+    goal: CellId,
+    tag: &str,
+    placed: &HashSet<CellId>,
+) -> Option<Vec<CellId>> {
+    use std::collections::VecDeque;
+    let mut q = VecDeque::new();
+    let mut prev: HashMap<CellId, Option<CellId>> = HashMap::new();
+    let mut seen: HashSet<CellId> = HashSet::new();
+    q.push_back(start);
+    seen.insert(start);
+    prev.insert(start, None);
+    while let Some(u) = q.pop_front() {
+        if u == goal { break; }
+        for (v, t) in board.geom.neighbors_with_tags(u) {
+            if t != tag { continue; }
+            // allow traversal only through placed nodes or existing tiles
+            if !placed.contains(&v) && board.cells[v.0 as usize].stack.is_empty() { continue; }
+            if seen.insert(v) {
+                prev.insert(v, Some(u));
+                q.push_back(v);
+            }
+        }
+    }
+    if !prev.contains_key(&goal) { return None; }
+    // reconstruct path
+    let mut path = Vec::new();
+    let mut cur = goal;
+    path.push(cur);
+    while let Some(Some(p)) = prev.get(&cur) {
+        cur = *p;
+        path.push(cur);
+    }
+    path.reverse();
+    Some(path)
+}
+
+fn collect_line_on_dir(
+    board: &Board<RectGridGeometry>,
+    center: CellId,
+    tag: &str,
+    placed: &HashSet<CellId>,
+) -> Vec<CellId> {
+    // find one neighbor to go backwards
+    let neighs: Vec<CellId> = board
+        .geom
+        .neighbors_with_tags(center)
+        .into_iter()
+        .filter(|(_, t)| *t == tag)
+        .map(|(n, _)| n)
+        .collect();
+    let mut back = center;
+    // choose a backward direction arbitrarily among available
+    if let Some(nb) = neighs.get(0) {
+        let mut prev = center;
+        let mut cur = *nb;
+        // walk backwards as long as nodes are filled (placed or existing)
+        loop {
+            if !placed.contains(&cur) && board.cells[cur.0 as usize].stack.is_empty() { break; }
+            let nxt = board
+                .geom
+                .neighbors_with_tags(cur)
+                .into_iter()
+                .filter(|(_, t)| *t == tag)
+                .map(|(n, _)| n)
+                .find(|n| *n != prev);
+            back = cur;
+            if let Some(n2) = nxt { prev = cur; cur = n2; } else { break; }
+        }
+    }
+    // now walk forward from `back` accumulating cells
+    let mut out = Vec::new();
+    let mut prev = None;
+    let mut cur = back;
+    loop {
+        if !placed.contains(&cur) && board.cells[cur.0 as usize].stack.is_empty() { break; }
+        out.push(cur);
+        let nxt = board
+            .geom
+            .neighbors_with_tags(cur)
+            .into_iter()
+            .filter(|(_, t)| *t == tag)
+            .map(|(n, _)| n)
+            .find(|n| Some(*n) != prev);
+        if let Some(n2) = nxt { prev = Some(cur); cur = n2; } else { break; }
+    }
+    out
+}
+
+fn score_word_on_path(
+    board: &Board<RectGridGeometry>,
+    tileset: &Tileset,
+    path: &[CellId],
+    placed: &HashSet<CellId>,
+    stack_mode: StackScoring,
+) -> (String, i32) {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut score: i32 = 0;
+    let mut word_mul: i32 = 1;
+    for id in path {
+        let cell = &board.cells[id.0 as usize];
+        if let Some(tile) = cell.stack.last() {
+            let (ls, sym) = CrosswordRules::tile_symbol_and_score(tileset, tile);
+            tokens.push(sym);
+            let mut letter_mul = 1i32;
+            if placed.contains(id)
+                && let Some(b) = board.bonuses.get(id)
+            {
+                letter_mul = b.letter_mul as i32;
+                word_mul *= b.word_mul as i32;
+            }
+            let add = match stack_mode {
+                StackScoring::TopOnly => (ls as i32) * letter_mul,
+                StackScoring::SumStack => {
+                    let mut sum_under = 0i32;
+                    if !board.cells[id.0 as usize].stack.is_empty() {
+                        for t in board.cells[id.0 as usize].stack.iter().take(board.cells[id.0 as usize].stack.len().saturating_sub(1)) {
+                            let (s_u, _) = CrosswordRules::tile_symbol_and_score(tileset, t);
+                            sum_under += s_u as i32;
+                        }
+                    }
+                    sum_under + (ls as i32) * letter_mul
+                }
+            };
+            score += add;
+        }
+    }
+    (tokens.join(""), score * word_mul)
+}
 // -------- Move Generation (Phase 12 start) --------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -854,22 +1273,24 @@ pub fn generate_moves(
 
     // Precompute cross-check sets (only when dictionary enforced)
     use std::collections::{HashMap as Map, HashSet as Set};
-    fn gather_line(state: &GameState, start: Coord2D, step: (i32,i32)) -> String {
+    fn gather_line(state: &GameState, start: Coord2D, step: (i32,i32)) -> (String, usize) {
         let mut s = String::new();
+        let mut tiles = 0usize;
         let mut c = start;
         loop {
             if let Some(id) = state.board.geom.to_cell_id(c) {
                 let cell = &state.board.cells[id.0 as usize];
                 if let Some(t) = cell.stack.last() {
-                let (_, sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, t);
-                s.push_str(&sym);
+                    let (_, sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, t);
+                    s.push_str(&sym);
+                    tiles += 1;
                     c = Coord2D { x: c.x + step.0, y: c.y + step.1 };
                     continue;
                 }
             }
             break;
         }
-        s
+        (s, tiles)
     }
     fn cross_checks(state: &GameState, dir: (i32,i32)) -> Map<CellId, Set<String>> {
         let mut out: Map<CellId, Set<String>> = Map::new();
@@ -879,10 +1300,10 @@ pub fn generate_moves(
             let c = state.board.geom.from_cell_id(id).unwrap();
             let above = Coord2D { x: c.x - dir.0, y: c.y - dir.1 };
             let below = Coord2D { x: c.x + dir.0, y: c.y + dir.1 };
-            let top = gather_line(state, above, (-dir.0, -dir.1));
-            let bot = gather_line(state, below, (dir.0, dir.1));
-            let base_len = top.chars().count() + bot.chars().count();
-            if base_len == 0 { continue; }
+            let (top, top_tiles) = gather_line(state, above, (-dir.0, -dir.1));
+            let (bot, bot_tiles) = gather_line(state, below, (dir.0, dir.1));
+            let base_tiles = top_tiles + bot_tiles;
+            if base_tiles == 0 { continue; }
             let mut set: Set<String> = Set::new();
             // If a dictionary is attached, only include letters that produce a valid perpendicular word (length>1)
             if let Some(dict) = &state.dictionary {
@@ -890,7 +1311,8 @@ pub fn generate_moves(
                     if tk.is_blank { continue; }
                     let sym = &tk.symbol;
                     let w = format!("{}{}{}", top, sym, bot);
-                    if w.chars().count() > 1 && dict.contains(&w) {
+                    // Require at least 2 tiles in the perpendicular word
+                    if base_tiles + 1 > 1 && dict.contains(&w) {
                         set.insert(sym.clone());
                     }
                 }
@@ -922,6 +1344,7 @@ pub fn generate_moves(
         xchecks: &Map<CellId, Set<String>>,
         blank_kinds: &[String],
     ) {
+        
         if built.chars().count() >= max_len { return; }
         // if cell has fixed tile, append and continue
         if let Some(id) = state.board.geom.to_cell_id(pos) {
@@ -1078,14 +1501,12 @@ pub fn generate_moves(
             used.push((id, Tile { kind_id: kind_id.clone(), mark: None }));
 
             // Attempt to finalize this sequence as a play covering anchor
-            // Build draft and validate+score
+            // Build ValidatedMove directly (we already enforce line/contiguity/anchor here) and score
             if used.iter().any(|(cid, _)| *cid == anchor) || state.board.cells[anchor.0 as usize].stack.last().is_some() {
-                let draft = MoveDraft { placements: used.clone() };
-                if let Ok(v) = rules.validate(state, &draft) {
-                    let sc = rules.score(state, &v);
-                    if sc.total >= 0 { // valid dict words
-                        out.push(CandidateMove { placements: used.clone(), word: sc.main_word.clone(), score: sc.total });
-                    }
+                let v = ValidatedMove { placements: used.clone(), line_is_row: dir.1 == 0 };
+                let sc = rules.score(state, &v);
+                if sc.total >= 0 { // valid dict words
+                    out.push(CandidateMove { placements: used.clone(), word: sc.main_word.clone(), score: sc.total });
                 }
             }
 
@@ -1160,14 +1581,15 @@ pub fn generate_moves(
                         used.pop();
                         *rack.get_mut(&bid).unwrap() += 1;
                     }
-                }
             }
+        }
 
-            for (kind_id, cnt) in rack.clone() {
-                if cnt == 0 { continue; }
-                // cross-check perpendicular at left position
-                let Some((_tk, sym)) = get_symbol(&state.tileset, &kind_id) else { continue; };
-                let mut ov = Overlay::default();
+        for (kind_id, cnt) in rack.clone() {
+            if cnt == 0 { continue; }
+            // cross-check perpendicular at left position
+            let Some((_tk, sym)) = get_symbol(&state.tileset, &kind_id) else { continue; };
+            
+            let mut ov = Overlay::default();
                 for (cid, tile) in used.iter() { ov.0.insert(*cid, tile.clone()); }
                 ov.0.insert(left_id, Tile { kind_id: kind_id.clone(), mark: None });
                 let vword = perp_word(state, &ov, left_id, pdir);
@@ -1257,22 +1679,12 @@ pub fn generate_moves(
         let h_prefix = context_prefix(state, start, (1,0));
         // Compute initial GADDAG pre-sep node for left context
         let mut pre: Option<(&GaddagDictionary, usize)> = None;
-        if let Some(gd) = gaddag_pre_seed {
-            let mut node = gd.root();
-            let mut ok = true;
-            for ch in h_prefix.chars().rev() { if let Some(n2) = gd.step(node, ch) { node = n2; } else { ok = false; break; } }
-            if ok { pre = Some((gd, node)); }
-        }
+        if let Some(gd) = gaddag_pre_seed { if let Some(cur) = GaddagCursor::new(gd, &h_prefix) { pre = Some((gd, cur.pre_node())); } }
         dfs_left_then_right(state, rules, a, &mut rack_counts.clone(), h_prefix, start, &mut Vec::new(), &mut out, max_len, (1,0), (0,1), pre, &xchecks_vert, &blank_kinds);
         // vertical with up context
         let v_prefix = context_prefix(state, start, (0,1));
         let mut pre_v: Option<(&GaddagDictionary, usize)> = None;
-        if let Some(gd) = gaddag_pre_seed {
-            let mut node = gd.root();
-            let mut ok = true;
-            for ch in v_prefix.chars().rev() { if let Some(n2) = gd.step(node, ch) { node = n2; } else { ok = false; break; } }
-            if ok { pre_v = Some((gd, node)); }
-        }
+        if let Some(gd) = gaddag_pre_seed { if let Some(cur) = GaddagCursor::new(gd, &v_prefix) { pre_v = Some((gd, cur.pre_node())); } }
         dfs_left_then_right(state, rules, a, &mut rack_counts.clone(), v_prefix, start, &mut Vec::new(), &mut out, max_len, (0,1), (1,0), pre_v, &xchecks_horz, &blank_kinds);
     }
     // de-duplicate identical placement sets (same cells and assigned symbols)
@@ -1313,6 +1725,7 @@ pub trait Dictionary {
 pub struct SetDictionary {
     words: std::collections::HashSet<String>,
     case_fold: bool,
+    norm: NormalizationMode,
 }
 
 impl SetDictionary {
@@ -1330,7 +1743,7 @@ impl SetDictionary {
             if s.is_empty() || s.starts_with('#') {
                 continue;
             }
-            let mut w = nfc(s);
+            let mut w = normalize_with_mode(s, opts.norm);
             if opts.case_fold {
                 w = w.to_lowercase();
             }
@@ -1347,10 +1760,7 @@ impl SetDictionary {
             }
             set.insert(w);
         }
-        Ok(Self {
-            words: set,
-            case_fold: opts.case_fold,
-        })
+        Ok(Self { words: set, case_fold: opts.case_fold, norm: opts.norm })
     }
     pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
     where
@@ -1365,19 +1775,28 @@ impl SetDictionary {
             }
             set.insert(s);
         }
-        Self {
-            words: set,
-            case_fold,
+        Self { words: set, case_fold, norm: NormalizationMode::NFC }
+    }
+
+    pub fn from_words_opts<I, S>(iter: I, opts: DictionaryOptions) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut set = std::collections::HashSet::new();
+        for w in iter {
+            let mut s = normalize_with_mode(w.into(), opts.norm);
+            if opts.case_fold { s = s.to_lowercase(); }
+            set.insert(s);
         }
+        Self { words: set, case_fold: opts.case_fold, norm: opts.norm }
     }
 }
 
 impl Dictionary for SetDictionary {
     fn contains(&self, word: &str) -> bool {
-        let mut s = nfc(word);
-        if self.case_fold {
-            s = s.to_lowercase();
-        }
+        let mut s = normalize_with_mode(word, self.norm);
+        if self.case_fold { s = s.to_lowercase(); }
         self.words.contains(&s)
     }
     fn as_any(&self) -> &dyn Any { self }
@@ -1387,6 +1806,7 @@ impl Dictionary for SetDictionary {
 pub struct FstDictionary {
     set: fst::Set<Vec<u8>>,
     case_fold: bool,
+    norm: NormalizationMode,
 }
 
 impl FstDictionary {
@@ -1408,7 +1828,7 @@ impl FstDictionary {
         v.sort();
         v.dedup();
         let set = fst::Set::from_iter(v.iter()).expect("build fst set");
-        Self { set, case_fold }
+        Self { set, case_fold, norm: NormalizationMode::NFC }
     }
 
     pub fn from_file<P: AsRef<std::path::Path>>(
@@ -1425,7 +1845,7 @@ impl FstDictionary {
             if s.is_empty() || s.starts_with('#') {
                 continue;
             }
-            let mut w = nfc(s);
+            let mut w = normalize_with_mode(s, opts.norm);
             if opts.case_fold {
                 w = w.to_lowercase();
             }
@@ -1445,31 +1865,147 @@ impl FstDictionary {
         v.sort();
         v.dedup();
         let set = fst::Set::from_iter(v.iter()).expect("build fst set");
-        Ok(Self { set, case_fold: opts.case_fold })
+        Ok(Self { set, case_fold: opts.case_fold, norm: opts.norm })
     }
     pub fn from_bytes<D: AsRef<[u8]>>(bytes: D, case_fold: bool) -> Result<Self, fst::Error> {
         let set = fst::Set::new(bytes.as_ref().to_vec())?;
-        Ok(Self { set, case_fold })
+        Ok(Self { set, case_fold, norm: NormalizationMode::NFC })
+    }
+
+    pub fn from_words_opts<I, S>(iter: I, opts: DictionaryOptions) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut v: Vec<String> = iter
+            .into_iter()
+            .map(|w| {
+                let mut s = normalize_with_mode(w.into(), opts.norm);
+                if opts.case_fold { s = s.to_lowercase(); }
+                s
+            })
+            .collect();
+        v.sort();
+        v.dedup();
+        let set = fst::Set::from_iter(v.iter()).expect("build fst set");
+        Self { set, case_fold: opts.case_fold, norm: opts.norm }
     }
 }
 
 impl Dictionary for FstDictionary {
     fn contains(&self, word: &str) -> bool {
-        let mut s = nfc(word);
-        if self.case_fold {
-            s = s.to_lowercase();
-        }
+        let mut s = normalize_with_mode(word, self.norm);
+        if self.case_fold { s = s.to_lowercase(); }
         self.set.contains(&s)
     }
     fn has_prefix(&self, prefix: &str) -> bool {
         use fst::{automaton::Str, IntoStreamer};
-        let mut p = nfc(prefix);
-        if self.case_fold {
-            p = p.to_lowercase();
-        }
+        let mut p = normalize_with_mode(prefix, self.norm);
+        if self.case_fold { p = p.to_lowercase(); }
         let aut = Str::new(&p).starts_with();
         let mut stream = self.set.search(aut).into_stream();
         stream.next().is_some()
+    }
+    fn as_any(&self) -> &dyn Any { self }
+}
+
+// Simple DAWG/Trie implementation with prefix search (Phase 11)
+#[derive(Debug, Clone, Default)]
+pub struct DawgDictionary {
+    nodes: Vec<DawgNode>,
+    case_fold: bool,
+    norm: NormalizationMode,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DawgNode {
+    edges: std::collections::HashMap<char, usize>,
+    terminal: bool,
+}
+
+impl DawgDictionary {
+    pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut v: Vec<String> = iter
+            .into_iter()
+            .map(|w| {
+                let mut s = nfc(w.into());
+                if case_fold { s = s.to_lowercase(); }
+                s
+            })
+            .collect();
+        v.sort();
+        v.dedup();
+        let mut nodes = vec![DawgNode::default()];
+        for w in v {
+            let mut node = 0usize;
+            for ch in w.chars() {
+                let next = if let Some(&id) = nodes[node].edges.get(&ch) {
+                    id
+                } else {
+                    let id = nodes.len();
+                    nodes.push(DawgNode::default());
+                    nodes[node].edges.insert(ch, id);
+                    id
+                };
+                node = next;
+            }
+            nodes[node].terminal = true;
+        }
+        Self { nodes, case_fold, norm: NormalizationMode::NFC }
+    }
+
+    pub fn from_file<P: AsRef<std::path::Path>>(
+        path: P,
+        opts: DictionaryOptions,
+    ) -> std::io::Result<Self> {
+        use std::io::{BufRead, BufReader};
+        let f = std::fs::File::open(path)?;
+        let reader = BufReader::new(f);
+        let mut v: Vec<String> = Vec::new();
+        for line in reader.lines() {
+            let s = line?;
+            let s = s.trim();
+            if s.is_empty() || s.starts_with('#') { continue; }
+            let mut w = normalize_with_mode(s, opts.norm);
+            if opts.case_fold { w = w.to_lowercase(); }
+            let len = w.chars().count();
+            if let Some(min) = opts.min_len
+                && len < min { continue; }
+            if let Some(max) = opts.max_len
+                && len > max { continue; }
+            v.push(w);
+        }
+        Ok(Self::from_words(v, opts.case_fold))
+    }
+}
+
+impl Dictionary for DawgDictionary {
+    fn contains(&self, word: &str) -> bool {
+        let mut s = normalize_with_mode(word, self.norm);
+        if self.case_fold { s = s.to_lowercase(); }
+        let mut node = 0usize;
+        for ch in s.chars() {
+            if let Some(&nxt) = self.nodes[node].edges.get(&ch) {
+                node = nxt;
+            } else {
+                return false;
+            }
+        }
+        self.nodes.get(node).map(|n| n.terminal).unwrap_or(false)
+    }
+    fn has_prefix(&self, prefix: &str) -> bool {
+        let mut p = normalize_with_mode(prefix, self.norm);
+        if self.case_fold { p = p.to_lowercase(); }
+        let mut node = 0usize;
+        for ch in p.chars() {
+            if let Some(&nxt) = self.nodes[node].edges.get(&ch) { node = nxt; }
+            else { return false; }
+        }
+        true
     }
     fn as_any(&self) -> &dyn Any { self }
 }
@@ -1634,6 +2170,42 @@ impl GaddagDictionary {
     }
 }
 
+pub struct GaddagCursor<'a> {
+    dict: &'a GaddagDictionary,
+    pre: usize,
+}
+
+pub struct GaddagRight<'a> {
+    dict: &'a GaddagDictionary,
+    node: usize,
+}
+
+impl<'a> GaddagCursor<'a> {
+    pub fn new(dict: &'a GaddagDictionary, left_context: &str) -> Option<Self> {
+        let mut node = dict.root();
+        for ch in left_context.chars().rev() { node = dict.step(node, ch)?; }
+        Some(Self { dict, pre: node })
+    }
+    pub fn step_left(&self, sym: &str) -> Option<Self> {
+        let n = self.dict.step_symbol(self.pre, sym)?;
+        Some(Self { dict: self.dict, pre: n })
+    }
+    pub fn branch_right(&self) -> Option<GaddagRight<'a>> {
+        let n = self.dict.step(self.pre, self.dict.sep())?;
+        Some(GaddagRight { dict: self.dict, node: n })
+    }
+    pub fn pre_node(&self) -> usize { self.pre }
+}
+
+impl<'a> GaddagRight<'a> {
+    pub fn step(&self, sym: &str) -> Option<Self> {
+        let n = self.dict.step_symbol(self.node, sym)?;
+        Some(Self { dict: self.dict, node: n })
+    }
+    pub fn is_terminal(&self) -> bool { self.dict.is_terminal(self.node) }
+    pub fn node(&self) -> usize { self.node }
+}
+
 impl Dictionary for GaddagDictionary {
     fn contains(&self, word: &str) -> bool {
         self.forward.contains(word)
@@ -1644,11 +2216,18 @@ impl Dictionary for GaddagDictionary {
     fn as_any(&self) -> &dyn Any { self }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct DictionaryOptions {
     pub case_fold: bool,
     pub min_len: Option<usize>,
     pub max_len: Option<usize>,
+    pub norm: NormalizationMode,
+}
+
+impl Default for DictionaryOptions {
+    fn default() -> Self {
+        Self { case_fold: false, min_len: None, max_len: None, norm: NormalizationMode::NFC }
+    }
 }
 
 // -------- Tests --------
@@ -1659,10 +2238,7 @@ mod tests {
     use unicode_normalization::UnicodeNormalization;
 
     fn rect(w: u32, h: u32) -> RectGridGeometry {
-        RectGridGeometry {
-            width: w,
-            height: h,
-        }
+        RectGridGeometry { width: w, height: h, adj: None, present: None }
     }
 
     #[test]
@@ -2124,6 +2700,7 @@ mod tests {
                 case_fold: true,
                 min_len: Some(2),
                 max_len: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -2198,6 +2775,39 @@ mod tests {
     }
 
     #[test]
+    fn dawg_dictionary_contains_and_prefix() {
+        let dict = DawgDictionary::from_words(vec!["AB".to_string(), "ABC".to_string(), "BEE".to_string()], true);
+        assert!(dict.contains("ab"));
+        assert!(dict.has_prefix("ab"));
+        assert!(dict.contains("abc"));
+        assert!(!dict.contains("abd"));
+        assert!(!dict.has_prefix("zz"));
+    }
+
+    #[test]
+    fn dawg_normalization_and_casefold() {
+        let composed = "Café".to_string();
+        let decomposed = "Cafe\u{301}".nfc().collect::<String>();
+        let dict_cf = DawgDictionary::from_words(vec![decomposed.clone()], true);
+        assert!(dict_cf.contains(&composed));
+        assert!(dict_cf.has_prefix("caf"));
+        let dict_no = DawgDictionary::from_words(vec!["café".to_string()], false);
+        assert!(!dict_no.contains("CAFÉ"));
+    }
+
+    #[test]
+    fn nfkc_contains_ligature_variant() {
+        // Build dict with NFC words; use NFKC mode so ligatures map to base letters
+        let opts = DictionaryOptions { case_fold: false, min_len: None, max_len: None, norm: NormalizationMode::NFKC };
+        let dict = FstDictionary::from_words_opts(vec!["coffee".to_string()], opts);
+        let ligature = "coﬀee"; // contains U+FB00 LIGATURE FF
+        assert!(dict.contains(ligature));
+        // Default NFC dictionary should not match the ligature
+        let dict_nfc = FstDictionary::from_words(vec!["coffee".to_string()], false);
+        assert!(!dict_nfc.contains(ligature));
+    }
+
+    #[test]
     fn rules_with_fst_dictionary() {
         use std::collections::HashMap;
         let tileset = Tileset {
@@ -2236,6 +2846,154 @@ mod tests {
         let v2 = rules.validate(&st, &mv2).unwrap();
         let sc2 = rules.score(&st, &v2);
         assert!(sc2.total >= 0);
+    }
+
+    #[test]
+    fn emoji_grapheme_word_scoring() {
+        use std::collections::HashMap;
+        let emoji = "👩‍🚀"; // woman astronaut (ZWJ sequence)
+        let tileset = Tileset {
+            tile_kinds: vec![
+                TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
+                TileKind { id: "EM".into(), symbol: emoji.into(), score: 5, is_blank: false, aliases: vec![] },
+            ],
+        };
+        let mut counts = HashMap::new(); counts.insert("A".to_string(), 10); counts.insert("EM".to_string(), 10);
+        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 5, height: 5 }, ruleset_id: "cross".into(), dictionary_id: "en".into(), rng_seed: 11, tile_counts: counts };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        // Dictionary contains A + emoji
+        let word = format!("A{}", emoji);
+        st.dictionary = Some(Box::new(FstDictionary::from_words(vec![word.clone()], false)));
+        let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
+        let c = CrosswordRules::center_cell(&st.board.geom);
+        let cc = st.board.geom.from_cell_id(c).unwrap();
+        let right = st.board.geom.to_cell_id(Coord2D { x: cc.x + 1, y: cc.y }).unwrap();
+        let mv = MoveDraft { placements: vec![
+            (c, Tile { kind_id: "A".into(), mark: None }),
+            (right, Tile { kind_id: "EM".into(), mark: None }),
+        ]};
+        let v = rules.validate(&st, &mv).unwrap();
+        let sc = rules.score(&st, &v);
+        assert_eq!(sc.main_word, word);
+        assert_eq!(sc.total, 1 + 5);
+    }
+
+    #[test]
+    fn blank_mapping_persists_and_scoring_unaffected() {
+        use std::collections::HashMap;
+        // Tiles: BL(blank,0), B(3)
+        let tileset = Tileset { tile_kinds: vec![
+            TileKind { id: "BL".into(), symbol: "_".into(), score: 0, is_blank: true, aliases: vec![] },
+            TileKind { id: "B".into(), symbol: "B".into(), score: 3, is_blank: false, aliases: vec![] },
+        ]};
+        let mut counts = HashMap::new(); counts.insert("BL".to_string(), 10); counts.insert("B".to_string(), 10);
+        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 5, height: 5 }, ruleset_id: "cross".into(), dictionary_id: "en".into(), rng_seed: 12, tile_counts: counts };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        // Add a 3L letter bonus on center; blank should remain 0 even with 3L
+        let c = CrosswordRules::center_cell(&st.board.geom);
+        st.board.bonuses.insert(c, Bonus { letter_mul: 3, word_mul: 1, tags: BTreeSet::new() });
+        // Place BL mapped to 'A' only
+        let rules_free = CrosswordRules { free_word_mode: true, ..Default::default() };
+        let mv1 = MoveDraft { placements: vec![(c, Tile { kind_id: "BL".into(), mark: Some("A".into()) })] };
+        let v1 = rules_free.validate(&st, &mv1).unwrap();
+        let sc1 = rules_free.score(&st, &v1);
+        assert_eq!(sc1.total, 0);
+        rules_free.commit(&mut st, v1, &sc1).unwrap();
+        // Persisted mapping
+        let top = st.board.cells[c.0 as usize].stack.last().unwrap();
+        assert_eq!(top.kind_id, "BL");
+        assert_eq!(top.mark.as_deref(), Some("A"));
+        // Next move: place B to the right to form "AB"; score should be 3
+        st.dictionary = Some(Box::new(FstDictionary::from_words(vec!["AB".to_string()], true)));
+        let cc = st.board.geom.from_cell_id(c).unwrap();
+        let right = st.board.geom.to_cell_id(Coord2D { x: cc.x + 1, y: cc.y }).unwrap();
+        let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
+        let mv2 = MoveDraft { placements: vec![(right, Tile { kind_id: "B".into(), mark: None })] };
+        let v2 = rules.validate(&st, &mv2).unwrap();
+        let sc2 = rules.score(&st, &v2);
+        assert_eq!(sc2.main_word, "AB");
+        assert_eq!(sc2.total, 3);
+    }
+
+    #[test]
+    fn stacking_allows_overlay_and_forbids_same_symbol() {
+        use std::collections::HashMap;
+        let tileset = Tileset {
+            tile_kinds: vec![
+                TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
+                TileKind { id: "B".into(), symbol: "B".into(), score: 3, is_blank: false, aliases: vec![] },
+            ],
+        };
+        let mut counts = HashMap::new(); counts.insert("A".to_string(), 10); counts.insert("B".to_string(), 10);
+        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 5, height: 5 }, ruleset_id: "cross".into(), dictionary_id: "en".into(), rng_seed: 1, tile_counts: counts };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        let mut rules = CrosswordRules { free_word_mode: true, stacking_enabled: true, stacking_max_height: 2, ..Default::default() };
+        // Place A at center
+        let c = CrosswordRules::center_cell(&st.board.geom);
+        let mv1 = MoveDraft { placements: vec![(c, Tile { kind_id: "A".into(), mark: None })] };
+        let v1 = rules.validate(&st, &mv1).unwrap(); let sc1 = rules.score(&st, &v1); rules.commit(&mut st, v1, &sc1).unwrap();
+        // Overlay B on A: allowed
+        let mv2 = MoveDraft { placements: vec![(c, Tile { kind_id: "B".into(), mark: None })] };
+        let _ = rules.validate(&st, &mv2).unwrap();
+        // Overlay A on A: forbidden when forbid_same_symbol_overlay=true
+        let mv3 = MoveDraft { placements: vec![(c, Tile { kind_id: "A".into(), mark: None })] };
+        assert!(rules.validate(&st, &mv3).is_err());
+    }
+
+    #[test]
+    fn stacking_sum_stack_scoring() {
+        use std::collections::HashMap;
+        let tileset = Tileset { tile_kinds: vec![
+            TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
+            TileKind { id: "B".into(), symbol: "B".into(), score: 3, is_blank: false, aliases: vec![] },
+        ]};
+        let mut counts = HashMap::new(); counts.insert("A".to_string(), 10); counts.insert("B".to_string(), 10);
+        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 5, height: 5 }, ruleset_id: "cross".into(), dictionary_id: "en".into(), rng_seed: 2, tile_counts: counts };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        let mut rules = CrosswordRules { free_word_mode: true, stacking_enabled: true, stacking_max_height: 3, stacking_scoring: StackScoring::SumStack, ..Default::default() };
+        // Place A at center
+        let c = CrosswordRules::center_cell(&st.board.geom);
+        let right = st.board.geom.to_cell_id(Coord2D { x: st.board.geom.from_cell_id(c).unwrap().x + 1, y: st.board.geom.from_cell_id(c).unwrap().y }).unwrap();
+        let mv1 = MoveDraft { placements: vec![(c, Tile { kind_id: "A".into(), mark: None })] };
+        let v1 = rules.validate(&st, &mv1).unwrap(); let sc1 = rules.score(&st, &v1); rules.commit(&mut st, v1, &sc1).unwrap();
+        // Overlay B on A at center and place A at right to form BA (visible BA)
+        // With SumStack, the score for the stacked cell should be A(1) + B(3) = 4 (no bonuses)
+        let mv2 = MoveDraft { placements: vec![(c, Tile { kind_id: "B".into(), mark: None }), (right, Tile { kind_id: "A".into(), mark: None })] };
+        let v2 = rules.validate(&st, &mv2).unwrap();
+        let sc2 = rules.score(&st, &v2);
+        assert!(sc2.total >= 5); // at least 4 (stack) + 1 (A) = 5
+    }
+
+    #[test]
+    fn rtl_horizontal_word_dictionary_check() {
+        use std::collections::HashMap;
+        let tileset = Tileset {
+            tile_kinds: vec![
+                TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
+                TileKind { id: "B".into(), symbol: "B".into(), score: 3, is_blank: false, aliases: vec![] },
+            ],
+        };
+        let mut counts = HashMap::new(); counts.insert("A".to_string(), 10); counts.insert("B".to_string(), 10);
+        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 5, height: 5 }, ruleset_id: "cross".into(), dictionary_id: "xx".into(), rng_seed: 1, tile_counts: counts };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        // Dictionary allows BA (right-to-left word)
+        st.dictionary = Some(Box::new(FstDictionary::from_words(vec!["BA".to_string()], true)));
+        let rules = CrosswordRules { free_word_mode: false, reading_dir: ReadingDirection::RTL, ..Default::default() };
+        // First move: place A at center using free mode commit
+        let free_rules = CrosswordRules { free_word_mode: true, ..Default::default() };
+        let c = CrosswordRules::center_cell(&st.board.geom);
+        let mv1 = MoveDraft { placements: vec![(c, Tile { kind_id: "A".into(), mark: None })] };
+        let v1 = free_rules.validate(&st, &mv1).unwrap();
+        let sc1 = free_rules.score(&st, &v1);
+        free_rules.commit(&mut st, v1, &sc1).unwrap();
+        // Second move: place B to the right; physical "AB" but RTL read as "BA"
+        let c_coord = st.board.geom.from_cell_id(c).unwrap();
+        let right = st.board.geom.to_cell_id(Coord2D { x: c_coord.x + 1, y: c_coord.y }).unwrap();
+        let mv2 = MoveDraft { placements: vec![(right, Tile { kind_id: "B".into(), mark: None })] };
+        let v2 = rules.validate(&st, &mv2).unwrap();
+        let sc2 = rules.score(&st, &v2);
+        assert!(sc2.total >= 0);
+        assert_eq!(sc2.main_word, "BA");
     }
 
     #[test]
