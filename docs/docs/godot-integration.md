@@ -26,12 +26,22 @@ Artifacts:
 4. Open the project and run `scenes/Main.tscn`.
 5. The extension registers a `WordEngine` class.
 
+## 3D Scene (layers)
+
+- Open `scenes/Main3D.tscn` from the example project.
+- Script `scripts/Board3D.gd` initializes a 3D layout (`type: "3d"`) and renders stacked layers.
+- Symbols are drawn as `Label3D` nodes above each cell. Adjust `W/H/D` in the script for different sizes.
+
 ## API
 
 - `WordEngine.new_game(config_json: String, players: int) -> bool`
 - `WordEngine.play_move(placements_json: String) -> String` (empty on error)
 - `WordEngine.get_board_json() -> String`
 - `WordEngine.set_free_word_mode(on: bool)`
+
+## Toggle rules mid-session
+
+- In the 2D example (`scripts/Board.gd`), a top bar button toggles free-word mode by calling `eng.set_free_word_mode(...)`.
 
 ### GDScript example
 

@@ -1059,6 +1059,109 @@ impl Rules for CrosswordRules {
     }
 }
 
+// -------- Rule Plugins (Phase 10) --------
+
+#[derive(Debug, Clone)]
+pub enum Action {
+    Place { x: i32, y: i32, kind_id: String, mark: Option<String> },
+    Stack { x: i32, y: i32, kind_id: String, mark: Option<String> },
+    SwapRack { give: Vec<String> },
+    RotateTile { x: i32, y: i32 },
+    SlideGroup { cells: Vec<(i32,i32)>, dx: i32, dy: i32 },
+    Custom(String, serde_json::Value),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UserMove { pub actions: Vec<Action> }
+
+pub trait RulePlugin {
+    fn name(&self) -> &str { "plugin" }
+    fn pre_validate(&self, _state: &GameState, _mv: &mut UserMove) -> Result<(), EngineError> { Ok(()) }
+    fn validate(&self, _state: &GameState, _mv: &UserMove) -> Result<(), EngineError> { Ok(()) }
+    fn to_draft(&self, _state: &GameState, _mv: &UserMove) -> Option<MoveDraft> { None }
+    fn modify_score(&self, _state: &GameState, _v: &ValidatedMove, _sc: &mut ScoreBreakdown) {}
+    fn commit(&self, _state: &mut GameState, _v: &ValidatedMove, _sc: &ScoreBreakdown) -> Result<(), EngineError> { Ok(()) }
+}
+
+#[derive(Debug, Default)]
+pub struct BasicActionsPlugin;
+impl RulePlugin for BasicActionsPlugin {
+    fn name(&self) -> &str { "basic_actions" }
+    fn pre_validate(&self, _state: &GameState, mv: &mut UserMove) -> Result<(), EngineError> {
+        // reject unsupported actions here
+        for a in &mv.actions {
+            match a {
+                Action::Place { .. } | Action::Stack { .. } | Action::Custom(_, _) => {}
+                _ => return Err(EngineError::Config("unsupported action")),
+            }
+        }
+        Ok(())
+    }
+    fn to_draft(&self, state: &GameState, mv: &UserMove) -> Option<MoveDraft> {
+        let mut placements: Vec<(CellId, Tile)> = Vec::new();
+        for a in &mv.actions {
+            match a {
+                Action::Place { x, y, kind_id, mark } | Action::Stack { x, y, kind_id, mark } => {
+                    let id = state.board.geom.to_cell_id(Coord2D { x: *x, y: *y })?;
+                    placements.push((id, Tile { kind_id: kind_id.clone(), mark: mark.clone() }));
+                }
+                Action::Custom(_, _) => {}
+                _ => {}
+            }
+        }
+        if placements.is_empty() { None } else { Some(MoveDraft { placements }) }
+    }
+}
+
+#[derive(Debug)]
+pub struct ScoreBonusPlugin { pub bonus: i32 }
+impl RulePlugin for ScoreBonusPlugin {
+    fn name(&self) -> &str { "score_bonus" }
+    fn modify_score(&self, _state: &GameState, _v: &ValidatedMove, sc: &mut ScoreBreakdown) {
+        sc.total += self.bonus;
+    }
+}
+
+pub struct PluginRules {
+    pub base: CrosswordRules,
+    pub plugins: Vec<Box<dyn RulePlugin + Send + Sync>>, // deterministic order
+}
+
+impl PluginRules {
+    pub fn new(base: CrosswordRules, plugins: Vec<Box<dyn RulePlugin + Send + Sync>>) -> Self {
+        Self { base, plugins }
+    }
+    pub fn validate_user_move(&self, state: &GameState, mut mv: UserMove) -> Result<ValidatedMove, EngineError> {
+        // preprocess
+        for p in &self.plugins { p.pre_validate(state, &mut mv)?; }
+        // validate hooks
+        for p in &self.plugins { p.validate(state, &mv)?; }
+        // draft conversion
+        let mut draft: Option<MoveDraft> = None;
+        for p in &self.plugins { if let Some(d) = p.to_draft(state, &mv) { draft = Some(d); } }
+        let draft = draft.ok_or(EngineError::Config("no draft produced by plugins"))?;
+        // base validation
+        self.base.validate(state, &draft)
+    }
+    pub fn score_user_move(&self, state: &GameState, v: &ValidatedMove) -> ScoreBreakdown {
+        let mut sc = self.base.score(state, v);
+        for p in &self.plugins { p.modify_score(state, v, &mut sc); }
+        sc
+    }
+    pub fn commit_user_move(&self, state: &mut GameState, v: ValidatedMove, sc: &ScoreBreakdown) -> Result<(), EngineError> {
+        self.base.commit(state, v.clone(), sc)?;
+        for p in &self.plugins { p.commit(state, &v, sc)?; }
+        Ok(())
+    }
+}
+
+impl Rules for PluginRules {
+    fn validate(&self, state: &GameState, draft: &MoveDraft) -> Result<ValidatedMove, EngineError> {
+        self.base.validate(state, draft)
+    }
+    fn score(&self, state: &GameState, mv: &ValidatedMove) -> ScoreBreakdown { self.base.score(state, mv) }
+    fn commit(&self, state: &mut GameState, mv: ValidatedMove, score: &ScoreBreakdown) -> Result<(), EngineError> { self.base.commit(state, mv, score) }
+}
 // ---- Graph helpers ----
 
 fn bfs_path_on_dir(
@@ -2808,6 +2911,52 @@ mod tests {
     }
 
     #[test]
+    fn plugin_pipeline_composition_and_score_bonus() {
+        use std::collections::HashMap;
+        let tileset = Tileset { tile_kinds: vec![
+            TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
+            TileKind { id: "B".into(), symbol: "B".into(), score: 3, is_blank: false, aliases: vec![] },
+        ]};
+        let mut counts = HashMap::new(); counts.insert("A".to_string(), 10); counts.insert("B".to_string(), 10);
+        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 5, height: 5 }, ruleset_id: "cross".into(), dictionary_id: "en".into(), rng_seed: 1, tile_counts: counts };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        st.dictionary = Some(Box::new(FstDictionary::from_words(vec!["AB".to_string()], true)));
+        let base = CrosswordRules { free_word_mode: false, ..Default::default() };
+        let rules = PluginRules::new(base, vec![
+            Box::new(BasicActionsPlugin::default()),
+            Box::new(ScoreBonusPlugin { bonus: 5 }),
+        ]);
+        // Actions equivalent to placing AB on center row
+        let c = CrosswordRules::center_cell(&st.board.geom);
+        let cc = st.board.geom.from_cell_id(c).unwrap();
+        let right = st.board.geom.to_cell_id(Coord2D { x: cc.x + 1, y: cc.y }).unwrap();
+        let mut mv = UserMove::default();
+        mv.actions.push(Action::Place { x: cc.x, y: cc.y, kind_id: "A".into(), mark: None });
+        mv.actions.push(Action::Place { x: cc.x + 1, y: cc.y, kind_id: "B".into(), mark: None });
+        let v = rules.validate_user_move(&st, mv).unwrap();
+        let sc = rules.score_user_move(&st, &v);
+        // base score: AB => 1 + 3 = 4; plugin bonus adds +5
+        assert_eq!(sc.total, 9);
+        rules.commit_user_move(&mut st, v, &sc).unwrap();
+    }
+
+    #[test]
+    fn plugin_rejects_unsupported_action() {
+        let tileset = Tileset { tile_kinds: vec![
+            TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
+        ]};
+        let mut counts = std::collections::HashMap::new(); counts.insert("A".to_string(), 10);
+        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 3, height: 3 }, ruleset_id: "cross".into(), dictionary_id: "en".into(), rng_seed: 1, tile_counts: counts };
+        let st = GameState::new(&cfg, 2).unwrap();
+        let base = CrosswordRules::default();
+        let rules = PluginRules::new(base, vec![ Box::new(BasicActionsPlugin::default()) ]);
+        let mut mv = UserMove::default();
+        mv.actions.push(Action::SwapRack { give: vec!["A".into()] });
+        let err = rules.validate_user_move(&st, mv).unwrap_err();
+        match err { EngineError::Config(_) => {}, _ => panic!("expected config error"), }
+    }
+
+    #[test]
     fn rules_with_fst_dictionary() {
         use std::collections::HashMap;
         let tileset = Tileset {
@@ -2876,6 +3025,36 @@ mod tests {
         let sc = rules.score(&st, &v);
         assert_eq!(sc.main_word, word);
         assert_eq!(sc.total, 1 + 5);
+    }
+
+    #[test]
+    fn emoji_skin_tone_grapheme_mixed_with_letter() {
+        use std::collections::HashMap;
+        let thumbs = "👍🏽"; // thumbs up with medium skin tone
+        let tileset = Tileset {
+            tile_kinds: vec![
+                TileKind { id: "EM2".into(), symbol: thumbs.into(), score: 4, is_blank: false, aliases: vec![] },
+                TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
+            ],
+        };
+        let mut counts = HashMap::new(); counts.insert("EM2".to_string(), 10); counts.insert("A".to_string(), 10);
+        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 5, height: 5 }, ruleset_id: "cross".into(), dictionary_id: "en".into(), rng_seed: 13, tile_counts: counts };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        // Dict contains emoji + A
+        let word = format!("{}A", thumbs);
+        st.dictionary = Some(Box::new(FstDictionary::from_words(vec![word.clone()], false)));
+        let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
+        let c = CrosswordRules::center_cell(&st.board.geom);
+        let cc = st.board.geom.from_cell_id(c).unwrap();
+        let right = st.board.geom.to_cell_id(Coord2D { x: cc.x + 1, y: cc.y }).unwrap();
+        let mv = MoveDraft { placements: vec![
+            (c, Tile { kind_id: "EM2".into(), mark: None }),
+            (right, Tile { kind_id: "A".into(), mark: None }),
+        ]};
+        let v = rules.validate(&st, &mv).unwrap();
+        let sc = rules.score(&st, &v);
+        assert_eq!(sc.main_word, word);
+        assert_eq!(sc.total, 4 + 1);
     }
 
     #[test]

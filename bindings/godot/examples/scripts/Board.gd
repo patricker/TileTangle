@@ -7,6 +7,19 @@ var height := 5
 var USE_HEX := true
 
 func _ready():
+    # Top bar with a toggle button
+    var bar := HBoxContainer.new()
+    bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    add_child(bar)
+    var btn := Button.new()
+    btn.text = "Free Word Mode"
+    btn.toggle_mode = true
+    btn.button_pressed = true
+    btn.pressed.connect(func():
+        eng.set_free_word_mode(btn.button_pressed)
+    )
+    bar.add_child(btn)
+
     add_child(grid)
     grid.columns = width
     grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL

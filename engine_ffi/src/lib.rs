@@ -320,6 +320,14 @@ pub extern "C" fn tt_last_error_message() -> *const c_char {
     })
 }
 
+/// Set free_word_mode at runtime (1=true, 0=false)
+#[no_mangle]
+pub extern "C" fn tt_set_free_word_mode(game: *mut GameHandle, on: c_uint) {
+    if game.is_null() { return; }
+    let g = unsafe { &mut *(game as *mut FfiGame) };
+    g.rules.free_word_mode = on != 0;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

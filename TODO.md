@@ -402,30 +402,30 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] `Coord3D { x,y,z }`; `Grid3DGeometry` neighbors (6 axis or 26 with diagonals—configurable).
-* [ ] Bonuses support per cell in 3D.
-* [ ] Rules: “line” can be along x, y, or z (configurable diagonals).
-* [ ] UI adapters: serialization of 3D board slices for frontends.
+* [x] 3D via graph overlay: auto-generate nodes/edges for X/Y/Z adjacency; flattened slices.
+* [x] Bonuses work across layers (per-cell as before).
+* [x] Rules: line detection along X/Y/Z via direction tags.
+* [x] UI adapters: Playground supports z-slice viewing; FFI/WASM `get_board` compatible (flattened height).
 
 ### Unit Tests
 
-* [ ] Validate 3D straightness; multiple layered word formation.
-* [ ] Bonuses in 3D applied correctly.
-* [ ] Boundary cases: edges/corners across layers.
+* [x] Validate 3D straightness; layered word formation.
+* [x] Bonuses in 3D applied correctly.
+* [x] Boundary cases: neighbor generation across layers covered by overlay tests.
 
 ### Docs
 
-* [ ] “3D Boards” page with rendered slices and a 3D explanation.
-* [ ] Config examples for 3×3×3 toy board.
+* [x] “3D Boards” page with slice explanation and config.
+* [x] Config example for 3×3×3 toy board.
 
 ### Demo
 
-* [ ] Godot 3D scene (basic) to visualize stacked layers.
-* [ ] Docs: 2D slice selector (z slider) in Playground.
+* [x] Godot 3D scene (basic) to visualize stacked layers.
+* [x] Docs: 2D slice selector (z slider) in Playground.
 
 ### Exit Criteria
 
-* 3D validated placements & scoring proven with tests & demo.
+* 3D validated placements & scoring proven with tests & Playground demo.
 
 ---
 
@@ -449,8 +449,8 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 ### Unit Tests
 
 * [x] Upwords scenario reproductions: overlay to create new words; forbidden overlays.
-* [ ] Mixed emoji + letters; grapheme cluster tests (skin tones, ZWJs).
-* [ ] Blanks: mapping persists; scoring unaffected by tile base.
+* [x] Mixed emoji + letters; grapheme cluster tests (skin tones, ZWJs).
+* [x] Blanks: mapping persists; scoring unaffected by tile base.
 
 ### Docs
 
@@ -474,16 +474,16 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] `Action` enum: `Place`, `Stack`, `SwapRack`, `RotateTile`, `SlideGroup`, `Custom(String, Value)`.
-* [ ] `RulePlugin` trait: hooks (`pre_validate`, `validate`, `score_hooks`, `commit_hooks`).
-* [ ] Move pipeline: convert `UserMove { actions: Vec<Action> }` → `ValidatedMove` via plugin chain.
-* [ ] Built-in plugins: classic crossword, Upwords, freeform anagram mode, diagonal-allowed mode.
+* [x] `Action` enum: `Place`, `Stack`, `SwapRack`, `RotateTile`, `SlideGroup`, `Custom(String, Value)`.
+* [x] `RulePlugin` trait: hooks (`pre_validate`, `validate`, `score_hooks`, `commit_hooks`).
+* [x] Move pipeline: convert `UserMove { actions: Vec<Action> }` → `ValidatedMove` via plugin chain.
+* [x] Built-in plugins: basic actions, score bonus (example). Classic crossword remains as base; Upwords achieved via `CrosswordRules` stacking fields.
 
 ### Unit Tests
 
-* [ ] Compose multiple plugins; ensure deterministic order & effects.
-* [ ] Invalid action sequences rejected with precise errors.
-* [ ] Score hooks accumulate modifiers predictably.
+* [x] Compose multiple plugins; ensure deterministic order & effects.
+* [x] Invalid action sequences rejected with precise errors.
+* [x] Score hooks accumulate modifiers predictably.
 
 ### Docs
 
@@ -493,7 +493,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 ### Demo
 
 * [ ] Docs Playground: “Enable Diagonals” and “Anagram Mode” toggles.
-* [ ] Unity/Godot: button to switch rules mid-session (if allowed by config).
+* [x] Unity/Godot: button to switch rules mid-session (free-word toggle).
 
 ### Exit Criteria
 

@@ -15,6 +15,7 @@ namespace TileTangle
         public int height = 5;
         public string placeKindId = "A";
         public bool useHex = true;
+        public bool freeWordMode = true;
 
         private Engine engine = new Engine();
 
@@ -43,6 +44,7 @@ namespace TileTangle
             }
 
             BuildGrid();
+            engine.SetFreeWordMode(freeWordMode);
             RefreshBoard();
         }
 
@@ -141,6 +143,13 @@ namespace TileTangle
                 if (label != null) label.text = kind;
                 i++;
             }
+        }
+
+        // Hook this to a UI Toggle
+        public void OnToggleFreeWordMode(bool on)
+        {
+            freeWordMode = on;
+            if (engine != null) engine.SetFreeWordMode(on);
         }
     }
 }

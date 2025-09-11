@@ -19,7 +19,7 @@ import TabItem from '@theme/TabItem'
   <TabItem value="js" label="JavaScript">
 
 ```js
-import init, { new_game, play_move, get_board } from '/wasm/engine/pkg/tiletangle_wasm.js';
+import init, { new_game, play_move, get_board, set_free_word_mode, set_reading_direction, set_stacking } from '/wasm/engine/pkg/tiletangle_wasm.js';
 await init();
 const config = {
   tileset: { tile_kinds: [{ id: 'A', symbol: 'A', score: 1 }] },
@@ -32,6 +32,10 @@ const config = {
   free_word_mode: true
 };
 const game = new_game(JSON.stringify(config), 2);
+// Toggle options at runtime
+set_free_word_mode(game, false); // enforce dictionary
+set_reading_direction(game, false); // RTL=true / LTR=false
+set_stacking(game, true, 7, true, 'top'); // enable stacking
 console.log('board', get_board(game));
 const placements = [{ x: 3, y: 3, kind_id: 'A' }];
 const result = play_move(game, JSON.stringify(placements));

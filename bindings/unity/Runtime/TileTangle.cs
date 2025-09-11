@@ -24,6 +24,9 @@ namespace TileTangle
 
         [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr tt_last_error_message();
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void tt_set_free_word_mode(IntPtr game, uint on);
     }
 
     public sealed class Engine : IDisposable
@@ -87,6 +90,12 @@ namespace TileTangle
             GC.SuppressFinalize(this);
         }
 
+        public void SetFreeWordMode(bool on)
+        {
+            EnsureHandle();
+            Native.tt_set_free_word_mode(handle, on ? 1u : 0u);
+        }
+
         private void EnsureHandle()
         {
             if (handle == IntPtr.Zero)
@@ -113,4 +122,3 @@ namespace TileTangle
         ~Engine() { Dispose(); }
     }
 }
-

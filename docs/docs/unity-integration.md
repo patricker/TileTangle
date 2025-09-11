@@ -47,6 +47,7 @@ engine.Dispose();
 - Add `bindings/unity/Runtime/UGUISample.cs` to a GameObject and assign:
   - `gridRoot`: the RectTransform that has the `GridLayoutGroup`.
   - `cellButtonPrefab`: your Button prefab.
+- Optional: add a Toggle and hook it to `UGUISample.OnToggleFreeWordMode(bool)` to switch rules mid-session.
 - Enter Play Mode and click cells to place the configured tile (default `A`).
 
 Example code paths:

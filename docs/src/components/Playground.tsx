@@ -8,6 +8,13 @@ export default function Playground(): JSX.Element {
   const [useWorker, setUseWorker] = useState(false);
   const [useDict, setUseDict] = useState(true);
   const [useHex, setUseHex] = useState(false);
+  const [use3D, setUse3D] = useState(false);
+  const [rtl, setRtl] = useState(false);
+  const [stackOn, setStackOn] = useState(false);
+  const [stackScoring, setStackScoring] = useState<'top'|'sum'>('top');
+  const [forbidSame, setForbidSame] = useState(true);
+  const [depth, setDepth] = useState(3);
+  const [z, setZ] = useState(0);
   const [game, setGame] = useState<any>(null);
   const [board, setBoard] = useState<BoardJson | null>(null);
   const [pending, setPending] = useState<Placement[]>([]);
@@ -24,6 +31,9 @@ export default function Playground(): JSX.Element {
       ruleset_id: 'cross', dictionary_id: 'en', rng_seed: 1,
       tile_counts: { A: 30, B: 12 }, free_word_mode: true,
     } as any;
+    if (use3D) {
+      return { ...base, board_layout: { type: '3d', width, height, depth } } as any;
+    }
     if (!useHex) return { ...base, board_layout: { width, height } };
     // Build hex-style adjacency on a rectangular grid (even-r offset)
     const nodes: {x:number;y:number}[] = [];
@@ -45,7 +55,7 @@ export default function Playground(): JSX.Element {
       }
     }
     return { ...base, board_layout: { width, height, type: 'graph', nodes, edges } };
-  }, [useHex]);
+  }, [useHex, use3D, depth]);
 
   useEffect(() => {
     (async () => {
@@ -67,6 +77,9 @@ export default function Playground(): JSX.Element {
         }
         const cfg2 = { ...cfg, free_word_mode: !useDict } as any;
         await call('new_game', { config: cfg2, players: 2 });
+        await call('set_reading_direction', { rtl });
+        await call('set_stacking', { enabled: stackOn, max_height: 7, forbid_same: forbidSame, scoring: stackScoring });
+        await call('set_free_word_mode', { on: !useDict });
         const { board: b } = await call('get_board');
         setGame({ call });
         setBoard(JSON.parse(b as string) as BoardJson);
@@ -76,6 +89,8 @@ export default function Playground(): JSX.Element {
         await mod.default();
         const cfg2 = { ...cfg, free_word_mode: !useDict } as any;
         const g = mod.new_game(JSON.stringify(cfg2), 2);
+        mod.set_reading_direction(g, rtl);
+        mod.set_stacking(g, stackOn, 7, forbidSame, stackScoring);
         if (useDict) {
           try {
             const resp = await fetch('/dictionaries/TWL06.fst');
@@ -100,7 +115,7 @@ export default function Playground(): JSX.Element {
         workerRef.current = null;
       }
     };
-  }, [useWorker, useDict, cfg]);
+  }, [useWorker, useDict, cfg, rtl, stackOn, stackScoring, forbidSame]);
 
   const rack = useMemo(() => ['A','A','A','B','B'], []);
 
@@ -126,8 +141,13 @@ export default function Playground(): JSX.Element {
     setPending(prev => {
       if (prev.some(p => p.x === x && p.y === y)) return prev;
       // Prevent placing over existing board tile
-      if (board && (board.rows[y][x] || '').length > 0) return prev;
-      return [...prev, { x, y, kind_id }];
+      if (board) {
+        const h = use3D ? Math.floor(board.height / depth) : board.height;
+        const gy = use3D ? (y + z * h) : y;
+        if (!stackOn && (board.rows[gy][x] || '').length > 0) return prev;
+        return [...prev, { x, y: gy, kind_id }];
+      }
+      return prev;
     });
   };
 
@@ -138,6 +158,11 @@ export default function Playground(): JSX.Element {
   const cellDisplay = (x: number, y: number): string => {
     const p = pending.find(pp => pp.x === x && pp.y === y);
     if (p) return p.kind_id;
+    if (use3D && board) {
+      const h = Math.floor(board.height / depth);
+      const yy = y + z * h;
+      return (board.rows[yy][x] || '');
+    }
     return (board?.rows[y][x] || '');
   };
 
@@ -147,14 +172,30 @@ export default function Playground(): JSX.Element {
     <div>
       <div style={{display:'flex', alignItems:'center', gap:12, marginBottom: 12}}>
         <label><input type="checkbox" checked={useWorker} onChange={e => setUseWorker(e.target.checked)} /> Use Web Worker</label>
-        <label><input type="checkbox" checked={useHex} onChange={e => setUseHex(e.target.checked)} /> Hex adjacency</label>
+        <label><input type="checkbox" checked={useHex} onChange={e => { setUseHex(e.target.checked); setUse3D(false); }} /> Hex adjacency</label>
+        <label><input type="checkbox" checked={use3D} onChange={e => { setUse3D(e.target.checked); setUseHex(false); }} /> 3D (layers)</label>
+        {use3D && <>
+          <label>Depth: <input type="number" min={1} max={9} value={depth} onChange={e => { const v = Math.max(1, Math.min(9, parseInt(e.target.value||'1'))); setDepth(v); setZ(0); }} style={{width:50}}/></label>
+          <label>Slice z: <input type="range" min={0} max={Math.max(0, depth-1)} value={z} onChange={e => setZ(parseInt(e.target.value))} /></label>
+        </>}
         <label><input type="checkbox" checked={useDict} onChange={e => setUseDict(e.target.checked)} /> Dictionary checks (TWL06)</label>
+        <label><input type="checkbox" checked={rtl} onChange={e => setRtl(e.target.checked)} /> RTL reading</label>
+        <label><input type="checkbox" checked={stackOn} onChange={e => setStackOn(e.target.checked)} /> Stacking</label>
+        {stackOn && (<>
+          <label>Scoring: 
+            <select value={stackScoring} onChange={e => setStackScoring((e.target.value as any))}>
+              <option value="top">TopOnly</option>
+              <option value="sum">SumStack</option>
+            </select>
+          </label>
+          <label><input type="checkbox" checked={forbidSame} onChange={e => setForbidSame(e.target.checked)} /> Forbid same overlay</label>
+        </>)}
         <button onClick={commit} disabled={pending.length === 0}>Commit Move ({pending.length})</button>
         <button onClick={() => setPending([])} disabled={pending.length === 0}>Reset</button>
       </div>
       <div style={{display:'flex', gap: 16, alignItems:'flex-start'}}>
         <div style={{display: 'grid', gridTemplateColumns: `repeat(${board.width}, 28px)`, gap: 4}}>
-          {Array.from({length: board.height}).map((_, y) => (
+          {Array.from({length: use3D ? Math.floor(board.height / depth) : board.height}).map((_, y) => (
             Array.from({length: board.width}).map((__, x) => (
               <div key={`${x}-${y}`}
                    onDragOver={(e)=>e.preventDefault()}

@@ -41,6 +41,8 @@ struct JsBoardLayout {
     nodes: Vec<JsNode>,
     #[serde(default)]
     edges: Vec<JsEdge>,
+    #[serde(default)]
+    depth: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -87,7 +89,26 @@ pub fn new_game(config_json: &str, players: usize) -> Result<JsGame, JsValue> {
         tile_counts: cfg.tile_counts,
     };
     let mut state = engine::GameState::new(&eng_cfg, players).map_err(to_js_err)?;
-    if cfg.board_layout.r#type.as_deref() == Some("graph") || !cfg.board_layout.nodes.is_empty() {
+    if cfg.board_layout.r#type.as_deref() == Some("3d") {
+        let w = cfg.board_layout.width as i32;
+        let h = cfg.board_layout.height as i32;
+        let d = cfg.board_layout.depth.unwrap_or(1) as i32;
+        let mut nodes: Vec<engine::Coord2D> = Vec::new();
+        for z in 0..d { for y in 0..h { for x in 0..w { nodes.push(engine::Coord2D { x, y: y + z*h }); } } }
+        let index = |x:i32,y:i32,z:i32| -> usize { ((y + z*h) * w + x) as usize };
+        let mut edges: Vec<(usize,usize,String)> = Vec::new();
+        let mut try_edge = |x1:i32,y1:i32,z1:i32, x2:i32,y2:i32,z2:i32, tag:&str| {
+            if x2<0||x2>=w||y2<0||y2>=h||z2<0||z2>=d { return; }
+            edges.push((index(x1,y1,z1), index(x2,y2,z2), tag.to_string()));
+        };
+        for z in 0..d { for y in 0..h { for x in 0..w {
+            try_edge(x,y,z, x+1,y,z, "X");
+            try_edge(x,y,z, x,y+1,z, "Y");
+            try_edge(x,y,z, x,y,z+1, "Z");
+        } } }
+        let ov = engine::GraphOverlay { nodes, edges };
+        state.apply_graph_overlay(ov).map_err(to_js_err)?;
+    } else if cfg.board_layout.r#type.as_deref() == Some("graph") || !cfg.board_layout.nodes.is_empty() {
         let nodes: Vec<engine::Coord2D> = cfg.board_layout.nodes.iter().map(|n| engine::Coord2D { x: n.x, y: n.y }).collect();
         let edges: Vec<(usize, usize, String)> = cfg.board_layout.edges.iter().map(|e| (e.a, e.b, e.dir.clone().unwrap_or_else(|| "L".into()))).collect();
         let ov = engine::GraphOverlay { nodes, edges };
@@ -97,7 +118,18 @@ pub fn new_game(config_json: &str, players: usize) -> Result<JsGame, JsValue> {
         free_word_mode: cfg.free_word_mode,
         ..Default::default()
     };
-    Ok(JsGame { state, rules })
+    let mut game = JsGame { state, rules };
+    // Deal initial racks (7 tiles per player default)
+    let players_n = game.state.players.len();
+    for pid in 0..players_n {
+        loop {
+            if game.state.players[pid].rack.tiles.len() >= 7 { break; }
+            if let Some(t) = game.state.bag.draw_one() {
+                let _ = game.state.players[pid].rack.add(t, 7);
+            } else { break; }
+        }
+    }
+    Ok(game)
 }
 
 #[derive(Deserialize)]
@@ -105,6 +137,8 @@ struct JsPlacement {
     x: i32,
     y: i32,
     kind_id: String,
+    #[serde(default)]
+    mark: Option<String>,
 }
 
 #[wasm_bindgen]
@@ -122,7 +156,7 @@ pub fn play_move(game: &mut JsGame, placements_json: &str) -> Result<JsValue, Js
             cid,
             engine::Tile {
                 kind_id: p.kind_id,
-                mark: None,
+                mark: p.mark,
             },
         ));
     }
@@ -197,6 +231,77 @@ pub fn set_dictionary_from_fst_bytes(game: &mut JsGame, bytes: &[u8], case_fold:
 }
 
 #[wasm_bindgen]
-pub fn set_free_word_mode(game: &mut JsGame, enabled: bool) {
-    game.rules.free_word_mode = enabled;
+pub fn set_free_word_mode(game: &mut JsGame, on: bool) {
+    game.rules.free_word_mode = on;
 }
+
+#[wasm_bindgen]
+pub fn set_reading_direction(game: &mut JsGame, rtl: bool) {
+    game.rules.reading_dir = if rtl { engine::ReadingDirection::RTL } else { engine::ReadingDirection::LTR };
+}
+
+#[wasm_bindgen]
+pub fn set_stacking(
+    game: &mut JsGame,
+    enabled: bool,
+    max_height: u32,
+    forbid_same: bool,
+    scoring_mode: &str,
+) {
+    game.rules.stacking_enabled = enabled;
+    game.rules.stacking_max_height = max_height as usize;
+    game.rules.forbid_same_symbol_overlay = forbid_same;
+    game.rules.stacking_scoring = match scoring_mode.to_lowercase().as_str() {
+        "sum" | "sumstack" => engine::StackScoring::SumStack,
+        _ => engine::StackScoring::TopOnly,
+    };
+}
+
+#[wasm_bindgen]
+pub fn get_scores(game: &JsGame) -> String {
+    let scores: Vec<i32> = game.state.players.iter().map(|p| p.score).collect();
+    serde_json::to_string(&scores).unwrap()
+}
+
+#[wasm_bindgen]
+pub fn get_rack(game: &JsGame) -> String {
+    let pid = game.state.to_move.0;
+    let rack: Vec<serde_json::Value> = game.state.players[pid].rack.tiles.iter().map(|t| {
+        serde_json::json!({ "kind_id": t.kind_id, "mark": t.mark })
+    }).collect();
+    serde_json::to_string(&rack).unwrap()
+}
+
+#[derive(Deserialize)]
+struct JsBonus { x: i32, y: i32, #[serde(default)] letter_mul: i8, #[serde(default)] word_mul: i8, #[serde(default)] tags: Vec<String> }
+
+#[wasm_bindgen]
+pub fn set_bonuses(game: &mut JsGame, bonuses_json: &str) -> Result<(), JsValue> {
+    let entries: Vec<JsBonus> = serde_json::from_str(bonuses_json).map_err(to_js_err)?;
+    game.state.board.bonuses.clear();
+    for b in entries {
+        let id = game.state.board.geom.to_cell_id(engine::Coord2D { x: b.x, y: b.y }).ok_or_else(|| to_js_err("invalid bonus coord"))?;
+        let mut tags = std::collections::BTreeSet::new();
+        for t in b.tags { tags.insert(t); }
+        game.state.board.bonuses.insert(id, engine::Bonus { letter_mul: if b.letter_mul==0 {1} else {b.letter_mul}, word_mul: if b.word_mul==0 {1} else {b.word_mul}, tags });
+    }
+    Ok(())
+}
+
+#[wasm_bindgen]
+pub fn generate_moves(game: &JsGame, max_len: u32, limit: u32) -> String {
+    let pid = game.state.to_move.0;
+    let rack_kinds: Vec<String> = game.state.players[pid].rack.tiles.iter().map(|t| t.kind_id.clone()).collect();
+    let cands = engine::generate_moves(&game.state, &game.rules, &rack_kinds, max_len as usize);
+    let mut out = Vec::new();
+    for cm in cands.into_iter().take(limit as usize) {
+        let placements: Vec<serde_json::Value> = cm.placements.iter().map(|(cid, t)| {
+            let c = game.state.board.geom.from_cell_id(*cid).unwrap();
+            serde_json::json!({ "x": c.x, "y": c.y, "kind_id": t.kind_id, "mark": t.mark })
+        }).collect();
+        out.push(serde_json::json!({ "word": cm.word, "score": cm.score, "placements": placements }));
+    }
+    serde_json::to_string(&out).unwrap()
+}
+
+// (set_free_word_mode defined above)
