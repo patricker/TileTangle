@@ -440,7 +440,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
   * Max height; allowed overlays (e.g., cannot place same symbol).
   * Scoring variants: sum all stack tiles vs top-only; config toggles.
-* [ ] Multi-character tiles:
+* [x] Multi-character tiles:
 
   * Treat `TileKind.symbol` as grapheme sequence.
   * Word reading uses **grapheme segmentation** (`unicode-segmentation` crate).
@@ -454,13 +454,13 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Docs
 
-* [ ] “Stacking Rules” with visuals; “Emoji & Graphemes” caveats (ZWJ, NFC).
-* [ ] Config snippets enabling Upwords-like mode.
+* [x] “Stacking Rules” with visuals; “Emoji & Graphemes” caveats (ZWJ, NFC).
+* [x] Config/API notes enabling Upwords-like mode.
 
 ### Demo
 
-* [ ] Docs Playground toggle: “Stacking ON”.
-* [ ] Python example: create emoji crossword; print board with unicode.
+* [x] Docs Playground toggle: “Stacking ON”.
+* [x] Python example: create emoji crossword; print board with unicode.
 
 ### Exit Criteria
 

@@ -26,7 +26,8 @@ self.onmessage = async (e) => {
       self.postMessage({ id, ok: true });
     } else if (action === 'set_stacking') {
       if (!game) throw new Error('no game');
-      mod.set_stacking(game, !!payload.enabled, payload.max_height ?? 7, !!payload.forbid_same, payload.scoring ?? 'top');
+      const sum = (payload.scoring === 'sum');
+      mod.set_stacking(game, !!payload.enabled, payload.max_height ?? 7, !!payload.forbid_same, sum);
       self.postMessage({ id, ok: true });
     } else if (action === 'get_board') {
       const b = game ? mod.get_board(game) : null;

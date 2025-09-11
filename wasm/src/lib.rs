@@ -254,22 +254,6 @@ pub fn set_reading_direction(game: &mut JsGame, rtl: bool) {
     game.rules.reading_dir = if rtl { engine::ReadingDirection::RTL } else { engine::ReadingDirection::LTR };
 }
 
-#[wasm_bindgen]
-pub fn set_stacking(
-    game: &mut JsGame,
-    enabled: bool,
-    max_height: u32,
-    forbid_same: bool,
-    scoring_mode: &str,
-) {
-    game.rules.stacking_enabled = enabled;
-    game.rules.stacking_max_height = max_height as usize;
-    game.rules.forbid_same_symbol_overlay = forbid_same;
-    game.rules.stacking_scoring = match scoring_mode.to_lowercase().as_str() {
-        "sum" | "sumstack" => engine::StackScoring::SumStack,
-        _ => engine::StackScoring::TopOnly,
-    };
-}
 
 #[wasm_bindgen]
 pub fn get_scores(game: &JsGame) -> String {

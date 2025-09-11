@@ -90,7 +90,7 @@ export default function Playground(): JSX.Element {
         const cfg2 = { ...cfg, free_word_mode: !useDict } as any;
         const g = mod.new_game(JSON.stringify(cfg2), 2);
         mod.set_reading_direction(g, rtl);
-        mod.set_stacking(g, stackOn, 7, forbidSame, stackScoring);
+        mod.set_stacking(g, stackOn, 7, forbidSame, stackScoring === 'sum');
         if (useDict) {
           try {
             const resp = await fetch('/dictionaries/TWL06.fst');

@@ -14,7 +14,7 @@ const FeatureList: FeatureItem[] = [
     title: 'Live Playground',
     Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
     description: (
-      <>Try the engine in-browser via WASM. Place tiles, inspect board JSON, and iterate quickly.</>
+      <>Try the engine in-browser via WASM. Place tiles, inspect board JSON, and iterate quickly. See the <a href="/docs/classic-demo">Classic Crossword Demo</a>.</>
     ),
   },
   {
