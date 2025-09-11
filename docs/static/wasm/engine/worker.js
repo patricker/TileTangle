@@ -47,6 +47,22 @@ self.onmessage = async (e) => {
       if (!game) throw new Error('no game');
       const moves = mod.generate_moves(game, payload?.max_len ?? 7, payload?.limit ?? 50);
       self.postMessage({ id, ok: true, moves });
+    } else if (action === 'pass_turn') {
+      if (!game) throw new Error('no game');
+      mod.pass_turn(game);
+      self.postMessage({ id, ok: true });
+    } else if (action === 'exchange_tiles') {
+      if (!game) throw new Error('no game');
+      mod.exchange_tiles(game, JSON.stringify(payload?.kinds ?? []));
+      self.postMessage({ id, ok: true });
+    } else if (action === 'set_dictionary_from_fst_bytes') {
+      if (!game) throw new Error('no game');
+      mod.set_dictionary_from_fst_bytes(game, payload.bytes, !!payload.case_fold);
+      self.postMessage({ id, ok: true });
+    } else if (action === 'set_dictionary_from_text') {
+      if (!game) throw new Error('no game');
+      mod.set_dictionary_from_text(game, payload.text, !!payload.case_fold);
+      self.postMessage({ id, ok: true });
     } else if (action === 'play_move') {
       if (!game) throw new Error('no game');
       const res = mod.play_move(game, JSON.stringify(payload.placements));

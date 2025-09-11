@@ -50,6 +50,9 @@ export default function ClassicDemo(): JSX.Element {
   const [stackScoring, setStackScoring] = useState<'top'|'sum'>('top');
   const [forbidSame, setForbidSame] = useState(true);
   const [pending, setPending] = useState<Placement[]>([]);
+  const [exchangeSel, setExchangeSel] = useState<Set<number>>(new Set());
+  const [showHints, setShowHints] = useState(false);
+  const [hints, setHints] = useState<{placements: Placement[]; score:number; word:string}[]>([]);
   const workerRef = useRef<Worker|null>(null);
 
   const cfg = useMemo(() => {
@@ -129,6 +132,44 @@ export default function ClassicDemo(): JSX.Element {
     } catch (e) { console.error(e); }
   };
 
+  const pass = async () => {
+    if (!game) return;
+    await game.call('pass_turn');
+    const { board: b } = await game.call('get_board');
+    const { rack: r } = await game.call('get_rack');
+    const { scores: s } = await game.call('get_scores');
+    setBoard(JSON.parse(b as string) as BoardJson);
+    setRack(JSON.parse(r as string));
+    setScores(JSON.parse(s as string));
+    setPending([]);
+    setExchangeSel(new Set());
+  };
+
+  const exchange = async () => {
+    if (!game || exchangeSel.size === 0) return;
+    const kinds = Array.from(exchangeSel).map(i => rack[i].kind_id);
+    await game.call('exchange_tiles', { kinds });
+    const { board: b } = await game.call('get_board');
+    const { rack: r } = await game.call('get_rack');
+    const { scores: s } = await game.call('get_scores');
+    setBoard(JSON.parse(b as string) as BoardJson);
+    setRack(JSON.parse(r as string));
+    setScores(JSON.parse(s as string));
+    setExchangeSel(new Set());
+    setPending([]);
+  };
+
+  useEffect(() => {
+    (async () => {
+      if (!game || !showHints) { setHints([]); return; }
+      try {
+        const { moves } = await game.call('generate_moves', { max_len: 15, limit: 5 });
+        const arr = JSON.parse(moves as string) as { placements: Placement[]; score:number; word:string }[];
+        setHints(arr);
+      } catch (e) { console.error(e); }
+    })();
+  }, [game, showHints, board]);
+
   const aiMove = async () => {
     if (!game) return;
     try {
@@ -172,6 +213,14 @@ export default function ClassicDemo(): JSX.Element {
 
   if (!board || !game) return <div>Loading…</div>;
 
+  const hintIndexAt = (x:number,y:number): number => {
+    for (let i=0;i<Math.min(hints.length,5);i++) {
+      const h = hints[i];
+      if (h.placements.some(p => p.x===x && p.y===y)) return i+1;
+    }
+    return 0;
+  };
+
   return (
     <div>
       <div style={{display:'flex', gap:12, alignItems:'center', marginBottom: 12}}>
@@ -190,8 +239,11 @@ export default function ClassicDemo(): JSX.Element {
           </>
         )}
         <button onClick={commit} disabled={pending.length===0}>Commit ({pending.length})</button>
+        <button onClick={pass}>Pass</button>
+        <button onClick={exchange} disabled={exchangeSel.size===0}>Exchange ({exchangeSel.size})</button>
         <button onClick={()=>setPending([])} disabled={pending.length===0}>Reset Pending</button>
         <button onClick={aiMove}>AI Move</button>
+        <label><input type="checkbox" checked={showHints} onChange={e=>setShowHints(e.target.checked)} /> Show Hints</label>
         <div style={{marginLeft:'auto'}}>Scores: {scores.join(' : ')}</div>
       </div>
       <div style={{display:'flex', gap:16}}>
@@ -202,8 +254,9 @@ export default function ClassicDemo(): JSX.Element {
                 <div key={`${x}-${y}`}
                      onDragOver={e=>e.preventDefault()}
                      onDrop={e=>onDropCell(x,y,e)}
-                     style={{width:28, height:28, border:'1px solid #ccc', background:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12}}>
+                     style={{width:28, height:28, border:'1px solid #ccc', background:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, position:'relative'}}>
                   {letterAt(x,y)}
+                  {showHints && (()=>{ const idx = hintIndexAt(x,y); return idx>0 ? <div style={{position:'absolute', inset:2, background:`rgba(255,165,0,0.25)`, color:'#b55', fontSize:9, display:'flex', alignItems:'center', justifyContent:'center'}}>{idx}</div> : null })()}
                 </div>
               ))
             ))}
@@ -212,16 +265,19 @@ export default function ClassicDemo(): JSX.Element {
         <div>
           <div style={{marginBottom:6, fontSize:12, opacity:0.7}}>Rack (drag)</div>
           <div style={{display:'flex', gap:6}}>
-            {rack.map((t, i) => (
-              <div key={i} draggable onDragStart={(e)=>onDragStartTile(t, e)}
-                   style={{width:28, height:28, border:'1px solid #aaa', display:'flex', alignItems:'center', justifyContent:'center', background:'#f9f9f9', cursor:'grab'}}>
+            {rack.map((t, i) => {
+              const sel = exchangeSel.has(i);
+              return (
+              <div key={i} draggable onDragStart={(e)=>onDragStartTile(t, e)} onClick={()=>{
+                    const ns = new Set(exchangeSel); sel ? ns.delete(i) : ns.add(i); setExchangeSel(ns);
+                  }}
+                   style={{width:28, height:28, border:'1px solid #aaa', display:'flex', alignItems:'center', justifyContent:'center', background: sel?'#cfe8ff':'#f9f9f9', cursor:'grab'}}>
                 {t.kind_id}
               </div>
-            ))}
+            )})}
           </div>
         </div>
       </div>
     </div>
   );
 }
-

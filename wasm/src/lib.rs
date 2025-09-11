@@ -236,6 +236,20 @@ pub fn set_free_word_mode(game: &mut JsGame, on: bool) {
 }
 
 #[wasm_bindgen]
+pub fn set_stacking(
+    game: &mut JsGame,
+    enabled: bool,
+    max_height: u32,
+    forbid_same_symbol_overlay: bool,
+    sum_stack_scoring: bool,
+) {
+    game.rules.stacking_enabled = enabled;
+    game.rules.stacking_max_height = max_height as usize;
+    game.rules.forbid_same_symbol_overlay = forbid_same_symbol_overlay;
+    game.rules.stacking_scoring = if sum_stack_scoring { engine::StackScoring::SumStack } else { engine::StackScoring::TopOnly };
+}
+
+#[wasm_bindgen]
 pub fn set_reading_direction(game: &mut JsGame, rtl: bool) {
     game.rules.reading_dir = if rtl { engine::ReadingDirection::RTL } else { engine::ReadingDirection::LTR };
 }
@@ -302,6 +316,49 @@ pub fn generate_moves(game: &JsGame, max_len: u32, limit: u32) -> String {
         out.push(serde_json::json!({ "word": cm.word, "score": cm.score, "placements": placements }));
     }
     serde_json::to_string(&out).unwrap()
+}
+
+#[wasm_bindgen]
+pub fn pass_turn(game: &mut JsGame) {
+    let pid = game.state.to_move.0;
+    game.state.turn_num = game.state.turn_num.saturating_add(1);
+    game.state.to_move = engine::PlayerId((pid + 1) % game.state.players.len());
+}
+
+#[derive(Deserialize)]
+struct JsKinds { kinds: Vec<String> }
+
+#[wasm_bindgen]
+pub fn exchange_tiles(game: &mut JsGame, kinds_json: &str) -> Result<(), JsValue> {
+    let kinds: Vec<String> = match serde_json::from_str::<Vec<String>>(kinds_json) {
+        Ok(v) => v,
+        Err(_) => serde_json::from_str::<JsKinds>(kinds_json).map_err(to_js_err)?.kinds,
+    };
+    let n = kinds.len();
+    // require enough tiles in bag
+    if game.state.bag.remaining() < n as u32 { return Err(to_js_err("not enough tiles in bag to exchange")); }
+    let pid = game.state.to_move.0;
+    // remove from rack
+    for kid in &kinds {
+        // find first tile with that kind_id
+        let pos = game.state.players[pid].rack.tiles.iter().position(|t| &t.kind_id == kid).ok_or_else(|| to_js_err("tile not in rack"))?;
+        let _t = game.state.players[pid].rack.tiles.remove(pos);
+        // return to bag counts
+        // find tilekind by id
+        if let Some(tk) = game.state.tileset.tile_kinds.iter().find(|tk| &tk.id == kid) {
+            let entry = game.state.bag.counts.entry(tk.clone()).or_insert(0);
+            *entry += 1;
+        }
+    }
+    // draw same number
+    for _ in 0..n {
+        if let Some(t) = game.state.bag.draw_one() {
+            let _ = game.state.players[pid].rack.add(t, 7);
+        }
+    }
+    // advance turn
+    pass_turn(game);
+    Ok(())
 }
 
 // (set_free_word_mode defined above)
