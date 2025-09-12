@@ -300,7 +300,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
   * [x] PyO3/maturin project: `pip install .` yields `wordengine` module.
   * [x] Pythonic API mirrors WASM API (plus conveniences).
-  * [ ] Wheels for macOS, Linux (manylinux), Windows (CI later).
+  * [x] Wheels for macOS, Linux (manylinux), Windows (CI later).
 
 ### Unit Tests
 
@@ -725,6 +725,8 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 **Goal:** Polished demos proving breadth.
 
 ### Implementation & Demos
+
+* [x] Seed Unity/Godot click-to-place board demos (basic Rect/Hex toggle; free-word mode toggle).
 
 * [ ] **Classic Crossword** (web + Unity + Godot): AI opponent.
 * [ ] **Hex Board Variant** (web): show non-rect adjacency.

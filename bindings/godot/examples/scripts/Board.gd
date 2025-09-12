@@ -4,27 +4,48 @@ extends Control
 var eng := WordEngine.new()
 var width := 5
 var height := 5
-var USE_HEX := true
+var use_hex := true
 
 func _ready():
-    # Top bar with a toggle button
+    # Top bar with toggles
     var bar := HBoxContainer.new()
     bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     add_child(bar)
-    var btn := Button.new()
-    btn.text = "Free Word Mode"
-    btn.toggle_mode = true
-    btn.button_pressed = true
-    btn.pressed.connect(func():
-        eng.set_free_word_mode(btn.button_pressed)
+
+    var btn_free := Button.new()
+    btn_free.text = "Free Word Mode"
+    btn_free.toggle_mode = true
+    btn_free.button_pressed = true
+    btn_free.pressed.connect(func():
+        eng.set_free_word_mode(btn_free.button_pressed)
     )
-    bar.add_child(btn)
+    bar.add_child(btn_free)
+
+    var btn_hex := Button.new()
+    btn_hex.text = "Hex Geometry"
+    btn_hex.toggle_mode = true
+    btn_hex.button_pressed = use_hex
+    btn_hex.pressed.connect(func():
+        use_hex = btn_hex.button_pressed
+        _new_game_and_rebuild_grid()
+    )
+    bar.add_child(btn_hex)
 
     add_child(grid)
     grid.columns = width
     grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
+    _new_game_and_rebuild_grid()
+
+func _new_game_and_rebuild_grid():
+    # Clear grid
+    while grid.get_child_count() > 0:
+        var c = grid.get_child(0)
+        grid.remove_child(c)
+        c.queue_free()
+
+    # Build config
     var base = {
         "tileset": {"tile_kinds": [
             {"id": "A", "symbol": "A", "score": 1},
@@ -38,7 +59,7 @@ func _ready():
         "free_word_mode": true,
     }
     var cfg := base.duplicate(true)
-    if USE_HEX:
+    if use_hex:
         var nodes := []
         for y in height:
             for x in width:
@@ -57,11 +78,13 @@ func _ready():
         cfg["board_layout"] = {"width": width, "height": height, "type":"graph", "nodes": nodes, "edges": edges}
     else:
         cfg["board_layout"] = {"width": width, "height": height}
+
     var ok = eng.new_game(JSON.stringify(cfg), 2)
     if not ok:
         push_error("Failed to create game")
         return
 
+    # Build grid buttons
     for y in height:
         for x in width:
             var btn := Button.new()

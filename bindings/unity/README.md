@@ -26,7 +26,8 @@ Copy the file into your Unity project under `Assets/Plugins/<Platform>/` with th
 
 1. Add `Assets/Plugins/<Platform>/libtiletangle_ffi.(so|dylib|dll)`.
 2. Add `TileTangle.cs` to a suitable folder under your `Assets/` (e.g., `Assets/Scripts/TileTangle/`).
-3. Call the wrapper:
+3. (Optional) Drop in the demo script `Examples/BoardDemo.cs` and attach it to an empty GameObject in a new scene. It will create a Canvas with a grid of buttons at runtime. You can toggle Free Word Mode and Hex geometry in the top bar.
+4. Call the wrapper directly, or use the demo script:
 
 ```csharp
 var engine = new TileTangle.Engine();
@@ -38,9 +39,14 @@ engine.Dispose();
 
 See `Examples/ConsoleSmoke.cs` for a runnable snippet (outside Unity) to sanity-check the native calls.
 
+### Demo scene quick-setup
+
+- Create a new Unity scene.
+- Add an empty GameObject and attach `BoardDemo`.
+- Press Play. The script creates UI automatically; click cells to place tiles.
+
 ## Notes
 
 - Strings are marshaled as UTF-8 null-terminated C strings; free any returned string via `tt_string_free` (handled by the wrapper).
 - Retrieve last error message via `TileTangle.Engine.LastError()` if a call returns `null`.
 - The engine expects a JSON config matching `Appendix A — Sample Configs` in the repo `TODO.md`.
-
