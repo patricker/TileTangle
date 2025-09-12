@@ -233,7 +233,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 ### Docs
 
 * [x] “Lexicon Integration” stub page: normalization + case folding notes.
-* [ ] Guidance on licensing/packaging word lists (ship tiny test lists, document how to plug real ones).
+* [x] Guidance on licensing/packaging word lists (ship tiny test lists, document how to plug real ones).
 
 ### Demo
 
@@ -492,7 +492,8 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Demo
 
-* [ ] Docs Playground: “Enable Diagonals” and “Anagram Mode” toggles.
+* [x] Docs Playground: “Enable Diagonals” toggle.
+* [ ] Docs Playground: “Anagram Mode” toggle.
 * [x] Unity/Godot: button to switch rules mid-session (free-word toggle).
 
 ### Exit Criteria

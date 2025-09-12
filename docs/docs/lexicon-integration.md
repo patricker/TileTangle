@@ -58,3 +58,34 @@ set_dictionary_from_fst_bytes(game, buf, true);
 ```
 
 Note: richer loaders (metadata, compressed formats) can be added later.
+
+## Licensing & Packaging Guidance
+
+- Prefer tiny, permissively licensed test lists in-repo; avoid committing large or proprietary word lists.
+- Document sources and licenses for any example lists; verify redistribution terms before bundling.
+- Provide configuration to load real lexica at runtime (paths, URLs, or user-uploaded files), rather than vendoring them.
+
+Recommended approaches by target:
+
+- Desktop/Server (Rust, Python):
+  - Load from a local path via `SetDictionary::from_file` or `FstDictionary::from_file`.
+  - Keep real dictionaries outside the repository; point to them via a config file or env var (e.g., `WORDENGINE_DICT_PATH`).
+  - For performance, prefer FST-backed dictionaries once built.
+
+- Web (WASM):
+  - Prebuild an FST from a source list locally and host the resulting `.fst` yourself. In docs/site deployments, place it under `docs/static/dictionaries/` or serve from your own CDN.
+  - Alternatively, allow users to upload a list at runtime and convert client-side or on a backend, then feed bytes to the WASM API (see the FST example above).
+
+- Python:
+  - Expose a path-based loader and keep packaging wheel sizes small by not bundling large lists.
+  - Ship only minimal fixtures for tests and examples.
+
+Notes on common lists:
+
+- Tournament lists like TWL/OWL/CSW often have licensing restrictions. Treat any included copy as demo-only and replace with your own sources when distributing your app.
+- When in doubt, do not redistribute: instruct users to supply their own dictionary files, and provide tooling/docs to consume them.
+
+Build tips:
+
+- Create a small public-domain or self-authored test list (dozens/hundreds of words) for CI and examples.
+- Provide a helper script/Make target to transform a plain `.txt` list into an `.fst` for production use; keep the large source file out of version control.

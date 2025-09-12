@@ -56,6 +56,14 @@ self.onmessage = async (e) => {
       if (!game) throw new Error('no game');
       mod.exchange_tiles(game, JSON.stringify(payload?.kinds ?? []));
       self.postMessage({ id, ok: true });
+    } else if (action === 'undo') {
+      if (!game) throw new Error('no game');
+      mod.undo(game);
+      self.postMessage({ id, ok: true });
+    } else if (action === 'redo') {
+      if (!game) throw new Error('no game');
+      mod.redo(game);
+      self.postMessage({ id, ok: true });
     } else if (action === 'set_dictionary_from_fst_bytes') {
       if (!game) throw new Error('no game');
       mod.set_dictionary_from_fst_bytes(game, payload.bytes, !!payload.case_fold);

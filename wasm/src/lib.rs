@@ -7,6 +7,8 @@ use wasm_bindgen::prelude::*;
 pub struct JsGame {
     state: engine::GameState,
     rules: engine::CrosswordRules,
+    history: Vec<String>,
+    future: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -118,7 +120,7 @@ pub fn new_game(config_json: &str, players: usize) -> Result<JsGame, JsValue> {
         free_word_mode: cfg.free_word_mode,
         ..Default::default()
     };
-    let mut game = JsGame { state, rules };
+    let mut game = JsGame { state, rules, history: Vec::new(), future: Vec::new() };
     // Deal initial racks (7 tiles per player default)
     let players_n = game.state.players.len();
     for pid in 0..players_n {
@@ -129,6 +131,9 @@ pub fn new_game(config_json: &str, players: usize) -> Result<JsGame, JsValue> {
             } else { break; }
         }
     }
+    // snapshot initial state
+    let snap = snapshot_json(&game);
+    game.history.push(snap);
     Ok(game)
 }
 
@@ -144,6 +149,9 @@ struct JsPlacement {
 #[wasm_bindgen]
 pub fn play_move(game: &mut JsGame, placements_json: &str) -> Result<JsValue, JsValue> {
     let placements: Vec<JsPlacement> = serde_json::from_str(placements_json).map_err(to_js_err)?;
+    // save history snapshot (clear future on new action)
+    game.future.clear();
+    game.history.push(snapshot_json(game));
     let mut mv = engine::MoveDraft { placements: vec![] };
     for p in placements {
         let cid = game
@@ -206,6 +214,126 @@ fn score_to_json(sc: &engine::ScoreBreakdown) -> serde_json::Value {
 
 fn to_js_err<E: std::fmt::Display>(e: E) -> JsValue {
     JsValue::from_str(&format!("{}", e))
+}
+
+fn snapshot_json(game: &JsGame) -> String {
+    use serde_json::json;
+    let w = game.state.board.geom.width as i32;
+    let h = game.state.board.geom.height as i32;
+    let mut rows: Vec<Vec<Vec<serde_json::Value>>> = Vec::new();
+    for y in 0..h {
+        let mut row: Vec<Vec<serde_json::Value>> = Vec::new();
+        for x in 0..w {
+            let id = game.state.board.geom.to_cell_id(engine::Coord2D { x, y }).unwrap();
+            let cell = &game.state.board.cells[id.0 as usize];
+            let stack: Vec<serde_json::Value> = cell.stack.iter().map(|t| json!({"kind_id": t.kind_id, "mark": t.mark })).collect();
+            row.push(stack);
+        }
+        rows.push(row);
+    }
+    let racks: Vec<Vec<serde_json::Value>> = game.state.players.iter().map(|p| p.rack.tiles.iter().map(|t| json!({"kind_id": t.kind_id, "mark": t.mark})).collect()).collect();
+    let scores: Vec<i32> = game.state.players.iter().map(|p| p.score).collect();
+    let to_move = game.state.to_move.0;
+    let turn_num = game.state.turn_num;
+    let bonuses: Vec<serde_json::Value> = game.state.board.bonuses.iter().map(|(cid, b)| {
+        let c = game.state.board.geom.from_cell_id(*cid).unwrap();
+        let tags: Vec<String> = b.tags.iter().cloned().collect();
+        json!({"x": c.x, "y": c.y, "letter_mul": b.letter_mul, "word_mul": b.word_mul, "tags": tags})
+    }).collect();
+    let bag: Vec<serde_json::Value> = game.state.bag.counts.iter().map(|(k,c)| json!({"kind_id": k.id, "count": c})).collect();
+    json!({"board": rows, "racks": racks, "scores": scores, "to_move": to_move, "turn_num": turn_num, "bonuses": bonuses, "bag": bag}).to_string()
+}
+
+fn restore_from_json(game: &mut JsGame, snapshot: &str) -> Result<(), JsValue> {
+    let v: serde_json::Value = serde_json::from_str(snapshot).map_err(to_js_err)?;
+    // restore board stacks
+    let rows = v.get("board").ok_or_else(|| to_js_err("snapshot missing board"))?.as_array().ok_or_else(|| to_js_err("invalid board"))?;
+    for (y, row) in rows.iter().enumerate() {
+        let row_arr = row.as_array().ok_or_else(|| to_js_err("invalid row"))?;
+        for (x, stack) in row_arr.iter().enumerate() {
+            let id = game.state.board.geom.to_cell_id(engine::Coord2D { x: x as i32, y: y as i32 }).ok_or_else(|| to_js_err("coord OOB"))?;
+            let sarr = stack.as_array().ok_or_else(|| to_js_err("invalid stack"))?;
+            game.state.board.cells[id.0 as usize].stack.clear();
+            for t in sarr {
+                let kid = t.get("kind_id").and_then(|s| s.as_str()).ok_or_else(|| to_js_err("tile.kind_id"))?;
+                let mark = t.get("mark").and_then(|m| if m.is_null(){None}else{Some(m.as_str().unwrap_or("").to_string())});
+                game.state.board.cells[id.0 as usize].stack.push(engine::Tile { kind_id: kid.to_string(), mark });
+            }
+        }
+    }
+    // restore racks and scores
+    if let Some(racks) = v.get("racks").and_then(|r| r.as_array()) {
+        for (pi, r) in racks.iter().enumerate() {
+            let arr = r.as_array().ok_or_else(|| to_js_err("invalid rack"))?;
+            game.state.players[pi].rack.tiles.clear();
+            for t in arr {
+                let kid = t.get("kind_id").and_then(|s| s.as_str()).ok_or_else(|| to_js_err("rack.kind_id"))?;
+                let mark = t.get("mark").and_then(|m| if m.is_null(){None}else{Some(m.as_str().unwrap_or("").to_string())});
+                game.state.players[pi].rack.tiles.push(engine::Tile { kind_id: kid.to_string(), mark });
+            }
+        }
+    }
+    if let Some(scores) = v.get("scores").and_then(|r| r.as_array()) {
+        for (pi, s) in scores.iter().enumerate() {
+            game.state.players[pi].score = s.as_i64().unwrap_or(0) as i32;
+        }
+    }
+    if let Some(tm) = v.get("to_move").and_then(|x| x.as_u64()) { game.state.to_move = engine::PlayerId(tm as usize); }
+    if let Some(tn) = v.get("turn_num").and_then(|x| x.as_u64()) { game.state.turn_num = tn as u32; }
+    // bonuses
+    game.state.board.bonuses.clear();
+    if let Some(bons) = v.get("bonuses").and_then(|x| x.as_array()) {
+        use std::collections::BTreeSet;
+        for b in bons {
+            let x = b.get("x").and_then(|u| u.as_i64()).unwrap_or(0) as i32;
+            let y = b.get("y").and_then(|u| u.as_i64()).unwrap_or(0) as i32;
+            let id = game.state.board.geom.to_cell_id(engine::Coord2D { x, y }).ok_or_else(|| to_js_err("bonus OOB"))?;
+            let letter_mul = b.get("letter_mul").and_then(|u| u.as_i64()).unwrap_or(1) as i8;
+            let word_mul = b.get("word_mul").and_then(|u| u.as_i64()).unwrap_or(1) as i8;
+            let mut tags = BTreeSet::new();
+            if let Some(ts) = b.get("tags").and_then(|t| t.as_array()) {
+                for t in ts { if let Some(s) = t.as_str() { tags.insert(s.to_string()); } }
+            }
+            game.state.board.bonuses.insert(id, engine::Bonus { letter_mul, word_mul, tags });
+        }
+    }
+    // bag counts
+    if let Some(bag) = v.get("bag").and_then(|x| x.as_array()) {
+        // reset all to 0
+        for v in game.state.bag.counts.values_mut() { *v = 0; }
+        for e in bag {
+            if let (Some(kid), Some(cnt)) = (e.get("kind_id").and_then(|s| s.as_str()), e.get("count").and_then(|u| u.as_u64())) {
+                if let Some(tk) = game.state.tileset.tile_kinds.iter().find(|tk| tk.id == kid) {
+                    *game.state.bag.counts.entry(tk.clone()).or_insert(0) = cnt as u32;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[wasm_bindgen]
+pub fn snapshot(game: &JsGame) -> String { snapshot_json(game) }
+
+#[wasm_bindgen]
+pub fn restore_snapshot(game: &mut JsGame, data: &str) -> Result<(), JsValue> { restore_from_json(game, data) }
+
+#[wasm_bindgen]
+pub fn undo(game: &mut JsGame) -> Result<(), JsValue> {
+    if game.history.len() <= 1 { return Ok(()); }
+    let curr = game.history.pop().unwrap();
+    game.future.push(curr);
+    let prev = game.history.last().cloned().unwrap();
+    restore_from_json(game, &prev)
+}
+
+#[wasm_bindgen]
+pub fn redo(game: &mut JsGame) -> Result<(), JsValue> {
+    if let Some(next) = game.future.pop() {
+        // push current to history
+        game.history.push(next.clone());
+        restore_from_json(game, &next)
+    } else { Ok(()) }
 }
 
 #[wasm_bindgen]
@@ -304,6 +432,8 @@ pub fn generate_moves(game: &JsGame, max_len: u32, limit: u32) -> String {
 
 #[wasm_bindgen]
 pub fn pass_turn(game: &mut JsGame) {
+    game.future.clear();
+    game.history.push(snapshot_json(game));
     let pid = game.state.to_move.0;
     game.state.turn_num = game.state.turn_num.saturating_add(1);
     game.state.to_move = engine::PlayerId((pid + 1) % game.state.players.len());
@@ -314,6 +444,8 @@ struct JsKinds { kinds: Vec<String> }
 
 #[wasm_bindgen]
 pub fn exchange_tiles(game: &mut JsGame, kinds_json: &str) -> Result<(), JsValue> {
+    game.future.clear();
+    game.history.push(snapshot_json(game));
     let kinds: Vec<String> = match serde_json::from_str::<Vec<String>>(kinds_json) {
         Ok(v) => v,
         Err(_) => serde_json::from_str::<JsKinds>(kinds_json).map_err(to_js_err)?.kinds,

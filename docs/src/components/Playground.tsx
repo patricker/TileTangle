@@ -8,6 +8,7 @@ export default function Playground(): JSX.Element {
   const [useWorker, setUseWorker] = useState(false);
   const [useDict, setUseDict] = useState(true);
   const [useHex, setUseHex] = useState(false);
+  const [useDiag, setUseDiag] = useState(false);
   const [use3D, setUse3D] = useState(false);
   const [rtl, setRtl] = useState(false);
   const [stackOn, setStackOn] = useState(false);
@@ -34,6 +35,29 @@ export default function Playground(): JSX.Element {
     if (use3D) {
       return { ...base, board_layout: { type: '3d', width, height, depth } } as any;
     }
+    if (useDiag) {
+      const nodes: {x:number;y:number}[] = [];
+      for (let y=0;y<height;y++) for (let x=0;x<width;x++) nodes.push({x,y});
+      const index = (x:number,y:number) => y*width + x;
+      const edges: {a:number;b:number;dir:string}[] = [];
+      const tryEdge = (x1:number,y1:number,x2:number,y2:number,dir:string) => {
+        if (x2<0||x2>=width||y2<0||y2>=height) return;
+        edges.push({ a:index(x1,y1), b:index(x2,y2), dir });
+      };
+      for (let y=0;y<height;y++) {
+        for (let x=0;x<width;x++) {
+          tryEdge(x,y,x+1,y,'E');
+          tryEdge(x,y,x-1,y,'W');
+          tryEdge(x,y,x,y-1,'N');
+          tryEdge(x,y,x,y+1,'S');
+          tryEdge(x,y,x+1,y-1,'NE');
+          tryEdge(x,y,x-1,y-1,'NW');
+          tryEdge(x,y,x+1,y+1,'SE');
+          tryEdge(x,y,x-1,y+1,'SW');
+        }
+      }
+      return { ...base, board_layout: { width, height, type: 'graph', nodes, edges } };
+    }
     if (!useHex) return { ...base, board_layout: { width, height } };
     // Build hex-style adjacency on a rectangular grid (even-r offset)
     const nodes: {x:number;y:number}[] = [];
@@ -55,7 +79,7 @@ export default function Playground(): JSX.Element {
       }
     }
     return { ...base, board_layout: { width, height, type: 'graph', nodes, edges } };
-  }, [useHex, use3D, depth]);
+  }, [useHex, useDiag, use3D, depth]);
 
   useEffect(() => {
     (async () => {
@@ -172,7 +196,8 @@ export default function Playground(): JSX.Element {
     <div>
       <div style={{display:'flex', alignItems:'center', gap:12, marginBottom: 12}}>
         <label><input type="checkbox" checked={useWorker} onChange={e => setUseWorker(e.target.checked)} /> Use Web Worker</label>
-        <label><input type="checkbox" checked={useHex} onChange={e => { setUseHex(e.target.checked); setUse3D(false); }} /> Hex adjacency</label>
+        <label><input type="checkbox" checked={useHex} onChange={e => { setUseHex(e.target.checked); setUseDiag(false); setUse3D(false); }} /> Hex adjacency</label>
+        <label><input type="checkbox" checked={useDiag} onChange={e => { setUseDiag(e.target.checked); setUseHex(false); setUse3D(false); }} /> Diagonal adjacency</label>
         <label><input type="checkbox" checked={use3D} onChange={e => { setUse3D(e.target.checked); setUseHex(false); }} /> 3D (layers)</label>
         {use3D && <>
           <label>Depth: <input type="number" min={1} max={9} value={depth} onChange={e => { const v = Math.max(1, Math.min(9, parseInt(e.target.value||'1'))); setDepth(v); setZ(0); }} style={{width:50}}/></label>

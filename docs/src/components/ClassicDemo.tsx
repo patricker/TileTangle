@@ -186,6 +186,18 @@ export default function ClassicDemo(): JSX.Element {
     } catch (e) { console.error(e); }
   };
 
+  const playSuggested = async (idx: number) => {
+    if (!game || idx < 0 || idx >= hints.length) return;
+    const h = hints[idx];
+    await game.call('play_move', { placements: h.placements });
+    const { board: b } = await game.call('get_board');
+    const { rack: r } = await game.call('get_rack');
+    const { scores: s } = await game.call('get_scores');
+    setBoard(JSON.parse(b as string) as BoardJson);
+    setRack(JSON.parse(r as string));
+    setScores(JSON.parse(s as string));
+  };
+
   const onDropCell = (x: number, y: number, ev: React.DragEvent<HTMLDivElement>) => {
     ev.preventDefault();
     const data = ev.dataTransfer.getData('text/plain');
@@ -240,6 +252,8 @@ export default function ClassicDemo(): JSX.Element {
         )}
         <button onClick={commit} disabled={pending.length===0}>Commit ({pending.length})</button>
         <button onClick={pass}>Pass</button>
+        <button onClick={async()=>{ await game?.call('undo'); const { board: b } = await game!.call('get_board'); const { rack: r } = await game!.call('get_rack'); const { scores: s } = await game!.call('get_scores'); setBoard(JSON.parse(b as string)); setRack(JSON.parse(r as string)); setScores(JSON.parse(s as string)); }}>Undo</button>
+        <button onClick={async()=>{ await game?.call('redo'); const { board: b } = await game!.call('get_board'); const { rack: r } = await game!.call('get_rack'); const { scores: s } = await game!.call('get_scores'); setBoard(JSON.parse(b as string)); setRack(JSON.parse(r as string)); setScores(JSON.parse(s as string)); }}>Redo</button>
         <button onClick={exchange} disabled={exchangeSel.size===0}>Exchange ({exchangeSel.size})</button>
         <button onClick={()=>setPending([])} disabled={pending.length===0}>Reset Pending</button>
         <button onClick={aiMove}>AI Move</button>
@@ -277,6 +291,17 @@ export default function ClassicDemo(): JSX.Element {
             )})}
           </div>
         </div>
+        {showHints && (
+          <div style={{minWidth: 180}}>
+            <div style={{marginBottom:6, fontSize:12, opacity:0.7}}>Top Moves</div>
+            {hints.map((h, i) => (
+              <div key={i} style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4}}>
+                <div>#{i+1} {h.word} (+{h.score})</div>
+                <button onClick={()=>playSuggested(i)}>Play</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
