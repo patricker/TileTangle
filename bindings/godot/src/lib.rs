@@ -1,5 +1,5 @@
-use godot::prelude::*;
 use engine::{BoardGeometry, Rules};
+use godot::prelude::*;
 use serde::Deserialize;
 
 #[derive(GodotClass)]
@@ -14,7 +14,11 @@ pub struct WordEngine {
 #[godot_api]
 impl IRefCounted for WordEngine {
     fn init(base: Base<RefCounted>) -> Self {
-        Self { base, state: None, rules: engine::CrosswordRules::default() }
+        Self {
+            base,
+            state: None,
+            rules: engine::CrosswordRules::default(),
+        }
     }
 }
 
@@ -30,13 +34,23 @@ struct JsTileKind {
 }
 
 #[derive(Deserialize)]
-struct JsTileset { tile_kinds: Vec<JsTileKind> }
+struct JsTileset {
+    tile_kinds: Vec<JsTileKind>,
+}
 
 #[derive(Deserialize)]
-struct JsNode { x: i32, y: i32 }
+struct JsNode {
+    x: i32,
+    y: i32,
+}
 
 #[derive(Deserialize)]
-struct JsEdge { a: usize, b: usize, #[serde(default)] dir: Option<String> }
+struct JsEdge {
+    a: usize,
+    b: usize,
+    #[serde(default)]
+    dir: Option<String>,
+}
 
 #[derive(Deserialize)]
 struct JsBoardLayout {
@@ -67,7 +81,11 @@ struct JsConfig {
 }
 
 #[derive(Deserialize)]
-struct JsPlacement { x: i32, y: i32, kind_id: String }
+struct JsPlacement {
+    x: i32,
+    y: i32,
+    kind_id: String,
+}
 
 #[godot_api]
 impl WordEngine {
@@ -99,7 +117,10 @@ impl WordEngine {
         let cfg = engine::GameConfig {
             tileset,
             rack_size: parsed.rack_size,
-            board_layout: engine::RectBoardLayout { width: parsed.board_layout.width, height: parsed.board_layout.height },
+            board_layout: engine::RectBoardLayout {
+                width: parsed.board_layout.width,
+                height: parsed.board_layout.height,
+            },
             ruleset_id: parsed.ruleset_id,
             dictionary_id: parsed.dictionary_id,
             rng_seed: parsed.rng_seed,
@@ -113,25 +134,57 @@ impl WordEngine {
                     let h = parsed.board_layout.height as i32;
                     let d = parsed.board_layout.depth.unwrap_or(1) as i32;
                     let mut nodes: Vec<engine::Coord2D> = Vec::new();
-                    for z in 0..d { for y in 0..h { for x in 0..w { nodes.push(engine::Coord2D { x, y: y + z*h }); } } }
-                    let index = |x:i32,y:i32,z:i32| -> usize { ((y + z*h) * w + x) as usize };
-                    let mut edges: Vec<(usize,usize,String)> = Vec::new();
-                    let mut try_edge = |x1:i32,y1:i32,z1:i32, x2:i32,y2:i32,z2:i32, tag:&str| {
-                        if x2<0||x2>=w||y2<0||y2>=h||z2<0||z2>=d { return; }
-                        edges.push((index(x1,y1,z1), index(x2,y2,z2), tag.to_string()));
-                    };
-                    for z in 0..d { for y in 0..h { for x in 0..w {
-                        try_edge(x,y,z, x+1,y,z, "X");
-                        try_edge(x,y,z, x,y+1,z, "Y");
-                        try_edge(x,y,z, x,y,z+1, "Z");
-                    } } }
+                    for z in 0..d {
+                        for y in 0..h {
+                            for x in 0..w {
+                                nodes.push(engine::Coord2D { x, y: y + z * h });
+                            }
+                        }
+                    }
+                    let index =
+                        |x: i32, y: i32, z: i32| -> usize { ((y + z * h) * w + x) as usize };
+                    let mut edges: Vec<(usize, usize, String)> = Vec::new();
+                    let mut try_edge =
+                        |x1: i32, y1: i32, z1: i32, x2: i32, y2: i32, z2: i32, tag: &str| {
+                            if x2 < 0 || x2 >= w || y2 < 0 || y2 >= h || z2 < 0 || z2 >= d {
+                                return;
+                            }
+                            edges.push((index(x1, y1, z1), index(x2, y2, z2), tag.to_string()));
+                        };
+                    for z in 0..d {
+                        for y in 0..h {
+                            for x in 0..w {
+                                try_edge(x, y, z, x + 1, y, z, "X");
+                                try_edge(x, y, z, x, y + 1, z, "Y");
+                                try_edge(x, y, z, x, y, z + 1, "Z");
+                            }
+                        }
+                    }
                     let ov = engine::GraphOverlay { nodes, edges };
-                    if let Err(e) = state.apply_graph_overlay(ov) { godot_error!("{}", e); return false; }
-                } else if parsed.board_layout.r#type.as_deref() == Some("graph") || !parsed.board_layout.nodes.is_empty() {
-                    let nodes: Vec<engine::Coord2D> = parsed.board_layout.nodes.iter().map(|n| engine::Coord2D { x: n.x, y: n.y }).collect();
-                    let edges: Vec<(usize,usize,String)> = parsed.board_layout.edges.iter().map(|e| (e.a, e.b, e.dir.clone().unwrap_or_else(|| "L".into()))).collect();
+                    if let Err(e) = state.apply_graph_overlay(ov) {
+                        godot_error!("{}", e);
+                        return false;
+                    }
+                } else if parsed.board_layout.r#type.as_deref() == Some("graph")
+                    || !parsed.board_layout.nodes.is_empty()
+                {
+                    let nodes: Vec<engine::Coord2D> = parsed
+                        .board_layout
+                        .nodes
+                        .iter()
+                        .map(|n| engine::Coord2D { x: n.x, y: n.y })
+                        .collect();
+                    let edges: Vec<(usize, usize, String)> = parsed
+                        .board_layout
+                        .edges
+                        .iter()
+                        .map(|e| (e.a, e.b, e.dir.clone().unwrap_or_else(|| "L".into())))
+                        .collect();
                     let ov = engine::GraphOverlay { nodes, edges };
-                    if let Err(e) = state.apply_graph_overlay(ov) { godot_error!("{}", e); return false; }
+                    if let Err(e) = state.apply_graph_overlay(ov) {
+                        godot_error!("{}", e);
+                        return false;
+                    }
                 }
                 self.rules.free_word_mode = parsed.free_word_mode;
                 self.state = Some(state);
@@ -171,7 +224,13 @@ impl WordEngine {
                     return GString::from("");
                 }
             };
-            mv.placements.push((cid, engine::Tile { kind_id: p.kind_id, mark: None }));
+            mv.placements.push((
+                cid,
+                engine::Tile {
+                    kind_id: p.kind_id,
+                    mark: None,
+                },
+            ));
         }
         let rules = &self.rules;
         let validated = match rules.validate(st, &mv) {
@@ -205,7 +264,7 @@ impl WordEngine {
     pub fn get_board_json(&self) -> GString {
         let st = match self.state.as_ref() {
             Some(s) => s,
-            None => return GString::from("")
+            None => return GString::from(""),
         };
         let w = st.board.geom.width as i32;
         let h = st.board.geom.height as i32;
@@ -215,7 +274,11 @@ impl WordEngine {
             for x in 0..w {
                 if let Some(id) = st.board.geom.to_cell_id(engine::Coord2D { x, y }) {
                     let cell = &st.board.cells[id.0 as usize];
-                    let s = if let Some(t) = cell.stack.last() { t.kind_id.clone() } else { String::new() };
+                    let s = if let Some(t) = cell.stack.last() {
+                        t.kind_id.clone()
+                    } else {
+                        String::new()
+                    };
                     row.push(s);
                 } else {
                     row.push(String::new());
@@ -229,7 +292,331 @@ impl WordEngine {
 
     /// Toggle free-word mode for testing without a dictionary.
     #[func]
-    pub fn set_free_word_mode(&mut self, on: bool) { self.rules.free_word_mode = on; }
+    pub fn set_free_word_mode(&mut self, on: bool) {
+        self.rules.free_word_mode = on;
+    }
+
+    /// Get current player's rack as JSON array: [{kind_id, symbol, score}]
+    #[func]
+    pub fn get_rack_json(&self) -> GString {
+        let st = match self.state.as_ref() {
+            Some(s) => s,
+            None => return GString::from(""),
+        };
+        let rack = &st.players[st.to_move.0].rack;
+        let mut arr = Vec::with_capacity(rack.tiles.len());
+        for t in &rack.tiles {
+            let mut symbol = String::new();
+            let mut score: i16 = 0;
+            for k in &st.tileset.tile_kinds {
+                if k.id == t.kind_id {
+                    symbol = k.symbol.clone();
+                    score = k.score;
+                    break;
+                }
+            }
+            arr.push(serde_json::json!({"kind_id": t.kind_id, "symbol": symbol, "score": score}));
+        }
+        GString::from(serde_json::to_string(&arr).unwrap())
+    }
+
+    /// Get scores and to_move as JSON: { players:[{score}], to_move }
+    #[func]
+    pub fn get_scores_json(&self) -> GString {
+        let st = match self.state.as_ref() {
+            Some(s) => s,
+            None => return GString::from(""),
+        };
+        let players: Vec<_> = st
+            .players
+            .iter()
+            .map(|p| serde_json::json!({"score": p.score}))
+            .collect();
+        let val = serde_json::json!({"players": players, "to_move": st.to_move.0});
+        GString::from(serde_json::to_string(&val).unwrap())
+    }
+
+    /// Preview move: returns JSON { valid, total, main_word, main_score, cross_words, bingo, main_cells, cross_cells }
+    #[func]
+    pub fn preview_move(&self, placements_json: GString) -> GString {
+        let st = match self.state.as_ref() {
+            Some(s) => s,
+            None => return GString::from(""),
+        };
+        let p_str = placements_json.to_string();
+        let placements: Vec<JsPlacement> = match serde_json::from_str(&p_str) {
+            Ok(v) => v,
+            Err(_) => return GString::from(""),
+        };
+        // Build validated move
+        let mut mv = engine::MoveDraft { placements: vec![] };
+        for p in &placements {
+            let Some(cid) = st.board.geom.to_cell_id(engine::Coord2D { x: p.x, y: p.y }) else {
+                return GString::from("");
+            };
+            mv.placements.push((
+                cid,
+                engine::Tile {
+                    kind_id: p.kind_id.clone(),
+                    mark: None,
+                },
+            ));
+        }
+        let rules = &self.rules;
+        let validated = match rules.validate(st, &mv) {
+            Ok(v) => v,
+            Err(_) => return GString::from(""),
+        };
+        let mut temp_board = st.board.clone();
+        for (cid, tile) in &validated.placements {
+            temp_board.cells[cid.0 as usize].stack.push(tile.clone());
+        }
+        use std::collections::HashSet;
+        let placed_ids: HashSet<engine::CellId> =
+            validated.placements.iter().map(|(id, _)| *id).collect();
+        let mut main_cells: Vec<(i32, i32)> = Vec::new();
+        let mut cross_cells: Vec<Vec<(i32, i32)>> = Vec::new();
+        if temp_board.geom.has_graph() {
+            if let Some((tag, path)) = graph_find_main_path(&temp_board, &placed_ids) {
+                for id in &path {
+                    if let Some(c) = temp_board.geom.from_cell_id(*id) {
+                        main_cells.push((c.x, c.y));
+                    }
+                }
+                for (cid, _) in &validated.placements {
+                    let mut seen: std::collections::HashSet<String> =
+                        std::collections::HashSet::new();
+                    for (_, t) in st.board.geom.neighbors_with_tags(*cid) {
+                        if t == tag {
+                            continue;
+                        }
+                        if !seen.insert(t.to_string()) {
+                            continue;
+                        }
+                        let line = collect_line_on_dir(&temp_board, *cid, t, &placed_ids);
+                        if line.len() > 1 {
+                            let mut vecxy = Vec::new();
+                            for id in line {
+                                if let Some(c) = temp_board.geom.from_cell_id(id) {
+                                    vecxy.push((c.x, c.y));
+                                }
+                            }
+                            cross_cells.push(vecxy);
+                        }
+                    }
+                }
+            }
+        } else {
+            if let Some(start) = temp_board.geom.from_cell_id(validated.placements[0].0) {
+                let dir = if validated.line_is_row {
+                    (1, 0)
+                } else {
+                    (0, 1)
+                };
+                let mut c = start;
+                loop {
+                    let prev = engine::Coord2D {
+                        x: c.x - dir.0,
+                        y: c.y - dir.1,
+                    };
+                    if let Some(id) = temp_board.geom.to_cell_id(prev) {
+                        if placed_ids.contains(&id)
+                            || !temp_board.cells[id.0 as usize].stack.is_empty()
+                        {
+                            c = prev;
+                            continue;
+                        }
+                    }
+                    break;
+                }
+                loop {
+                    if let Some(id) = temp_board.geom.to_cell_id(c) {
+                        if placed_ids.contains(&id)
+                            || !temp_board.cells[id.0 as usize].stack.is_empty()
+                        {
+                            main_cells.push((c.x, c.y));
+                            c = engine::Coord2D {
+                                x: c.x + dir.0,
+                                y: c.y + dir.1,
+                            };
+                            continue;
+                        }
+                    }
+                    break;
+                }
+            }
+            let pdir = if validated.line_is_row {
+                (0, 1)
+            } else {
+                (1, 0)
+            };
+            for (cid, _) in &validated.placements {
+                let center = temp_board.geom.from_cell_id(*cid).unwrap();
+                let mut back = center;
+                loop {
+                    let prev = engine::Coord2D {
+                        x: back.x - pdir.0,
+                        y: back.y - pdir.1,
+                    };
+                    if let Some(id) = temp_board.geom.to_cell_id(prev) {
+                        if placed_ids.contains(&id)
+                            || !temp_board.cells[id.0 as usize].stack.is_empty()
+                        {
+                            back = prev;
+                            continue;
+                        }
+                    }
+                    break;
+                }
+                let mut vecxy = Vec::new();
+                let mut cur = back;
+                loop {
+                    if let Some(id) = temp_board.geom.to_cell_id(cur) {
+                        if placed_ids.contains(&id)
+                            || !temp_board.cells[id.0 as usize].stack.is_empty()
+                        {
+                            vecxy.push((cur.x, cur.y));
+                            cur = engine::Coord2D {
+                                x: cur.x + pdir.0,
+                                y: cur.y + pdir.1,
+                            };
+                            continue;
+                        }
+                    }
+                    break;
+                }
+                if vecxy.len() > 1 {
+                    cross_cells.push(vecxy);
+                }
+            }
+        }
+        let sc = rules.score(st, &validated);
+        let valid = sc.main_score >= 0;
+        let val = serde_json::json!({
+            "valid": valid,
+            "total": sc.total,
+            "main_word": sc.main_word,
+            "main_score": sc.main_score,
+            "cross_words": sc.cross_words,
+            "bingo": sc.bingo,
+            "main_cells": main_cells.iter().map(|(x,y)| vec![*x, *y]).collect::<Vec<_>>(),
+            "cross_cells": cross_cells.iter().map(|v| v.iter().map(|(x,y)| vec![*x, *y]).collect::<Vec<_>>()).collect::<Vec<_>>()
+        });
+        GString::from(serde_json::to_string(&val).unwrap())
+    }
+}
+
+// Helpers duplicated from engine for GDExt preview
+use std::collections::HashSet;
+fn collect_line_on_dir(
+    board: &engine::Board<engine::RectGridGeometry>,
+    center: engine::CellId,
+    tag: &str,
+    placed: &HashSet<engine::CellId>,
+) -> Vec<engine::CellId> {
+    let neighs: Vec<engine::CellId> = board
+        .geom
+        .neighbors_with_tags(center)
+        .into_iter()
+        .filter(|(_, t)| *t == tag)
+        .map(|(n, _)| n)
+        .collect();
+    let mut back = center;
+    if let Some(nb) = neighs.get(0) {
+        let mut prev = center;
+        let mut cur = *nb;
+        loop {
+            if !placed.contains(&cur) && board.cells[cur.0 as usize].stack.is_empty() {
+                break;
+            }
+            let nxt = board
+                .geom
+                .neighbors_with_tags(cur)
+                .into_iter()
+                .filter(|(_, t)| *t == tag)
+                .map(|(n, _)| n)
+                .find(|n| *n != prev);
+            back = cur;
+            if let Some(n2) = nxt {
+                prev = cur;
+                cur = n2;
+            } else {
+                break;
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let mut prev = None;
+    let mut cur = back;
+    loop {
+        if !placed.contains(&cur) && board.cells[cur.0 as usize].stack.is_empty() {
+            break;
+        }
+        out.push(cur);
+        let nxt = board
+            .geom
+            .neighbors_with_tags(cur)
+            .into_iter()
+            .filter(|(_, t)| *t == tag)
+            .map(|(n, _)| n)
+            .find(|n| Some(*n) != prev);
+        if let Some(n2) = nxt {
+            prev = Some(cur);
+            cur = n2;
+        } else {
+            break;
+        }
+    }
+    out
+}
+
+fn graph_find_main_path(
+    board: &engine::Board<engine::RectGridGeometry>,
+    placed: &HashSet<engine::CellId>,
+) -> Option<(String, Vec<engine::CellId>)> {
+    if placed.len() == 1 {
+        let id = *placed.iter().next().unwrap();
+        let tag = board
+            .geom
+            .neighbors_with_tags(id)
+            .get(0)
+            .map(|(_, t)| t.to_string())
+            .unwrap_or_else(|| "E".into());
+        return Some((tag, vec![id]));
+    }
+    let mut tags: HashSet<String> = HashSet::new();
+    for &id in placed.iter() {
+        for (n, t) in board.geom.neighbors_with_tags(id) {
+            if placed.contains(&n) || !board.cells[n.0 as usize].stack.is_empty() {
+                tags.insert(t.to_string());
+            }
+        }
+    }
+    for tag in tags.into_iter() {
+        let mut starts: Vec<engine::CellId> = Vec::new();
+        for &id in placed.iter() {
+            let cnt = board
+                .geom
+                .neighbors_with_tags(id)
+                .into_iter()
+                .filter(|(_, t)| *t == tag)
+                .count();
+            if cnt <= 1 {
+                starts.push(id);
+            }
+        }
+        let start = starts
+            .get(0)
+            .copied()
+            .or_else(|| placed.iter().next().copied());
+        if let Some(s) = start {
+            let path = collect_line_on_dir(board, s, &tag, placed);
+            if !path.is_empty() {
+                return Some((tag, path));
+            }
+        }
+    }
+    None
 }
 
 struct TileTangleExtension;

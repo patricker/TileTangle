@@ -1,5 +1,5 @@
+use tiletangle_wasm::{new_game, play_move, set_dictionary_from_text};
 use wasm_bindgen_test::*;
-use tiletangle_wasm::{new_game, set_dictionary_from_text, play_move};
 
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
@@ -25,7 +25,8 @@ fn set_dict_and_reject_invalid() {
     // single A at center should be rejected
     let placements = serde_json::json!([
         {"x": 2, "y": 2, "kind_id": "A"}
-    ]).to_string();
+    ])
+    .to_string();
     let err = play_move(&mut game, &placements).unwrap_err();
     let s = format!("{:?}", err);
     assert!(s.to_lowercase().contains("invalid"));

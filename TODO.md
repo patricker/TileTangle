@@ -378,12 +378,12 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 * [x] Hex grid: neighbor counts; path collinearity along a direction family.
 * [x] Board with holes: ensure spelling lines skip blocked cells correctly.
-* [ ] Performance: large sparse graph validate within bounds.
+* [x] Performance: large sparse graph validate within bounds.
 
 ### Docs
 
 * [x] “Custom Geometry” with diagrams and sample configs for hex & triangle boards.
-* [ ] Guidance on mapping graph coords to 2D positions for rendering.
+* [x] Guidance on mapping graph coords to 2D positions for rendering.
 
 ### Demo
 
@@ -487,13 +487,13 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Docs
 
-* [ ] “Rule Plugins” developer guide with lifecycle diagram.
-* [ ] Template plugin crate example.
+* [x] “Rule Plugins” developer guide with lifecycle diagram.
+* [x] Template plugin crate example.
 
 ### Demo
 
 * [x] Docs Playground: “Enable Diagonals” toggle.
-* [ ] Docs Playground: “Anagram Mode” toggle.
+* [x] Docs Playground: “Anagram Mode” toggle.
 * [x] Unity/Godot: button to switch rules mid-session (free-word toggle).
 
 ### Exit Criteria
@@ -518,26 +518,26 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
   * Config per language: reading direction; UI rendering hints.
   * Validation respects directionality; still canonicalize codepoints.
 * [x] Normalization modes: NFC default; optional NFKC; locale-sensitive case rules.
-* [ ] Tokenization hooks: per-language grapheme/cluster segmentation.
+* [x] Tokenization hooks: per-language grapheme/cluster segmentation.
 
 ### Unit Tests
 
 * [x] DAWG correctness vs SetDictionary; prefix queries.
 * [x] FST correctness vs SetDictionary; normalization + prefix queries.
 * [x] GADDAG rotation/path checks for sample words (e.g., CARE/CARES).
-* [ ] RTL word assembly tests (Hebrew/Arabic samples).
-* [ ] Normalization permutations accepted equivalently.
+* [x] RTL word assembly tests (Hebrew/Arabic samples).
+* [x] Normalization permutations accepted equivalently.
 
 ### Docs
 
-* [ ] “Dictionary Engines: DAWG & GADDAG”.
+* [x] “Dictionary Engines: DAWG & GADDAG”.
 * [x] Update “Lexicon Integration” with included list, FST usage, and boxing.
-* [ ] “Language Packs: RTL & Normalization”.
+* [x] “Language Packs: RTL & Normalization”.
 
 ### Demo
 
-* [ ] Docs: benchmark chart (DAWG/FST vs SetDictionary lookups) using precomputed data.
-* [ ] Live demo: switch dictionary engine in Playground.
+* [x] Docs: benchmark chart (DAWG/FST vs SetDictionary lookups) using precomputed data.
+* [x] Live demo: switch dictionary engine in Playground.
 
 ### Exit Criteria
 
@@ -727,6 +727,8 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 ### Implementation & Demos
 
 * [x] Seed Unity/Godot click-to-place board demos (basic Rect/Hex toggle; free-word mode toggle).
+* [x] Add rack UI and scoring overlays in Unity/Godot demos (pick-and-place tiles from rack; show last move breakdown).
+* [x] Add drag-and-drop + multi-tile staging with preview scoring and word highlights (Unity and Godot).
 
 * [ ] **Classic Crossword** (web + Unity + Godot): AI opponent.
 * [ ] **Hex Board Variant** (web): show non-rect adjacency.

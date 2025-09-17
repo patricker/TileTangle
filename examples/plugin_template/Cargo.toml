@@ -1,0 +1,13 @@
+[package]
+name = "tiletangle-plugin-template"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "tiletangle_plugin_template"
+path = "src/lib.rs"
+
+[dependencies]
+engine = { package = "tiletangle-engine", path = "../../engine" }
+serde = { version = "1", features = ["derive"] }

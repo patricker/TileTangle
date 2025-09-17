@@ -1,0 +1,59 @@
+---
+title: Dictionary Engines
+description: Compare the available dictionary implementations (Set, FST, DAWG, GADDAG) and when to use them.
+---
+
+import DictEngineChart from '@site/src/components/DictEngineChart';
+
+Our engine ships with multiple dictionary backends so you can trade **lookup speed**, **memory footprint**,
+and **additional capabilities** (prefix walks, move generation). All engines share the same
+`Dictionary` trait, so you can swap them without touching the rules layer.
+
+## Engine overview
+
+- **SetDictionary** — simplest option. Backed by a `HashSet`. Great for tests or tiny lexica but
+  has higher memory use and no prefix search.
+- **FstDictionary** — compressed finite-state transducer. Extremely fast lookups and small footprint.
+  Supports prefix queries, and is the default in the WASM demo.
+- **DawgDictionary** — deterministic acyclic word graph. Slightly heavier build step than FST but
+  keeps prefix traversal entirely in-memory and stays Rust-native (no `fst` dependency).
+- **GaddagDictionary** — specialised structure for Scrabble-style move generation. Provides both
+  prefix and "reverse+suffix" walks so the generator can extend in both directions.
+
+All engines now respect **tokenization hooks** and **normalization modes** from `DictionaryOptions`,
+so you can opt into NFKC, RTL alphabets, or custom grapheme segmentation.
+
+## Benchmarks
+
+Below is a small, precomputed snapshot (10k TWL06 words on an M1 Pro). Interpret it as directional guidance; your workload will differ.
+
+<DictEngineChart />
+
+## Selecting an engine at runtime
+
+```rust title="Rust"
+use tiletangle_engine::{DictionaryOptions, FstDictionary, GaddagDictionary, TokenizerRef};
+
+let opts = DictionaryOptions {
+    case_fold: true,
+    tokenizer: TokenizerRef::default(),
+    ..Default::default()
+};
+let lex = FstDictionary::from_words_opts(words.clone(), opts.clone());
+let gaddag = GaddagDictionary::from_words_opts(words, opts);
+```
+
+On the web playground you can now switch engines from the **Dictionary engine** dropdown. When the
+"GADDAG" option is selected the move generator will immediately benefit from the richer structure.
+
+## WASM helper
+
+```ts title="WASM"
+import init, {new_game, set_dictionary_from_text_engine} from 'tiletangle_wasm';
+await init();
+const game = new_game(JSON.stringify(cfg), 2);
+const text = await (await fetch('/dictionaries/TWL06.txt')).text();
+set_dictionary_from_text_engine(game, text, 'gaddag', true);
+```
+
+Use `'set'`, `'fst'`, `'dawg'`, or `'gaddag'` for the `engine` argument. The helper automatically applies NFC and optional case-folding before building the data structure.

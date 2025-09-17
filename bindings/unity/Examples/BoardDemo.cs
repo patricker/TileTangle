@@ -24,6 +24,13 @@ namespace TileTangle.Examples
         private Engine engine = new Engine();
         private GridLayoutGroup grid;
         private readonly List<Button> cells = new();
+        private HorizontalLayoutGroup rackBar;
+        private readonly List<Button> rackButtons = new();
+        private string? selectedKindId;
+        private Text scoreLabel;
+        private readonly System.Collections.Generic.List<(int x, int y, string kindId)> staged = new();
+        private System.Collections.Generic.List<Vector2Int> hlMain = new();
+        private System.Collections.Generic.List<System.Collections.Generic.List<Vector2Int>> hlCross = new();
 
         void Start()
         {
@@ -97,7 +104,36 @@ namespace TileTangle.Examples
             var geomToggle = CreateToggle(bar.transform, "Hex Geometry", useHexGeometry);
             geomToggle.onValueChanged.AddListener(ToggleGeometry);
 
+            // Score label
+            var scoreGo = new GameObject("Score", typeof(RectTransform), typeof(Text));
+            scoreGo.transform.SetParent(bar.transform, false);
+            var t = scoreGo.GetComponent<Text>();
+            t.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            t.alignment = TextAnchor.MiddleLeft;
+            t.color = Color.white;
+            t.text = "";
+            scoreLabel = t;
+
             SpawnCells();
+
+            // Rack bar at bottom
+            var rackGo = new GameObject("Rack", typeof(RectTransform), typeof(HorizontalLayoutGroup));
+            rackGo.transform.SetParent(canvas.transform, false);
+            var rackRt = rackGo.GetComponent<RectTransform>();
+            rackRt.anchorMin = new Vector2(0, 0);
+            rackRt.anchorMax = new Vector2(1, 0);
+            rackRt.pivot = new Vector2(0.5f, 0f);
+            rackRt.sizeDelta = new Vector2(0, 60);
+            rackRt.anchoredPosition = new Vector2(0, 0);
+            rackBar = rackGo.GetComponent<HorizontalLayoutGroup>();
+            rackBar.padding = new RectOffset(12, 12, 10, 10);
+            rackBar.spacing = 8;
+
+            // Commit / Cancel buttons
+            var commit = CreateButton(bar.transform, "Commit Move");
+            commit.onClick.AddListener(CommitStaged);
+            var cancel = CreateButton(bar.transform, "Cancel");
+            cancel.onClick.AddListener(ClearStaged);
         }
 
         private void RebuildGrid()
@@ -106,6 +142,9 @@ namespace TileTangle.Examples
             cells.Clear();
             grid.constraintCount = width;
             SpawnCells();
+            RefreshRack();
+            // Preview initial staging (none)
+            UpdatePreviewOverlay();
         }
 
         private void SpawnCells()
@@ -123,11 +162,15 @@ namespace TileTangle.Examples
         private void OnCellClicked(int x, int y)
         {
             var placements = new[] { new { x, y, kind_id = "A" } };
+            if (!string.IsNullOrEmpty(selectedKindId))
+                placements = new[] { new { x, y, kind_id = selectedKindId } };
             var json = JsonSerializer.Serialize(placements);
             var res = engine.PlayMove(json);
             if (res == null)
                 Debug.LogError($"play_move error: {Engine.LastError()}");
+            else UpdateScoreOverlay(res);
             RefreshBoard();
+            RefreshRack();
         }
 
         private void RefreshBoard()
@@ -145,6 +188,84 @@ namespace TileTangle.Examples
                     var sym = rows[y][x].GetString() ?? string.Empty;
                     SetCellText(cells[i++], sym);
                 }
+                // Overlay preview/committed highlights
+                foreach (var v in hlMain)
+                {
+                    int idx = v.y * width + v.x;
+                    if (idx >= 0 && idx < cells.Count)
+                    {
+                        var img = cells[idx].GetComponent<Image>();
+                        if (img != null) img.color = new Color(1.0f, 0.95f, 0.7f, 1f);
+                    }
+                }
+                foreach (var list in hlCross)
+                {
+                    foreach (var v in list)
+                    {
+                        int idx = v.y * width + v.x;
+                        if (idx >= 0 && idx < cells.Count)
+                        {
+                            var img = cells[idx].GetComponent<Image>();
+                            if (img != null) img.color = new Color(0.95f, 1.0f, 0.8f, 1f);
+                        }
+                    }
+                }
+                // Draw staged tile glyphs on top of board text
+                foreach (var s in staged)
+                {
+                    int idx = s.y * width + s.x;
+                    if (idx >= 0 && idx < cells.Count)
+                    {
+                        SetCellText(cells[idx], s.kindId);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError(e);
+            }
+        }
+
+        private void RefreshRack()
+        {
+            foreach (var b in rackButtons) Destroy(b.gameObject);
+            rackButtons.Clear();
+            selectedKindId = null;
+            var json = engine.GetRackJson();
+            if (json == null) return;
+            try
+            {
+                var doc = JsonDocument.Parse(json);
+                foreach (var el in doc.RootElement.EnumerateArray())
+                {
+                    var kindId = el.GetProperty("kind_id").GetString() ?? "";
+                    var symbol = el.GetProperty("symbol").GetString() ?? kindId;
+                    var score = el.GetProperty("score").GetInt16();
+                    var btn = CreateRackButton(rackBar.transform, symbol, score);
+                    var drag = btn.gameObject.AddComponent<RackTileDraggable>();
+                    drag.KindId = kindId; drag.Symbol = symbol; drag.Score = score;
+                    btn.onClick.AddListener(() => { selectedKindId = kindId; HighlightSelected(btn); });
+                    rackButtons.Add(btn);
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError(e);
+            }
+        }
+
+        private void UpdateScoreOverlay(string scoreJson)
+        {
+            try
+            {
+                var doc = JsonDocument.Parse(scoreJson);
+                var total = doc.RootElement.GetProperty("total").GetInt32();
+                var mainWord = doc.RootElement.GetProperty("main_word").GetString() ?? "";
+                var mainScore = doc.RootElement.GetProperty("main_score").GetInt32();
+                var cross = doc.RootElement.GetProperty("cross_words");
+                var crossSum = 0;
+                foreach (var cw in cross.EnumerateArray()) crossSum += cw[1].GetInt32();
+                scoreLabel.text = $"Last: {mainWord} total={total} (main={mainScore} +cross={crossSum})";
             }
             catch (Exception e)
             {
@@ -227,6 +348,8 @@ namespace TileTangle.Examples
             var img = go.GetComponent<Image>();
             img.color = new Color(0.92f, 0.92f, 0.92f, 1f);
             var btn = go.GetComponent<Button>();
+            var drop = go.AddComponent<BoardCellDropTarget>();
+            drop.Board = this;
             // label
             var textGo = new GameObject("Text", typeof(RectTransform), typeof(Text));
             textGo.transform.SetParent(go.transform, false);
@@ -245,6 +368,129 @@ namespace TileTangle.Examples
             var txt = btn.GetComponentInChildren<Text>();
             if (txt != null) txt.text = s ?? string.Empty;
         }
+
+        private Button CreateRackButton(Transform parent, string label, int score)
+        {
+            var go = new GameObject("RackTile", typeof(RectTransform), typeof(Image), typeof(Button));
+            go.transform.SetParent(parent, false);
+            var img = go.GetComponent<Image>();
+            img.color = new Color(0.85f, 0.85f, 1f, 1f);
+            var btn = go.GetComponent<Button>();
+            var textGo = new GameObject("Text", typeof(RectTransform), typeof(Text));
+            textGo.transform.SetParent(go.transform, false);
+            var rt = textGo.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one; rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
+            var txt = textGo.GetComponent<Text>();
+            txt.text = $"{label}\n{score}";
+            txt.alignment = TextAnchor.MiddleCenter;
+            txt.color = Color.black;
+            txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            return btn;
+        }
+
+        private void HighlightSelected(Button selected)
+        {
+            foreach (var b in rackButtons)
+            {
+                var img = b.GetComponent<Image>();
+                img.color = new Color(0.85f, 0.85f, 1f, 1f);
+            }
+            var selImg = selected.GetComponent<Image>();
+            selImg.color = new Color(0.95f, 0.95f, 0.6f, 1f);
+        }
+
+        private Button CreateButton(Transform parent, string label)
+        {
+            var go = new GameObject(label, typeof(RectTransform), typeof(Image), typeof(Button));
+            go.transform.SetParent(parent, false);
+            var img = go.GetComponent<Image>();
+            img.color = new Color(0.2f, 0.4f, 0.8f, 0.9f);
+            var btn = go.GetComponent<Button>();
+            var textGo = new GameObject("Text", typeof(RectTransform), typeof(Text));
+            textGo.transform.SetParent(go.transform, false);
+            var rt = textGo.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one; rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
+            var txt = textGo.GetComponent<Text>();
+            txt.text = label;
+            txt.alignment = TextAnchor.MiddleCenter;
+            txt.color = Color.white;
+            txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            return btn;
+        }
+
+        // Staging API
+        public void AddStagedPlacement(int x, int y, string kindId)
+        {
+            // replace if same cell exists
+            int idx = staged.FindIndex(p => p.x == x && p.y == y);
+            if (idx >= 0) staged[idx] = (x, y, kindId);
+            else staged.Add((x, y, kindId));
+            UpdatePreviewOverlay();
+            RefreshBoard();
+        }
+
+        private void CommitStaged()
+        {
+            if (staged.Count == 0) return;
+            var placements = staged.ConvertAll(p => new { x = p.x, y = p.y, kind_id = p.kindId });
+            var json = JsonSerializer.Serialize(placements);
+            var res = engine.PlayMove(json);
+            if (res == null)
+            {
+                Debug.LogError($"play_move error: {Engine.LastError()}");
+            }
+            else
+            {
+                UpdateScoreOverlay(res);
+            }
+            staged.Clear();
+            hlMain.Clear(); hlCross.Clear();
+            RefreshBoard();
+            RefreshRack();
+        }
+
+        private void ClearStaged()
+        {
+            staged.Clear();
+            hlMain.Clear(); hlCross.Clear();
+            RefreshBoard();
+        }
+
+        private void UpdatePreviewOverlay()
+        {
+            if (staged.Count == 0)
+            {
+                hlMain.Clear(); hlCross.Clear();
+                return;
+            }
+            var placements = staged.ConvertAll(p => new { x = p.x, y = p.y, kind_id = p.kindId });
+            var json = JsonSerializer.Serialize(placements);
+            var res = engine.PreviewMoveJson(json);
+            if (res == null) { return; }
+            try
+            {
+                var doc = JsonDocument.Parse(res);
+                var valid = doc.RootElement.GetProperty("valid").GetBoolean();
+                var total = doc.RootElement.GetProperty("total").GetInt32();
+                var mainWord = doc.RootElement.GetProperty("main_word").GetString() ?? "";
+                var mainScore = doc.RootElement.GetProperty("main_score").GetInt32();
+                var cross = doc.RootElement.GetProperty("cross_words");
+                var crossSum = 0; foreach (var cw in cross.EnumerateArray()) crossSum += cw[1].GetInt32();
+                scoreLabel.text = valid ? $"Preview: {mainWord} total={total} (main={mainScore} +cross={crossSum})" : "Preview: invalid";
+                hlMain = new System.Collections.Generic.List<Vector2Int>();
+                hlCross = new System.Collections.Generic.List<System.Collections.Generic.List<Vector2Int>>();
+                foreach (var c in doc.RootElement.GetProperty("main_cells").EnumerateArray())
+                {
+                    hlMain.Add(new Vector2Int(c[0].GetInt32(), c[1].GetInt32()));
+                }
+                foreach (var arr in doc.RootElement.GetProperty("cross_cells").EnumerateArray())
+                {
+                    var list = new System.Collections.Generic.List<Vector2Int>();
+                    foreach (var c in arr.EnumerateArray()) list.Add(new Vector2Int(c[0].GetInt32(), c[1].GetInt32()));
+                    hlCross.Add(list);
+                }
+            }
+            catch { }
+        }
     }
 }
-

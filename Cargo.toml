@@ -6,6 +6,7 @@ members = [
     "bindings/python",
     "bindings/godot",
     "tools/dict-build",
+    "examples/plugin_template",
 ]
 resolver = "2"
 

@@ -24,11 +24,11 @@ let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
 Loading From File
 
 ```rust
-use engine::{SetDictionary, FstDictionary, DictionaryOptions};
+use engine::{SetDictionary, FstDictionary, DictionaryOptions, TokenizerRef};
 
 let dict = SetDictionary::from_file(
     std::path::Path::new("assets/dictionaries/TWL06.txt"),
-    DictionaryOptions { case_fold: true, min_len: Some(2), max_len: None },
+    DictionaryOptions { case_fold: true, min_len: Some(2), max_len: None, tokenizer: TokenizerRef::default() },
 ).expect("load dictionary");
 state.dictionary = Some(Box::new(dict));
 let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
@@ -37,10 +37,10 @@ let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
 FST-backed (prefix-capable)
 
 ```rust
-use engine::{FstDictionary, DictionaryOptions};
+use engine::{FstDictionary, DictionaryOptions, TokenizerRef};
 let dict = FstDictionary::from_file(
     std::path::Path::new("assets/dictionaries/TWL06.txt"),
-    DictionaryOptions { case_fold: true, min_len: Some(2), max_len: None },
+    DictionaryOptions { case_fold: true, min_len: Some(2), max_len: None, tokenizer: TokenizerRef::default() },
 ).expect("load dictionary");
 assert!(dict.has_prefix("ab"));
 ```
@@ -55,6 +55,17 @@ const game = new_game(JSON.stringify(cfg), 2);
 const resp = await fetch('/dictionaries/TWL06.fst');
 const buf = new Uint8Array(await resp.arrayBuffer());
 set_dictionary_from_fst_bytes(game, buf, true);
+```
+
+WASM Loader (choose engine)
+
+```js
+import init, { new_game, set_dictionary_from_text_engine } from '/wasm/engine/pkg/tiletangle_wasm.js';
+await init();
+const game = new_game(JSON.stringify(cfg), 2);
+const txt = await (await fetch('/dictionaries/TWL06.txt')).text();
+// engine can be 'set', 'fst', 'dawg', or 'gaddag'
+set_dictionary_from_text_engine(game, txt, 'gaddag', true);
 ```
 
 Note: richer loaders (metadata, compressed formats) can be added later.

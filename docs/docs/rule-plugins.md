@@ -51,9 +51,39 @@ assert_eq!(sc.total, 9); // 1+3 + bonus 5
 rules.commit_user_move(&mut state, v, &sc).unwrap();
 ```
 
+Lifecycle
+
+```
+UserMove (actions)
+   |
+   | pre_validate()  — plugins may reject or rewrite actions
+   v
+validate()          — plugins may enforce constraints
+   |
+   | to_draft()     — one plugin produces MoveDraft (placements)
+   v
+CrosswordRules.validate()  — base line/contiguity/anchor checks
+   |
+   v
+score()             — base scoring
+   |
+   | modify_score() — plugins adjust totals/breakdown
+   v
+commit()            — base commit (board/rack/bag updates)
+   |
+   v
+plugin.commit()     — optional side effects
+```
+
+Template plugin crate
+
+- See `examples/plugin_template/` for a minimal external crate that implements two plugins:
+  - `ScoreBonusPlugin` — adds a fixed bonus to each move.
+  - `RejectFarPlacementsPlugin` — rejects moves when placed tiles are too far apart.
+  - Import the crate and add `Box::new(...)` instances to your `PluginRules` list.
+
 Notes
 
 - Plugins run in order. Be mindful of deterministic behavior.
 - Use `Custom(String, Value)` to pass structured configs to specialized plugins.
 - Upwords-style overlays are supported in base rules (see Stacking). A plugin can toggle these at runtime or pre-process actions.
-

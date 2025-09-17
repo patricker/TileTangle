@@ -1,6 +1,7 @@
 use engine::{self, BoardGeometry, Rules};
 use serde::Deserialize;
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_uint};
 
@@ -13,7 +14,9 @@ fn set_error(msg: impl ToString) {
 }
 
 fn take_cstring(s: String) -> *mut c_char {
-    CString::new(s).unwrap_or_else(|_| CString::new("invalid utf8").unwrap()).into_raw()
+    CString::new(s)
+        .unwrap_or_else(|_| CString::new("invalid utf8").unwrap())
+        .into_raw()
 }
 
 #[repr(C)]
@@ -43,10 +46,18 @@ struct JsTileset {
 }
 
 #[derive(Deserialize)]
-struct JsNode { x: i32, y: i32 }
+struct JsNode {
+    x: i32,
+    y: i32,
+}
 
 #[derive(Deserialize)]
-struct JsEdge { a: usize, b: usize, #[serde(default)] dir: Option<String> }
+struct JsEdge {
+    a: usize,
+    b: usize,
+    #[serde(default)]
+    dir: Option<String>,
+}
 
 #[derive(Deserialize)]
 struct JsBoardLayout {
@@ -147,23 +158,50 @@ pub extern "C" fn tt_new_game(config_json: *const c_char, players: c_uint) -> *m
         // Adjust geometry height to flattened 2D height (h * d) if needed
         // Note: We assume engine GameConfig height already matches this in WASM/loader callers; here we can proceed with overlay only.
         let mut nodes: Vec<engine::Coord2D> = Vec::new();
-        for z in 0..d { for y in 0..h { for x in 0..w { nodes.push(engine::Coord2D { x, y: y + z*h }); } } }
-        let index = |x:i32,y:i32,z:i32| -> usize { ((y + z*h) * w + x) as usize };
-        let mut edges: Vec<(usize,usize,String)> = Vec::new();
-        let mut try_edge = |x1:i32,y1:i32,z1:i32, x2:i32,y2:i32,z2:i32, tag:&str| {
-            if x2<0||x2>=w||y2<0||y2>=h||z2<0||z2>=d { return; }
-            edges.push((index(x1,y1,z1), index(x2,y2,z2), tag.to_string()));
+        for z in 0..d {
+            for y in 0..h {
+                for x in 0..w {
+                    nodes.push(engine::Coord2D { x, y: y + z * h });
+                }
+            }
+        }
+        let index = |x: i32, y: i32, z: i32| -> usize { ((y + z * h) * w + x) as usize };
+        let mut edges: Vec<(usize, usize, String)> = Vec::new();
+        let mut try_edge = |x1: i32, y1: i32, z1: i32, x2: i32, y2: i32, z2: i32, tag: &str| {
+            if x2 < 0 || x2 >= w || y2 < 0 || y2 >= h || z2 < 0 || z2 >= d {
+                return;
+            }
+            edges.push((index(x1, y1, z1), index(x2, y2, z2), tag.to_string()));
         };
-        for z in 0..d { for y in 0..h { for x in 0..w {
-            try_edge(x,y,z, x+1,y,z, "X");
-            try_edge(x,y,z, x,y+1,z, "Y");
-            try_edge(x,y,z, x,y,z+1, "Z");
-        } } }
+        for z in 0..d {
+            for y in 0..h {
+                for x in 0..w {
+                    try_edge(x, y, z, x + 1, y, z, "X");
+                    try_edge(x, y, z, x, y + 1, z, "Y");
+                    try_edge(x, y, z, x, y, z + 1, "Z");
+                }
+            }
+        }
         let ov = engine::GraphOverlay { nodes, edges };
-        if let Err(e) = state.apply_graph_overlay(ov) { set_error(format!("{}", e)); return std::ptr::null_mut(); }
-    } else if cfg.board_layout.r#type.as_deref() == Some("graph") || !cfg.board_layout.nodes.is_empty() {
-        let nodes: Vec<engine::Coord2D> = cfg.board_layout.nodes.iter().map(|n| engine::Coord2D { x: n.x, y: n.y }).collect();
-        let edges: Vec<(usize, usize, String)> = cfg.board_layout.edges.iter().map(|e| (e.a, e.b, e.dir.clone().unwrap_or_else(|| "L".into()))).collect();
+        if let Err(e) = state.apply_graph_overlay(ov) {
+            set_error(format!("{}", e));
+            return std::ptr::null_mut();
+        }
+    } else if cfg.board_layout.r#type.as_deref() == Some("graph")
+        || !cfg.board_layout.nodes.is_empty()
+    {
+        let nodes: Vec<engine::Coord2D> = cfg
+            .board_layout
+            .nodes
+            .iter()
+            .map(|n| engine::Coord2D { x: n.x, y: n.y })
+            .collect();
+        let edges: Vec<(usize, usize, String)> = cfg
+            .board_layout
+            .edges
+            .iter()
+            .map(|e| (e.a, e.b, e.dir.clone().unwrap_or_else(|| "L".into())))
+            .collect();
         let ov = engine::GraphOverlay { nodes, edges };
         if let Err(e) = state.apply_graph_overlay(ov) {
             set_error(format!("{}", e));
@@ -189,7 +227,10 @@ pub extern "C" fn tt_free_game(game: *mut GameHandle) {
 /// On success, returns a newly-allocated C string containing a JSON score object.
 /// On error, returns null; use `tt_last_error_message()` for details.
 #[no_mangle]
-pub extern "C" fn tt_play_move(game: *mut GameHandle, placements_json: *const c_char) -> *mut c_char {
+pub extern "C" fn tt_play_move(
+    game: *mut GameHandle,
+    placements_json: *const c_char,
+) -> *mut c_char {
     LAST_ERROR.with(|e| *e.borrow_mut() = None);
     if game.is_null() {
         set_error("game is null");
@@ -278,7 +319,11 @@ pub extern "C" fn tt_get_board(game: *const GameHandle) -> *mut c_char {
         for x in 0..w {
             if let Some(id) = g.state.board.geom.to_cell_id(engine::Coord2D { x, y }) {
                 let cell = &g.state.board.cells[id.0 as usize];
-                let s = if let Some(t) = cell.stack.last() { t.kind_id.clone() } else { String::from("") };
+                let s = if let Some(t) = cell.stack.last() {
+                    t.kind_id.clone()
+                } else {
+                    String::from("")
+                };
                 row.push(s);
             } else {
                 row.push(String::from(""));
@@ -288,6 +333,365 @@ pub extern "C" fn tt_get_board(game: *const GameHandle) -> *mut c_char {
     }
     let json = serde_json::json!({"width": w, "height": h, "rows": rows});
     take_cstring(serde_json::to_string(&json).unwrap())
+}
+
+/// Returns a newly-allocated C string with current player's rack as JSON array of tiles
+/// Each element: { kind_id, symbol, score }
+#[no_mangle]
+pub extern "C" fn tt_get_rack(game: *const GameHandle) -> *mut c_char {
+    if game.is_null() {
+        return std::ptr::null_mut();
+    }
+    let g = unsafe { &*(game as *const FfiGame) };
+    let rack = &g.state.players[g.state.to_move.0].rack;
+    let mut arr = Vec::with_capacity(rack.tiles.len());
+    for t in &rack.tiles {
+        // Map to tileset info
+        let mut symbol = String::new();
+        let mut score = 0i16;
+        for k in &g.state.tileset.tile_kinds {
+            if k.id == t.kind_id {
+                symbol = k.symbol.clone();
+                score = k.score;
+                break;
+            }
+        }
+        arr.push(serde_json::json!({
+            "kind_id": t.kind_id,
+            "symbol": symbol,
+            "score": score,
+        }));
+    }
+    take_cstring(serde_json::to_string(&arr).unwrap())
+}
+
+/// Returns players' scores and to_move index: { players:[{score}], to_move }
+#[no_mangle]
+pub extern "C" fn tt_get_scores(game: *const GameHandle) -> *mut c_char {
+    if game.is_null() {
+        return std::ptr::null_mut();
+    }
+    let g = unsafe { &*(game as *const FfiGame) };
+    let players: Vec<_> = g
+        .state
+        .players
+        .iter()
+        .map(|p| serde_json::json!({"score": p.score}))
+        .collect();
+    let val = serde_json::json!({ "players": players, "to_move": g.state.to_move.0 });
+    take_cstring(serde_json::to_string(&val).unwrap())
+}
+
+// ---- Preview helpers (duplicate minimal logic for highlights) ----
+
+fn ffi_collect_line_on_dir(
+    board: &engine::Board<engine::RectGridGeometry>,
+    center: engine::CellId,
+    tag: &str,
+    placed: &HashSet<engine::CellId>,
+) -> Vec<engine::CellId> {
+    let neighs: Vec<engine::CellId> = board
+        .geom
+        .neighbors_with_tags(center)
+        .into_iter()
+        .filter(|(_, t)| *t == tag)
+        .map(|(n, _)| n)
+        .collect();
+    let mut back = center;
+    if let Some(nb) = neighs.get(0) {
+        let mut prev = center;
+        let mut cur = *nb;
+        loop {
+            if !placed.contains(&cur) && board.cells[cur.0 as usize].stack.is_empty() {
+                break;
+            }
+            let nxt = board
+                .geom
+                .neighbors_with_tags(cur)
+                .into_iter()
+                .filter(|(_, t)| *t == tag)
+                .map(|(n, _)| n)
+                .find(|n| *n != prev);
+            back = cur;
+            if let Some(n2) = nxt {
+                prev = cur;
+                cur = n2;
+            } else {
+                break;
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let mut prev = None;
+    let mut cur = back;
+    loop {
+        if !placed.contains(&cur) && board.cells[cur.0 as usize].stack.is_empty() {
+            break;
+        }
+        out.push(cur);
+        let nxt = board
+            .geom
+            .neighbors_with_tags(cur)
+            .into_iter()
+            .filter(|(_, t)| *t == tag)
+            .map(|(n, _)| n)
+            .find(|n| Some(*n) != prev);
+        if let Some(n2) = nxt {
+            prev = Some(cur);
+            cur = n2;
+        } else {
+            break;
+        }
+    }
+    out
+}
+
+fn ffi_graph_find_main_path(
+    board: &engine::Board<engine::RectGridGeometry>,
+    placed: &HashSet<engine::CellId>,
+) -> Option<(String, Vec<engine::CellId>)> {
+    if placed.len() == 1 {
+        let id = *placed.iter().next().unwrap();
+        let tag = board
+            .geom
+            .neighbors_with_tags(id)
+            .get(0)
+            .map(|(_, t)| t.to_string())
+            .unwrap_or_else(|| "E".into());
+        return Some((tag, vec![id]));
+    }
+    let mut tags: HashSet<String> = HashSet::new();
+    for &id in placed.iter() {
+        for (n, t) in board.geom.neighbors_with_tags(id) {
+            if placed.contains(&n) || !board.cells[n.0 as usize].stack.is_empty() {
+                tags.insert(t.to_string());
+            }
+        }
+    }
+    // Choose a tag that connects all placed into a single path
+    for tag in tags.into_iter() {
+        // find starting node: a placed node with <=1 neighbor along tag
+        let mut starts: Vec<engine::CellId> = Vec::new();
+        for &id in placed.iter() {
+            let cnt = board
+                .geom
+                .neighbors_with_tags(id)
+                .into_iter()
+                .filter(|(_, t)| *t == tag)
+                .count();
+            if cnt <= 1 {
+                starts.push(id);
+            }
+        }
+        let start = starts
+            .get(0)
+            .copied()
+            .or_else(|| placed.iter().next().copied());
+        if let Some(s) = start {
+            // walk along tag and collect path
+            // reuse collect logic by treating s as center and tag
+            let path = ffi_collect_line_on_dir(board, s, &tag, placed);
+            if !path.is_empty() {
+                return Some((tag, path));
+            }
+        }
+    }
+    None
+}
+
+/// Preview a move from placements JSON. Returns JSON with validity, score, and highlight cells.
+/// Schema: { valid: bool, total, main_word, main_score, cross_words, bingo, main_cells:[[x,y],...], cross_cells:[[[x,y],...],...] }
+#[no_mangle]
+pub extern "C" fn tt_preview_move(
+    game: *const GameHandle,
+    placements_json: *const c_char,
+) -> *mut c_char {
+    if game.is_null() || placements_json.is_null() {
+        set_error("null pointer");
+        return std::ptr::null_mut();
+    }
+    let g = unsafe { &*(game as *const FfiGame) };
+    let cstr = unsafe { CStr::from_ptr(placements_json) };
+    let p_str = match cstr.to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_error("UTF-8 error");
+            return std::ptr::null_mut();
+        }
+    };
+    let placements: Vec<JsPlacement> = match serde_json::from_str(p_str) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(format!("placements parse error: {}", e));
+            return std::ptr::null_mut();
+        }
+    };
+    // Build draft and validated
+    let mut mv = engine::MoveDraft { placements: vec![] };
+    for p in &placements {
+        let Some(cid) = g
+            .state
+            .board
+            .geom
+            .to_cell_id(engine::Coord2D { x: p.x, y: p.y })
+        else {
+            set_error("invalid coordinates");
+            return std::ptr::null_mut();
+        };
+        mv.placements.push((
+            cid,
+            engine::Tile {
+                kind_id: p.kind_id.clone(),
+                mark: None,
+            },
+        ));
+    }
+    let validated = match g.rules.validate(&g.state, &mv) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(format!("{}", e));
+            return std::ptr::null_mut();
+        }
+    };
+    // temp board overlay
+    let mut temp_board = g.state.board.clone();
+    for (cid, tile) in &validated.placements {
+        temp_board.cells[cid.0 as usize].stack.push(tile.clone());
+    }
+    let placed_ids: HashSet<engine::CellId> =
+        validated.placements.iter().map(|(id, _)| *id).collect();
+    // main and cross cell paths
+    let mut main_cells: Vec<(i32, i32)> = Vec::new();
+    let mut cross_cells: Vec<Vec<(i32, i32)>> = Vec::new();
+    if temp_board.geom.has_graph() {
+        if let Some((tag, path)) = ffi_graph_find_main_path(&temp_board, &placed_ids) {
+            for id in &path {
+                if let Some(c) = temp_board.geom.from_cell_id(*id) {
+                    main_cells.push((c.x, c.y));
+                }
+            }
+            for (cid, _) in &validated.placements {
+                let mut seen: HashSet<String> = HashSet::new();
+                for (_, t) in g.state.board.geom.neighbors_with_tags(*cid) {
+                    if t == tag {
+                        continue;
+                    }
+                    if !seen.insert(t.to_string()) {
+                        continue;
+                    }
+                    let line = ffi_collect_line_on_dir(&temp_board, *cid, t, &placed_ids);
+                    if line.len() > 1 {
+                        let mut vecxy = Vec::new();
+                        for id in line {
+                            if let Some(c) = temp_board.geom.from_cell_id(id) {
+                                vecxy.push((c.x, c.y));
+                            }
+                        }
+                        cross_cells.push(vecxy);
+                    }
+                }
+            }
+        }
+    } else {
+        // rect grid main path using line_is_row
+        if let Some(start) = temp_board.geom.from_cell_id(validated.placements[0].0) {
+            let dir = if validated.line_is_row {
+                (1, 0)
+            } else {
+                (0, 1)
+            };
+            // Move to beginning
+            let mut c = start;
+            loop {
+                let prev = engine::Coord2D {
+                    x: c.x - dir.0,
+                    y: c.y - dir.1,
+                };
+                if let Some(id) = temp_board.geom.to_cell_id(prev) {
+                    if placed_ids.contains(&id) || !temp_board.cells[id.0 as usize].stack.is_empty()
+                    {
+                        c = prev;
+                        continue;
+                    }
+                }
+                break;
+            }
+            // forward collect
+            loop {
+                if let Some(id) = temp_board.geom.to_cell_id(c) {
+                    if placed_ids.contains(&id) || !temp_board.cells[id.0 as usize].stack.is_empty()
+                    {
+                        main_cells.push((c.x, c.y));
+                        c = engine::Coord2D {
+                            x: c.x + dir.0,
+                            y: c.y + dir.1,
+                        };
+                        continue;
+                    }
+                }
+                break;
+            }
+        }
+        // cross lines at each placement
+        let pdir = if validated.line_is_row {
+            (0, 1)
+        } else {
+            (1, 0)
+        };
+        for (cid, _) in &validated.placements {
+            let center = temp_board.geom.from_cell_id(*cid).unwrap();
+            // back
+            let mut back = center;
+            loop {
+                let prev = engine::Coord2D {
+                    x: back.x - pdir.0,
+                    y: back.y - pdir.1,
+                };
+                if let Some(id) = temp_board.geom.to_cell_id(prev) {
+                    if placed_ids.contains(&id) || !temp_board.cells[id.0 as usize].stack.is_empty()
+                    {
+                        back = prev;
+                        continue;
+                    }
+                }
+                break;
+            }
+            // forward collect
+            let mut vecxy = Vec::new();
+            let mut cur = back;
+            loop {
+                if let Some(id) = temp_board.geom.to_cell_id(cur) {
+                    if placed_ids.contains(&id) || !temp_board.cells[id.0 as usize].stack.is_empty()
+                    {
+                        vecxy.push((cur.x, cur.y));
+                        cur = engine::Coord2D {
+                            x: cur.x + pdir.0,
+                            y: cur.y + pdir.1,
+                        };
+                        continue;
+                    }
+                }
+                break;
+            }
+            if vecxy.len() > 1 {
+                cross_cells.push(vecxy);
+            }
+        }
+    }
+    // score
+    let sc = g.rules.score(&g.state, &validated);
+    let valid = sc.main_score >= 0;
+    let val = serde_json::json!({
+        "valid": valid,
+        "total": sc.total,
+        "main_word": sc.main_word,
+        "main_score": sc.main_score,
+        "cross_words": sc.cross_words,
+        "bingo": sc.bingo,
+        "main_cells": main_cells.iter().map(|(x,y)| vec![*x, *y]).collect::<Vec<_>>(),
+        "cross_cells": cross_cells.iter().map(|v| v.iter().map(|(x,y)| vec![*x, *y]).collect::<Vec<_>>()).collect::<Vec<_>>()
+    });
+    take_cstring(serde_json::to_string(&val).unwrap())
 }
 
 /// Free a C string previously returned by this library.
@@ -323,7 +727,9 @@ pub extern "C" fn tt_last_error_message() -> *const c_char {
 /// Set free_word_mode at runtime (1=true, 0=false)
 #[no_mangle]
 pub extern "C" fn tt_set_free_word_mode(game: *mut GameHandle, on: c_uint) {
-    if game.is_null() { return; }
+    if game.is_null() {
+        return;
+    }
     let g = unsafe { &mut *(game as *mut FfiGame) };
     g.rules.free_word_mode = on != 0;
 }
@@ -345,7 +751,8 @@ mod tests {
             "rng_seed": 42,
             "tile_counts": {"A": 10, "B": 10},
             "free_word_mode": true
-        }).to_string()
+        })
+        .to_string()
     }
 
     #[test]
@@ -353,7 +760,9 @@ mod tests {
         let cfg = CString::new(cfg_json()).unwrap();
         let game = tt_new_game(cfg.as_ptr(), 2);
         assert!(!game.is_null(), "should create game: {:?}", unsafe {
-            CStr::from_ptr(tt_last_error_message()).to_string_lossy().into_owned()
+            CStr::from_ptr(tt_last_error_message())
+                .to_string_lossy()
+                .into_owned()
         });
         let b = tt_get_board(game);
         assert!(!b.is_null());
@@ -368,7 +777,11 @@ mod tests {
         let res = tt_play_move(game, p.as_ptr());
         assert!(!res.is_null(), "play_move error: {:?}", unsafe {
             let e = tt_last_error_message();
-            if e.is_null() { String::from("(none)") } else { CStr::from_ptr(e).to_string_lossy().into_owned() }
+            if e.is_null() {
+                String::from("(none)")
+            } else {
+                CStr::from_ptr(e).to_string_lossy().into_owned()
+            }
         });
         unsafe { tt_string_free(res) };
         tt_free_game(game);

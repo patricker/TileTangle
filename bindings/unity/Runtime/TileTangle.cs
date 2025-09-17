@@ -20,6 +20,15 @@ namespace TileTangle
         public static extern IntPtr tt_get_board(IntPtr game);
 
         [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr tt_get_rack(IntPtr game);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr tt_get_scores(IntPtr game);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr tt_preview_move(IntPtr game, IntPtr placementsJson);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
         public static extern void tt_string_free(IntPtr ptr);
 
         [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
@@ -71,6 +80,35 @@ namespace TileTangle
             EnsureHandle();
             var ptr = Native.tt_get_board(handle);
             return TakeString(ptr);
+        }
+
+        public string? GetRackJson()
+        {
+            EnsureHandle();
+            var ptr = Native.tt_get_rack(handle);
+            return TakeString(ptr);
+        }
+
+        public string? GetScoresJson()
+        {
+            EnsureHandle();
+            var ptr = Native.tt_get_scores(handle);
+            return TakeString(ptr);
+        }
+
+        public string? PreviewMoveJson(string placementsJson)
+        {
+            EnsureHandle();
+            var pPtr = StringToUtf8(placementsJson);
+            try
+            {
+                var res = Native.tt_preview_move(handle, pPtr);
+                return TakeString(res);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(pPtr);
+            }
         }
 
         public static string? LastError()

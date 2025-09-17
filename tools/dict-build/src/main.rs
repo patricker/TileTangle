@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader};
 use unicode_normalization::UnicodeNormalization;
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = "Build .fst set file from wordlist")] 
+#[command(author, version, about = "Build .fst set file from wordlist")]
 struct Args {
     /// Input text word list (newline separated)
     input: String,
@@ -30,19 +30,33 @@ fn main() -> anyhow::Result<()> {
     for line in reader.lines() {
         let s = line?;
         let s = s.trim();
-        if s.is_empty() || s.starts_with('#') { continue; }
+        if s.is_empty() || s.starts_with('#') {
+            continue;
+        }
         let mut w: String = s.nfc().collect();
-        if args.case_fold { w = w.to_lowercase(); }
+        if args.case_fold {
+            w = w.to_lowercase();
+        }
         let len = w.chars().count();
-        if let Some(min) = args.min_len { if len < min { continue; } }
-        if let Some(max) = args.max_len { if len > max { continue; } }
+        if let Some(min) = args.min_len {
+            if len < min {
+                continue;
+            }
+        }
+        if let Some(max) = args.max_len {
+            if len > max {
+                continue;
+            }
+        }
         words.push(w);
     }
     words.sort();
     words.dedup();
     let out = File::create(&args.output)?;
     let mut builder = SetBuilder::new(out)?;
-    for w in words { builder.insert(w)?; }
+    for w in words {
+        builder.insert(w)?;
+    }
     builder.finish()?;
     Ok(())
 }

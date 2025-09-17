@@ -7,6 +7,8 @@ export default function Playground(): JSX.Element {
   const [ready, setReady] = useState(false);
   const [useWorker, setUseWorker] = useState(false);
   const [useDict, setUseDict] = useState(true);
+  const [dictEngine, setDictEngine] = useState<'fst' | 'set' | 'dawg' | 'gaddag'>('fst');
+  const [useAnagram, setUseAnagram] = useState(false);
   const [useHex, setUseHex] = useState(false);
   const [useDiag, setUseDiag] = useState(false);
   const [use3D, setUse3D] = useState(false);
@@ -81,6 +83,36 @@ export default function Playground(): JSX.Element {
     return { ...base, board_layout: { width, height, type: 'graph', nodes, edges } };
   }, [useHex, useDiag, use3D, depth]);
 
+  // Optional: build a tiny anagram index from the demo dictionary
+  const [anagramIndex, setAnagramIndex] = useState<Map<string, string> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadIndex() {
+      if (!useAnagram || !useDict) { setAnagramIndex(null); return; }
+      try {
+        // Prefer text to avoid bundling large FST parsing on the client
+        const resp = await fetch('/dictionaries/TWL06.txt');
+        if (!resp.ok) { setAnagramIndex(null); return; }
+        const txt = await resp.text();
+        // Build a small index only for words length <= 7 (rack size)
+        const m = new Map<string, string>();
+        const maxLen = 7;
+        for (const raw of txt.split(/\r?\n/)) {
+          const w = raw.trim();
+          if (!w || w.startsWith('#')) continue;
+          if (w.length > maxLen) continue;
+          const sig = w.toUpperCase().split('').sort().join('');
+          if (!m.has(sig)) m.set(sig, w.toUpperCase());
+        }
+        if (!cancelled) setAnagramIndex(m);
+      } catch {
+        if (!cancelled) setAnagramIndex(null);
+      }
+    }
+    loadIndex();
+    return () => { cancelled = true; };
+  }, [useAnagram, useDict]);
+
   useEffect(() => {
     (async () => {
       if (useWorker) {
@@ -104,6 +136,31 @@ export default function Playground(): JSX.Element {
         await call('set_reading_direction', { rtl });
         await call('set_stacking', { enabled: stackOn, max_height: 7, forbid_same: forbidSame, scoring: stackScoring });
         await call('set_free_word_mode', { on: !useDict });
+        if (useDict) {
+          try {
+            if (dictEngine === 'fst') {
+              const resp = await fetch('/dictionaries/TWL06.fst');
+              if (resp.ok) {
+                const buf = new Uint8Array(await resp.arrayBuffer());
+                await call('set_dictionary_from_fst_bytes', { bytes: buf, case_fold: true });
+              } else {
+                const txtResp = await fetch('/dictionaries/TWL06.txt');
+                if (txtResp.ok) {
+                  const txt = await txtResp.text();
+                  await call('set_dictionary_from_text', { text: txt, case_fold: true });
+                }
+              }
+            } else {
+              const txtResp = await fetch('/dictionaries/TWL06.txt');
+              if (txtResp.ok) {
+                const txt = await txtResp.text();
+                await call('set_dictionary_engine', { text: txt, engine: dictEngine, case_fold: true });
+              }
+            }
+          } catch (e) {
+            console.error('Failed to load dictionary', e);
+          }
+        }
         const { board: b } = await call('get_board');
         setGame({ call });
         setBoard(JSON.parse(b as string) as BoardJson);
@@ -117,14 +174,24 @@ export default function Playground(): JSX.Element {
         mod.set_stacking(g, stackOn, 7, forbidSame, stackScoring === 'sum');
         if (useDict) {
           try {
-            const resp = await fetch('/dictionaries/TWL06.fst');
-            if (resp.ok) {
-              const buf = new Uint8Array(await resp.arrayBuffer());
-              mod.set_dictionary_from_fst_bytes(g, buf, true);
+            if (dictEngine === 'fst') {
+              const resp = await fetch('/dictionaries/TWL06.fst');
+              if (resp.ok) {
+                const buf = new Uint8Array(await resp.arrayBuffer());
+                mod.set_dictionary_from_fst_bytes(g, buf, true);
+              } else {
+                const txtResp = await fetch('/dictionaries/TWL06.txt');
+                if (txtResp.ok) {
+                  const txt = await txtResp.text();
+                  mod.set_dictionary_from_text(g, txt, true);
+                }
+              }
             } else {
               const txtResp = await fetch('/dictionaries/TWL06.txt');
-              const txt = await txtResp.text();
-              mod.set_dictionary_from_text(g, txt, true);
+              if (txtResp.ok) {
+                const txt = await txtResp.text();
+                mod.set_dictionary_from_text_engine(g, txt, dictEngine, true);
+              }
             }
           } catch (e) { console.error('Failed to load dictionary', e); }
         }
@@ -139,19 +206,39 @@ export default function Playground(): JSX.Element {
         workerRef.current = null;
       }
     };
-  }, [useWorker, useDict, cfg, rtl, stackOn, stackScoring, forbidSame]);
+  }, [useWorker, useDict, cfg, rtl, stackOn, stackScoring, forbidSame, dictEngine]);
 
   const rack = useMemo(() => ['A','A','A','B','B'], []);
 
   const commit = async () => {
     if (!game || pending.length === 0) return;
     try {
+      let placements = pending;
+      // If anagram mode is enabled and we have an index, try to reorder letters to form any dictionary word
+      if (useAnagram && useDict && anagramIndex && board) {
+        // Check if placements are on a straight line (row or column)
+        const allX = new Set(placements.map(p => p.x));
+        const allY = new Set(placements.map(p => p.y));
+        const isRow = allY.size === 1;
+        const isCol = allX.size === 1;
+        if (isRow || isCol) {
+          // Derive the current letters from pending or board (pending contains only kind_id)
+          const letters = placements.map(p => p.kind_id.toUpperCase());
+          const sig = letters.slice().sort().join('');
+          const word = anagramIndex.get(sig);
+          if (word) {
+            // Order the placements along the line and assign letters from the found word
+            const sorted = [...placements].sort((a,b) => (isRow ? a.x - b.x : a.y - b.y));
+            placements = sorted.map((p, i) => ({ ...p, kind_id: word[i] }));
+          }
+        }
+      }
       if (useWorker) {
-        await game.call('play_move', { placements: pending });
+        await game.call('play_move', { placements });
         const { board: b } = await game.call('get_board');
         setBoard(JSON.parse(b as string) as BoardJson);
       } else {
-        game.mod.play_move(game.g, JSON.stringify(pending));
+        game.mod.play_move(game.g, JSON.stringify(placements));
         setBoard(JSON.parse(game.mod.get_board(game.g)) as BoardJson);
       }
       setPending([]);
@@ -204,6 +291,15 @@ export default function Playground(): JSX.Element {
           <label>Slice z: <input type="range" min={0} max={Math.max(0, depth-1)} value={z} onChange={e => setZ(parseInt(e.target.value))} /></label>
         </>}
         <label><input type="checkbox" checked={useDict} onChange={e => setUseDict(e.target.checked)} /> Dictionary checks (TWL06)</label>
+        <label>Engine:
+          <select value={dictEngine} onChange={e => setDictEngine(e.target.value as 'fst' | 'set' | 'dawg' | 'gaddag')} disabled={!useDict}>
+            <option value="fst">FST</option>
+            <option value="set">Set</option>
+            <option value="dawg">DAWG</option>
+            <option value="gaddag">GADDAG</option>
+          </select>
+        </label>
+        <label title="Reorder placed tiles to any valid anagram on commit (row/column only)"><input type="checkbox" checked={useAnagram} onChange={e => setUseAnagram(e.target.checked)} /> Anagram Mode</label>
         <label><input type="checkbox" checked={rtl} onChange={e => setRtl(e.target.checked)} /> RTL reading</label>
         <label><input type="checkbox" checked={stackOn} onChange={e => setStackOn(e.target.checked)} /> Stacking</label>
         {stackOn && (<>
