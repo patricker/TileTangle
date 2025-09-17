@@ -19,20 +19,55 @@ type AiSuggestion = {
   placements: Placement[];
 };
 
-export default function Playground(): JSX.Element {
+type PlaygroundInitialConfig = {
+  tileset?: { tile_kinds: { id: string; symbol: string; score: number; is_blank?: boolean; aliases?: string[] }[] };
+  tile_counts?: Record<string, number>;
+  rack_size?: number;
+  board_layout?: Record<string, unknown>;
+  ruleset_id?: string;
+  dictionary_id?: string;
+  rng_seed?: number;
+};
+
+type PlaygroundInitial = {
+  useWorker?: boolean;
+  useDict?: boolean;
+  dictEngine?: 'fst' | 'set' | 'dawg' | 'gaddag';
+  useAnagram?: boolean;
+  useHex?: boolean;
+  useDiag?: boolean;
+  use3D?: boolean;
+  depth?: number;
+  rtl?: boolean;
+  stackOn?: boolean;
+  stackScoring?: 'top' | 'sum';
+  forbidSame?: boolean;
+  cpuDifficulty?: 'off' | 'easy' | 'medium' | 'hard';
+  config?: PlaygroundInitialConfig;
+  rack?: string[];
+};
+
+type PlaygroundProps = {
+  initial?: PlaygroundInitial;
+};
+
+export default function Playground({initial}: PlaygroundProps = {}): JSX.Element {
+  const configOverrideRef = useRef<PlaygroundInitialConfig | undefined>(initial?.config);
+  const rackOverrideRef = useRef<string[] | undefined>(initial?.rack);
+
   const [ready, setReady] = useState(false);
-  const [useWorker, setUseWorker] = useState(false);
-  const [useDict, setUseDict] = useState(true);
-  const [dictEngine, setDictEngine] = useState<'fst' | 'set' | 'dawg' | 'gaddag'>('fst');
-  const [useAnagram, setUseAnagram] = useState(false);
-  const [useHex, setUseHex] = useState(false);
-  const [useDiag, setUseDiag] = useState(false);
-  const [use3D, setUse3D] = useState(false);
-  const [rtl, setRtl] = useState(false);
-  const [stackOn, setStackOn] = useState(false);
-  const [stackScoring, setStackScoring] = useState<'top'|'sum'>('top');
-  const [forbidSame, setForbidSame] = useState(true);
-  const [depth, setDepth] = useState(3);
+  const [useWorker, setUseWorker] = useState(initial?.useWorker ?? false);
+  const [useDict, setUseDict] = useState(initial?.useDict ?? true);
+  const [dictEngine, setDictEngine] = useState<'fst' | 'set' | 'dawg' | 'gaddag'>(initial?.dictEngine ?? 'fst');
+  const [useAnagram, setUseAnagram] = useState(initial?.useAnagram ?? false);
+  const [useHex, setUseHex] = useState(initial?.useHex ?? false);
+  const [useDiag, setUseDiag] = useState(initial?.useDiag ?? false);
+  const [use3D, setUse3D] = useState(initial?.use3D ?? false);
+  const [rtl, setRtl] = useState(initial?.rtl ?? false);
+  const [stackOn, setStackOn] = useState(initial?.stackOn ?? false);
+  const [stackScoring, setStackScoring] = useState<'top'|'sum'>(initial?.stackScoring ?? 'top');
+  const [forbidSame, setForbidSame] = useState(initial?.forbidSame ?? true);
+  const [depth, setDepth] = useState(initial?.depth ?? 3);
   const [z, setZ] = useState(0);
   const [game, setGame] = useState<any>(null);
   const [board, setBoard] = useState<BoardJson | null>(null);
@@ -41,8 +76,8 @@ export default function Playground(): JSX.Element {
   const [legalMoves, setLegalMoves] = useState<GeneratedMove[]>([]);
   const [activeMoveIndex, setActiveMoveIndex] = useState<number | null>(null);
   const [loadingMoves, setLoadingMoves] = useState(false);
-  const [rack, setRack] = useState<string[]>([]);
-  const [cpuDifficulty, setCpuDifficulty] = useState<'off' | 'easy' | 'medium' | 'hard'>('off');
+  const [rack, setRack] = useState<string[]>(rackOverrideRef.current ?? []);
+  const [cpuDifficulty, setCpuDifficulty] = useState<'off' | 'easy' | 'medium' | 'hard'>(initial?.cpuDifficulty ?? 'off');
   const [cpuThinking, setCpuThinking] = useState(false);
   const [cpuSuggestion, setCpuSuggestion] = useState<AiSuggestion | null>(null);
   const [lastCpu, setLastCpu] = useState<AiSuggestion | null>(null);
@@ -50,21 +85,33 @@ export default function Playground(): JSX.Element {
   const [eventLogText, setEventLogText] = useState('');
   const workerRef = useRef<Worker | null>(null);
 
+  const defaultTileset = useMemo(() => ({
+    tile_kinds: [
+      { id: 'A', symbol: 'A', score: 1 },
+      { id: 'B', symbol: 'B', score: 3 },
+    ],
+  }), []);
+
+  const defaultTileCounts = useMemo(() => ({ A: 30, B: 12 }), []);
+
   const cfg = useMemo(() => {
-    const width = 9, height = 9;
-    const base = {
-      tileset: { tile_kinds: [
-        { id: 'A', symbol: 'A', score: 1 },
-        { id: 'B', symbol: 'B', score: 3 },
-      ] },
-      rack_size: 7,
-      ruleset_id: 'cross', dictionary_id: 'en', rng_seed: 1,
-      tile_counts: { A: 30, B: 12 }, free_word_mode: true,
-    } as any;
-    if (use3D) {
-      return { ...base, board_layout: { type: '3d', width, height, depth } } as any;
-    }
-    if (useDiag) {
+    const override = configOverrideRef.current;
+    const baseWidth = typeof override?.board_layout === 'object' && override?.board_layout !== null && 'width' in (override.board_layout as any)
+      ? Number((override.board_layout as any).width)
+      : 9;
+    const baseHeight = typeof override?.board_layout === 'object' && override?.board_layout !== null && 'height' in (override.board_layout as any)
+      ? Number((override.board_layout as any).height)
+      : 9;
+
+    const width = Number.isFinite(baseWidth) && baseWidth > 0 ? baseWidth : 9;
+    const height = Number.isFinite(baseHeight) && baseHeight > 0 ? baseHeight : 9;
+
+    let boardLayout: Record<string, unknown>;
+    if (override?.board_layout) {
+      boardLayout = override.board_layout;
+    } else if (use3D) {
+      boardLayout = { type: '3d', width, height, depth };
+    } else if (useDiag) {
       const nodes: {x:number;y:number}[] = [];
       for (let y=0;y<height;y++) for (let x=0;x<width;x++) nodes.push({x,y});
       const index = (x:number,y:number) => y*width + x;
@@ -85,30 +132,40 @@ export default function Playground(): JSX.Element {
           tryEdge(x,y,x-1,y+1,'SW');
         }
       }
-      return { ...base, board_layout: { width, height, type: 'graph', nodes, edges } };
-    }
-    if (!useHex) return { ...base, board_layout: { width, height } };
-    // Build hex-style adjacency on a rectangular grid (even-r offset)
-    const nodes: {x:number;y:number}[] = [];
-    for (let y=0;y<height;y++) for (let x=0;x<width;x++) nodes.push({x,y});
-    const index = (x:number,y:number) => y*width + x;
-    const edges: {a:number;b:number;dir:string}[] = [];
-    const tryEdge = (x1:number,y1:number,x2:number,y2:number,dir:string) => {
-      if (x2<0||x2>=width||y2<0||y2>=height) return;
-      edges.push({ a:index(x1,y1), b:index(x2,y2), dir });
-    };
-    for (let y=0;y<height;y++) {
-      for (let x=0;x<width;x++) {
-        const even = (y % 2) === 0;
-        // Use only forward directions; overlay builds reverse links
-        tryEdge(x,y,x+1,y,'E');
-        // NE and SE (reverse links provide NW/SW)
-        tryEdge(x,y, x + (even?0:1), y-1, 'NE');
-        tryEdge(x,y, x + (even?0:1), y+1, 'SE');
+      boardLayout = { width, height, type: 'graph', nodes, edges };
+    } else if (useHex) {
+      const nodes: {x:number;y:number}[] = [];
+      for (let y=0;y<height;y++) for (let x=0;x<width;x++) nodes.push({x,y});
+      const index = (x:number,y:number) => y*width + x;
+      const edges: {a:number;b:number;dir:string}[] = [];
+      const tryEdge = (x1:number,y1:number,x2:number,y2:number,dir:string) => {
+        if (x2<0||x2>=width||y2<0||y2>=height) return;
+        edges.push({ a:index(x1,y1), b:index(x2,y2), dir });
+      };
+      for (let y=0;y<height;y++) {
+        for (let x=0;x<width;x++) {
+          const even = (y % 2) === 0;
+          tryEdge(x,y,x+1,y,'E');
+          tryEdge(x,y, x + (even ? 0 : 1), y-1, 'NE');
+          tryEdge(x,y, x + (even ? 0 : 1), y+1, 'SE');
+        }
       }
+      boardLayout = { width, height, type: 'graph', nodes, edges };
+    } else {
+      boardLayout = { width, height };
     }
-    return { ...base, board_layout: { width, height, type: 'graph', nodes, edges } };
-  }, [useHex, useDiag, use3D, depth]);
+
+    return {
+      tileset: override?.tileset ?? defaultTileset,
+      rack_size: override?.rack_size ?? 7,
+      board_layout: boardLayout,
+      ruleset_id: override?.ruleset_id ?? 'cross',
+      dictionary_id: override?.dictionary_id ?? 'en',
+      rng_seed: override?.rng_seed ?? 1,
+      tile_counts: override?.tile_counts ?? defaultTileCounts,
+      free_word_mode: !useDict,
+    } as any;
+  }, [useDict, useHex, useDiag, use3D, depth, defaultTileset, defaultTileCounts]);
 
   // Optional: build a tiny anagram index from the demo dictionary
   const [anagramIndex, setAnagramIndex] = useState<Map<string, string> | null>(null);
@@ -188,6 +245,10 @@ export default function Playground(): JSX.Element {
             console.error('Failed to load dictionary', e);
           }
         }
+        const overrideRack = rackOverrideRef.current;
+        if (overrideRack && overrideRack.length) {
+          await call('set_rack', { tiles: overrideRack });
+        }
         const { board: b } = await call('get_board');
         const { rack: r } = await call('get_rack');
         setGame({ call });
@@ -224,6 +285,10 @@ export default function Playground(): JSX.Element {
               }
             }
           } catch (e) { console.error('Failed to load dictionary', e); }
+        }
+        const overrideRack = rackOverrideRef.current;
+        if (overrideRack && overrideRack.length) {
+          mod.set_rack(g, JSON.stringify(overrideRack));
         }
         setGame({ mod, g });
         setBoard(JSON.parse(mod.get_board(g)) as BoardJson);
@@ -266,6 +331,25 @@ export default function Playground(): JSX.Element {
       console.error('get_rack failed', err);
     }
   }, [game, useWorker]);
+
+  const syncBoard = useCallback(async () => {
+    if (!game) return;
+    try {
+      if (useWorker) {
+        const { board: b } = await game.call('get_board');
+        setBoard(JSON.parse(b as string) as BoardJson);
+      } else {
+        setBoard(JSON.parse(game.mod.get_board(game.g)) as BoardJson);
+      }
+      await refreshRack();
+      setPending([]);
+      clearMoves();
+      setCpuSuggestion(null);
+      setLastCpu(null);
+    } catch (err) {
+      console.error('sync board failed', err);
+    }
+  }, [game, useWorker, refreshRack, clearMoves]);
 
   const commit = async () => {
     if (!game || pending.length === 0) return;
@@ -510,6 +594,34 @@ export default function Playground(): JSX.Element {
     }
   }, [game, useWorker]);
 
+  const undoMove = useCallback(async () => {
+    if (!game) return;
+    try {
+      if (useWorker) {
+        await game.call('undo');
+      } else {
+        game.mod.undo(game.g);
+      }
+      await syncBoard();
+    } catch (err) {
+      console.error('undo failed', err);
+    }
+  }, [game, useWorker, syncBoard]);
+
+  const redoMove = useCallback(async () => {
+    if (!game) return;
+    try {
+      if (useWorker) {
+        await game.call('redo');
+      } else {
+        game.mod.redo(game.g);
+      }
+      await syncBoard();
+    } catch (err) {
+      console.error('redo failed', err);
+    }
+  }, [game, useWorker, syncBoard]);
+
   if (!ready || !board) return <div>Loading WASM…</div>;
 
   return (
@@ -546,6 +658,8 @@ export default function Playground(): JSX.Element {
         </>)}
         <button onClick={commit} disabled={pending.length === 0}>Commit Move ({pending.length})</button>
         <button onClick={() => setPending([])} disabled={pending.length === 0}>Reset</button>
+        <button onClick={undoMove} disabled={!game} data-testid="playground-undo">Undo</button>
+        <button onClick={redoMove} disabled={!game} data-testid="playground-redo">Redo</button>
         <button onClick={() => {
           if (showMoves) {
             clearMoves();
@@ -595,6 +709,9 @@ export default function Playground(): JSX.Element {
           {Array.from({length: use3D ? Math.floor(board.height / depth) : board.height}).map((_, y) => (
             Array.from({length: board.width}).map((__, x) => (
               <div key={`${x}-${y}`}
+                   data-testid="playground-board-cell"
+                   data-x={x}
+                   data-y={use3D ? (y + z * Math.floor(board.height / depth)) : y}
                    onDragOver={(e)=>e.preventDefault()}
                    onDrop={(e)=>onDropCell(x, y, e)}
                    style={{
@@ -622,7 +739,11 @@ export default function Playground(): JSX.Element {
           <div style={{marginBottom: 6, fontSize: 12, opacity: 0.7}}>Rack (drag onto board)</div>
           <div style={{display:'flex', gap: 6}}>
             {rack.map((k, i) => (
-              <div key={i} draggable onDragStart={(e)=>onDragStartTile(k, e)}
+              <div key={i}
+                   draggable
+                   data-testid="playground-rack-tile"
+                   data-kind={k}
+                   onDragStart={(e)=>onDragStartTile(k, e)}
                    style={{width:28, height:28, border:'1px solid #aaa', display:'flex', alignItems:'center', justifyContent:'center', background:'#f9f9f9', cursor:'grab'}}>
                 {k}
               </div>

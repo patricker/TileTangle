@@ -1,0 +1,97 @@
+---
+id: showcase
+sidebar_position: 12
+title: Showcase Demos
+description: Explore feature-focused demos across the TileTangle surface area.
+---
+
+import Playground from '@site/src/components/Playground';
+import ClassicDemo from '@site/src/components/ClassicDemo';
+import SolverTool from '@site/src/components/SolverTool';
+
+## Classic Crossword (AI opponent)
+
+<ClassicDemo />
+
+The WASM demo above mirrors the classic 15×15 experience: commit moves with drag-and-drop, let the CPU
+respond, and use <kbd>Undo</kbd>/<kbd>Redo</kbd> to scrub the event log.
+
+- Unity scene: `bindings/unity/Samples~/BoardDemo` (toggle “Hex Geometry” and “Commit Move”).
+  - Build the native plugin with `make unity-libs`, then open the sample scene and hit Play; the script
+    exposes the same drag-and-drop flow showcased here.
+- Godot project: `bindings/godot/examples` (scene `scenes/Main.tscn`). The top bar toggles free-word mode,
+  stacking, and hex adjacency while mirroring the WASM demo logic.
+
+## Hex Board Variant (web)
+
+<Playground initial={{ useHex: true, useDict: true, dictEngine: 'dawg' }} />
+
+Hex adjacency uses graph-based move generation. Try placing letters around the origin and notice that
+perpendicular checks follow the six-direction neighbourhood.
+
+## Upwords-style Stacking (web)
+
+<Playground initial={{ stackOn: true, stackScoring: 'sum', forbidSame: false }} />
+
+Enable stacking to layer tiles on existing words. The demo defaults to `SumStack` scoring so previously
+covered letters still contribute—toggle back to `TopOnly` to emulate Upwords.
+
+## Emoji Crossword (web)
+
+<Playground
+  initial={{
+    useDict: false,
+    config: {
+      tileset: {
+        tile_kinds: [
+          { id: 'SUN', symbol: '🌞', score: 4 },
+          { id: 'STAR', symbol: '⭐', score: 3 },
+          { id: 'HEART', symbol: '❤️', score: 2 },
+          { id: 'SMILE', symbol: '😀', score: 1 },
+          { id: 'MOON', symbol: '🌙', score: 2 },
+          { id: 'NOTE', symbol: '🎵', score: 3 },
+          { id: 'PLANET', symbol: '🪐', score: 5 },
+          { id: 'BL', symbol: '✨', score: 0, is_blank: true }
+        ]
+      },
+      tile_counts: { SUN: 4, STAR: 5, HEART: 6, SMILE: 8, MOON: 5, NOTE: 5, PLANET: 2, BL: 2 },
+      board_layout: { width: 7, height: 7 },
+      rack_size: 7,
+      ruleset_id: 'emoji',
+      dictionary_id: 'emoji'
+    },
+    rack: ['🌞','❤️','🌞','🎵','⭐','✨','😀'],
+    stackOn: false
+  }}
+/>
+
+Free-word mode is active and the rack starts with a blank (`✨`). Drop pieces to paint emoji words without
+worrying about dictionary enforcement.
+
+## 3D Board (Godot)
+
+The Godot sample includes a stacked-layers mode. Load `bindings/godot/examples`, toggle the “3D Slice”
+controls, and use the layer slider to inspect vertical plays. (3D move generation is available through
+`CrosswordRules::validate`—use the same API from Unity or Python.)
+
+## Solver Tool (web + Python)
+
+<SolverTool />
+
+Pair the UI above with the Python helper for automation:
+
+```bash
+python examples/python/top_moves.py --rack AEIRST?
+```
+
+The CLI prints parity results with the WASM tool, proving that solver logic stays consistent across
+bindings.
+
+## Source links
+
+- Web demos (Playground & Classic): `docs/src/components/`
+- Unity wrapper & samples: `bindings/unity/`
+- Godot addon & project: `bindings/godot/`
+- Python examples: `examples/python/`
+
+Use these as starting points for your own variants—each demo relies exclusively on the public bindings.

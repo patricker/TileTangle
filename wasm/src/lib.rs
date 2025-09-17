@@ -304,9 +304,8 @@ struct JsPlacement {
 #[wasm_bindgen]
 pub fn play_move(game: &mut JsGame, placements_json: &str) -> Result<JsValue, JsValue> {
     let placements: Vec<JsPlacement> = serde_json::from_str(placements_json).map_err(to_js_err)?;
-    // save history snapshot (clear future on new action)
+    // clear redo stack on new action
     game.future.clear();
-    game.history.push(snapshot_json(game));
     let mut mv = engine::MoveDraft { placements: vec![] };
     for p in placements {
         let cid = game
@@ -331,6 +330,7 @@ pub fn play_move(game: &mut JsGame, placements_json: &str) -> Result<JsValue, Js
     game.rules
         .commit(&mut game.state, validated, &score)
         .map_err(to_js_err)?;
+    game.history.push(snapshot_json(game));
     Ok(JsValue::from_str(
         &serde_json::to_string(&score_to_json(&score)).unwrap(),
     ))
@@ -593,6 +593,33 @@ pub fn redo(game: &mut JsGame) -> Result<(), JsValue> {
 }
 
 #[wasm_bindgen]
+pub fn set_rack(game: &mut JsGame, rack_json: &str) -> Result<(), JsValue> {
+    let tiles: Vec<String> = serde_json::from_str(rack_json).map_err(to_js_err)?;
+    let pid = game.state.to_move.0;
+    if tiles.len() > 21 {
+        return Err(to_js_err("rack exceeds maximum capacity"));
+    }
+    let mut new_tiles = Vec::with_capacity(tiles.len());
+    for kind_id in tiles {
+        if !game
+            .state
+            .tileset
+            .tile_kinds
+            .iter()
+            .any(|tk| tk.id == kind_id)
+        {
+            return Err(to_js_err(format!("unknown tile id '{kind_id}'")));
+        }
+        new_tiles.push(engine::Tile {
+            kind_id,
+            mark: None,
+        });
+    }
+    game.state.players[pid].rack.tiles = new_tiles;
+    Ok(())
+}
+
+#[wasm_bindgen]
 pub fn set_dictionary_from_text(
     game: &mut JsGame,
     text: &str,
@@ -833,8 +860,8 @@ pub fn best_move(game: &JsGame, difficulty: &str, seed: Option<u64>) -> Result<S
 #[wasm_bindgen]
 pub fn pass_turn(game: &mut JsGame) {
     game.future.clear();
-    game.history.push(snapshot_json(game));
     game.state.pass_turn();
+    game.history.push(snapshot_json(game));
 }
 
 #[derive(Deserialize)]

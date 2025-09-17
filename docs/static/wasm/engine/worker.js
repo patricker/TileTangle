@@ -20,6 +20,11 @@ self.onmessage = async (e) => {
       if (!game) throw new Error('no game');
       mod.set_free_word_mode(game, !!payload.on);
       self.postMessage({ id, ok: true });
+    } else if (action === 'set_rack') {
+      if (!game) throw new Error('no game');
+      const tiles = Array.isArray(payload?.tiles) ? payload.tiles : [];
+      mod.set_rack(game, JSON.stringify(tiles));
+      self.postMessage({ id, ok: true });
     } else if (action === 'set_reading_direction') {
       if (!game) throw new Error('no game');
       mod.set_reading_direction(game, !!payload.rtl);
