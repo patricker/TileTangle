@@ -336,6 +336,61 @@ impl WordEngine {
         GString::from(serde_json::to_string(&val).unwrap())
     }
 
+    #[func]
+    pub fn best_move(&self, difficulty: GString, seed: Variant) -> GString {
+        let Some(state) = &self.state else {
+            godot_error!("best_move called before new_game");
+            return GString::from("");
+        };
+        let diff_tag = difficulty.to_string();
+        let level = match diff_tag.to_ascii_lowercase().as_str() {
+            "easy" => engine::AiDifficulty::Easy,
+            "medium" => engine::AiDifficulty::Medium,
+            "hard" => engine::AiDifficulty::Hard,
+            _ => {
+                godot_error!("unknown difficulty: {}", diff_tag);
+                return GString::from("");
+            }
+        };
+        let mut cfg = engine::AiConfig::for_difficulty(level);
+        if !seed.is_nil() {
+            if let Ok(v) = seed.try_to::<i64>() {
+                if v >= 0 {
+                    cfg.randomness = Some(v as u64);
+                }
+            }
+        }
+        let Some(eval) = engine::best_move_greedy(state, &self.rules, &cfg) else {
+            return GString::from("null");
+        };
+        let mut placements = Vec::with_capacity(eval.candidate.placements.len());
+        for (cid, tile) in &eval.candidate.placements {
+            if let Some(coord) = state.board.geom.from_cell_id(*cid) {
+                let mut obj = serde_json::Map::new();
+                obj.insert("x".into(), coord.x.into());
+                obj.insert("y".into(), coord.y.into());
+                obj.insert(
+                    "kind_id".into(),
+                    serde_json::Value::String(tile.kind_id.clone()),
+                );
+                if let Some(mark) = &tile.mark {
+                    obj.insert("mark".into(), serde_json::Value::String(mark.clone()));
+                }
+                placements.push(serde_json::Value::Object(obj));
+            }
+        }
+        let json = serde_json::json!({
+            "word": eval.candidate.word,
+            "score": eval.candidate.score,
+            "total": eval.total,
+            "rack_leave": eval.rack_leave,
+            "board_equity": eval.board_equity,
+            "endgame_penalty": eval.endgame_penalty,
+            "placements": placements,
+        });
+        GString::from(json.to_string())
+    }
+
     /// Preview move: returns JSON { valid, total, main_word, main_score, cross_words, bingo, main_cells, cross_cells }
     #[func]
     pub fn preview_move(&self, placements_json: GString) -> GString {

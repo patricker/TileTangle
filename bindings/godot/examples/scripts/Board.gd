@@ -10,6 +10,10 @@ var staged := [] # array of {x,y,kind_id}
 var kind_to_symbol := {}
 var last_main := []
 var last_cross := []
+var cpu_difficulty := "medium"
+var cpu_button : Button
+var cpu_diff_button : Button
+var cpu_busy := false
 
 func _ready():
     # Top bar with toggles
@@ -52,6 +56,16 @@ func _ready():
     btn_cancel.text = "Cancel"
     btn_cancel.pressed.connect(func(): _clear_staged())
     bar.add_child(btn_cancel)
+
+    cpu_diff_button = Button.new()
+    cpu_diff_button.text = "Difficulty: Medium"
+    cpu_diff_button.pressed.connect(func(): _cycle_cpu_difficulty())
+    bar.add_child(cpu_diff_button)
+
+    cpu_button = Button.new()
+    cpu_button.text = "CPU Move (Medium)"
+    cpu_button.pressed.connect(func(): _play_cpu_move())
+    bar.add_child(cpu_button)
 
     add_child(grid)
     grid.columns = width
@@ -306,6 +320,76 @@ func _commit_staged():
 func _clear_staged():
     staged.clear()
     _refresh_board()
+
+func _cycle_cpu_difficulty():
+    match cpu_difficulty:
+        "easy": cpu_difficulty = "medium"
+        "medium": cpu_difficulty = "hard"
+        _:
+            cpu_difficulty = "easy"
+    var label := cpu_difficulty.capitalize()
+    if cpu_diff_button:
+        cpu_diff_button.text = "Difficulty: %s" % label
+    if cpu_button:
+        cpu_button.text = "CPU Move (%s)" % label
+
+func _play_cpu_move():
+    if cpu_busy:
+        return
+    cpu_busy = true
+    if cpu_button:
+        cpu_button.disabled = true
+    var best_json := eng.best_move(cpu_difficulty, 42)
+    if best_json == "":
+        push_warning("best_move returned empty result")
+        _reset_cpu_button()
+        return
+    if best_json == "null":
+        var label := get_node_or_null("ScoreLabel") as Label
+        if label:
+            label.text = "CPU: no legal moves"
+        _reset_cpu_button()
+        return
+    var parsed = JSON.parse_string(best_json)
+    if parsed == null:
+        push_warning("best_move returned invalid JSON")
+        _reset_cpu_button()
+        return
+    var placements := []
+    for entry in parsed.get("placements", []):
+        var obj := {
+            "x": int(entry.get("x", 0)),
+            "y": int(entry.get("y", 0)),
+            "kind_id": String(entry.get("kind_id", "")),
+        }
+        if entry.has("mark"):
+            obj["mark"] = entry["mark"]
+        placements.append(obj)
+    if placements.is_empty():
+        push_warning("CPU move produced no placements")
+        _reset_cpu_button()
+        return
+    var placements_json := JSON.stringify(placements)
+    var preview_json := eng.preview_move(placements_json)
+    if preview_json != "":
+        var preview = JSON.parse_string(preview_json)
+        if preview != null:
+            last_main = preview.get("main_cells", [])
+            last_cross = preview.get("cross_cells", [])
+    var res := eng.play_move(placements_json)
+    if res == "":
+        push_error("play_move failed for CPU move")
+    else:
+        _update_score_overlay(res)
+    staged.clear()
+    _refresh_board()
+    _refresh_rack()
+    _reset_cpu_button()
+
+func _reset_cpu_button():
+    cpu_busy = false
+    if cpu_button:
+        cpu_button.disabled = false
 
 func stage_tile(x:int, y:int, kid:String):
     var new_staged := []

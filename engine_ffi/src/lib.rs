@@ -1,7 +1,7 @@
-use engine::{self, BoardGeometry, Rules};
+use engine::{self, AiConfig, AiDifficulty, BoardGeometry, Rules};
 use serde::Deserialize;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_uint};
 
@@ -17,6 +17,15 @@ fn take_cstring(s: String) -> *mut c_char {
     CString::new(s)
         .unwrap_or_else(|_| CString::new("invalid utf8").unwrap())
         .into_raw()
+}
+
+fn parse_difficulty_tag(tag: &str) -> Result<AiDifficulty, &'static str> {
+    match tag.to_ascii_lowercase().as_str() {
+        "easy" => Ok(AiDifficulty::Easy),
+        "medium" => Ok(AiDifficulty::Medium),
+        "hard" => Ok(AiDifficulty::Hard),
+        _ => Err("unknown difficulty"),
+    }
 }
 
 #[repr(C)]
@@ -692,6 +701,80 @@ pub extern "C" fn tt_preview_move(
         "cross_cells": cross_cells.iter().map(|v| v.iter().map(|(x,y)| vec![*x, *y]).collect::<Vec<_>>()).collect::<Vec<_>>()
     });
     take_cstring(serde_json::to_string(&val).unwrap())
+}
+
+/// Compute the engine's best move for the current player.
+///
+/// `difficulty` accepts "easy", "medium", or "hard".
+/// If `seed_is_some` is non-zero, the `seed` value is used for deterministic randomness; otherwise RNG is disabled.
+/// Returns a JSON blob describing the evaluated move or the string "null" if no moves are available.
+#[no_mangle]
+pub extern "C" fn tt_best_move(
+    game: *mut GameHandle,
+    difficulty: *const c_char,
+    seed: u64,
+    seed_is_some: c_uint,
+) -> *mut c_char {
+    LAST_ERROR.with(|e| *e.borrow_mut() = None);
+    if game.is_null() {
+        set_error("game is null");
+        return std::ptr::null_mut();
+    }
+    let g = unsafe { &mut *(game as *mut FfiGame) };
+    if difficulty.is_null() {
+        set_error("difficulty is null");
+        return std::ptr::null_mut();
+    }
+    let diff_cstr = unsafe { CStr::from_ptr(difficulty) };
+    let diff_str = match diff_cstr.to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_error("difficulty is not valid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+    let level = match parse_difficulty_tag(diff_str) {
+        Ok(lvl) => lvl,
+        Err(_) => {
+            set_error("unknown difficulty");
+            return std::ptr::null_mut();
+        }
+    };
+    let mut cfg = AiConfig::for_difficulty(level);
+    if seed_is_some != 0 {
+        cfg.randomness = Some(seed);
+    }
+    let Some(eval) = engine::best_move_greedy(&g.state, &g.rules, &cfg) else {
+        return take_cstring("null".to_string());
+    };
+    let mut placements_json = Vec::with_capacity(eval.candidate.placements.len());
+    for (cid, tile) in &eval.candidate.placements {
+        let Some(coord) = g.state.board.geom.from_cell_id(*cid) else {
+            set_error("invalid placement coordinate");
+            return std::ptr::null_mut();
+        };
+        let mut obj = serde_json::Map::new();
+        obj.insert("x".into(), coord.x.into());
+        obj.insert("y".into(), coord.y.into());
+        obj.insert(
+            "kind_id".into(),
+            serde_json::Value::String(tile.kind_id.clone()),
+        );
+        if let Some(mark) = &tile.mark {
+            obj.insert("mark".into(), serde_json::Value::String(mark.clone()));
+        }
+        placements_json.push(serde_json::Value::Object(obj));
+    }
+    let val = serde_json::json!({
+        "word": eval.candidate.word,
+        "score": eval.candidate.score,
+        "total": eval.total,
+        "rack_leave": eval.rack_leave,
+        "board_equity": eval.board_equity,
+        "endgame_penalty": eval.endgame_penalty,
+        "placements": placements_json,
+    });
+    take_cstring(val.to_string())
 }
 
 /// Free a C string previously returned by this library.

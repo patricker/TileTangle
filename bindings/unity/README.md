@@ -26,7 +26,7 @@ Copy the file into your Unity project under `Assets/Plugins/<Platform>/` with th
 
 1. Add `Assets/Plugins/<Platform>/libtiletangle_ffi.(so|dylib|dll)`.
 2. Add `TileTangle.cs` to a suitable folder under your `Assets/` (e.g., `Assets/Scripts/TileTangle/`).
-3. (Optional) Drop in the demo scripts `Examples/BoardDemo.cs`, `Examples/RackTileDraggable.cs`, and `Examples/BoardCellDropTarget.cs`. Attach `BoardDemo` to an empty GameObject in a new scene. It creates a Canvas with a grid, a rack bar, and a score overlay. You can toggle Free Word Mode and Hex geometry. Drag tiles from the rack onto board cells, then press “Commit Move” (or cancel).
+3. (Optional) Drop in the demo scripts `Examples/BoardDemo.cs`, `Examples/RackTileDraggable.cs`, and `Examples/BoardCellDropTarget.cs`. Attach `BoardDemo` to an empty GameObject in a new scene. It creates a Canvas with a grid, a rack bar, and a score overlay. You can toggle Free Word Mode/Hex geometry, pick an AI difficulty, and fire the **CPU Move** button to watch the Rust solver respond. Drag tiles from the rack onto board cells, then press “Commit Move” (or cancel).
 4. Call the wrapper directly, or use the demo script:
 
 ```csharp

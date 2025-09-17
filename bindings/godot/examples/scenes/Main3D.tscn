@@ -1,9 +1,47 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
-[ext_resource type="Script" path="res://scripts/Board3D.gd" id="1_j9fsc"]
+[ext_resource type="Script" path="res://scripts/Board3D.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/Board3DOverlay.gd" id="2"]
 
 [node name="Main3D" type="Node3D"]
 
 [node name="Board3D" type="Node3D" parent="."]
-script = ExtResource("1_j9fsc")
+script = ExtResource("1")
 
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="Overlay" type="Control" parent="UI"]
+script = ExtResource("2")
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 0.0
+anchor_bottom = 0.0
+position = Vector2(16, 16)
+size = Vector2(280, 160)
+
+[node name="VBox" type="VBoxContainer" parent="UI/Overlay"]
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 0.0
+anchor_bottom = 0.0
+size_flags_horizontal = 0
+size_flags_vertical = 0
+
+[node name="IntroLabel" type="Label" parent="UI/Overlay/VBox"]
+text = "Use the slider to view slices of the 3D board."
+
+[node name="LayerLabel" type="Label" parent="UI/Overlay/VBox"]
+text = "Layer 0"
+
+[node name="LayerSlider" type="HSlider" parent="UI/Overlay/VBox"]
+min_value = 0.0
+max_value = 2.0
+step = 1.0
+value = 0.0
+size_flags_horizontal = 3
+
+[node name="PlayButton" type="Button" parent="UI/Overlay/VBox"]
+text = "Play sample vertical word"
+
+[connection signal="value_changed" from="UI/Overlay/VBox/LayerSlider" to="UI/Overlay" method="_on_layer_slider_value_changed"]
+[connection signal="pressed" from="UI/Overlay/VBox/PlayButton" to="UI/Overlay" method="_on_play_button_pressed"]

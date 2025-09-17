@@ -31,6 +31,10 @@ namespace TileTangle.Examples
         private readonly System.Collections.Generic.List<(int x, int y, string kindId)> staged = new();
         private System.Collections.Generic.List<Vector2Int> hlMain = new();
         private System.Collections.Generic.List<System.Collections.Generic.List<Vector2Int>> hlCross = new();
+        private Button cpuButton;
+        private Button cpuDifficultyButton;
+        private bool cpuBusy;
+        private string cpuDifficulty = "medium";
 
         void Start()
         {
@@ -134,6 +138,12 @@ namespace TileTangle.Examples
             commit.onClick.AddListener(CommitStaged);
             var cancel = CreateButton(bar.transform, "Cancel");
             cancel.onClick.AddListener(ClearStaged);
+
+            cpuDifficultyButton = CreateButton(bar.transform, "Difficulty: Medium");
+            cpuDifficultyButton.onClick.AddListener(CycleDifficulty);
+
+            cpuButton = CreateButton(bar.transform, "CPU Move (Medium)");
+            cpuButton.onClick.AddListener(CpuMove);
         }
 
         private void RebuildGrid()
@@ -270,6 +280,131 @@ namespace TileTangle.Examples
             catch (Exception e)
             {
                 Debug.LogError(e);
+            }
+        }
+
+        private void CycleDifficulty()
+        {
+            cpuDifficulty = cpuDifficulty switch
+            {
+                "easy" => "medium",
+                "medium" => "hard",
+                _ => "easy",
+            };
+            string human = cpuDifficulty switch
+            {
+                "easy" => "Easy",
+                "hard" => "Hard",
+                _ => "Medium",
+            };
+            if (cpuDifficultyButton != null)
+            {
+                cpuDifficultyButton.GetComponentInChildren<Text>().text = $"Difficulty: {human}";
+            }
+            if (cpuButton != null)
+            {
+                cpuButton.GetComponentInChildren<Text>().text = $"CPU Move ({human})";
+            }
+        }
+
+        private void ApplyPreviewHighlights(string previewJson)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(previewJson);
+                var mainCells = doc.RootElement.GetProperty("main_cells");
+                var crossCells = doc.RootElement.GetProperty("cross_cells");
+                hlMain = new System.Collections.Generic.List<Vector2Int>();
+                foreach (var c in mainCells.EnumerateArray())
+                {
+                    hlMain.Add(new Vector2Int(c[0].GetInt32(), c[1].GetInt32()));
+                }
+                hlCross = new System.Collections.Generic.List<System.Collections.Generic.List<Vector2Int>>();
+                foreach (var arr in crossCells.EnumerateArray())
+                {
+                    var list = new System.Collections.Generic.List<Vector2Int>();
+                    foreach (var c in arr.EnumerateArray())
+                    {
+                        list.Add(new Vector2Int(c[0].GetInt32(), c[1].GetInt32()));
+                    }
+                    hlCross.Add(list);
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"Failed to parse preview JSON: {e.Message}");
+            }
+        }
+
+        private void CpuMove()
+        {
+            if (cpuBusy)
+            {
+                Debug.LogWarning("CPU move already in progress");
+                return;
+            }
+            cpuBusy = true;
+            try
+            {
+                var best = engine.BestMove(cpuDifficulty, 42);
+                if (string.IsNullOrEmpty(best))
+                {
+                    Debug.LogWarning($"best_move error: {Engine.LastError()}");
+                    return;
+                }
+                if (best == "null")
+                {
+                    scoreLabel.text = "CPU: no legal move";
+                    return;
+                }
+                using var doc = JsonDocument.Parse(best);
+                var placementsEl = doc.RootElement.GetProperty("placements");
+                var placements = new List<Dictionary<string, object?>>();
+                foreach (var el in placementsEl.EnumerateArray())
+                {
+                    var entry = new Dictionary<string, object?>
+                    {
+                        ["x"] = el.GetProperty("x").GetInt32(),
+                        ["y"] = el.GetProperty("y").GetInt32(),
+                        ["kind_id"] = el.GetProperty("kind_id").GetString() ?? string.Empty,
+                    };
+                    if (el.TryGetProperty("mark", out var markEl) && markEl.ValueKind == JsonValueKind.String)
+                    {
+                        entry["mark"] = markEl.GetString();
+                    }
+                    placements.Add(entry);
+                }
+                if (placements.Count == 0)
+                {
+                    Debug.LogWarning("CPU move returned no placements");
+                    return;
+                }
+                var placementsJson = JsonSerializer.Serialize(placements);
+                var preview = engine.PreviewMoveJson(placementsJson);
+                if (!string.IsNullOrEmpty(preview))
+                {
+                    ApplyPreviewHighlights(preview);
+                }
+                var res = engine.PlayMove(placementsJson);
+                if (res == null)
+                {
+                    Debug.LogError($"play_move error: {Engine.LastError()}");
+                }
+                else
+                {
+                    UpdateScoreOverlay(res);
+                }
+                staged.Clear();
+                RefreshBoard();
+                RefreshRack();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"CPU move failed: {e}");
+            }
+            finally
+            {
+                cpuBusy = false;
             }
         }
 
@@ -416,6 +551,51 @@ namespace TileTangle.Examples
             txt.color = Color.white;
             txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
             return btn;
+        }
+
+        private Toggle CreateToggle(Transform parent, string label, bool initial)
+        {
+            var go = new GameObject($"{label}Toggle", typeof(RectTransform), typeof(Image), typeof(Toggle));
+            go.transform.SetParent(parent, false);
+            var rect = go.GetComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(140, 28);
+            rect.pivot = new Vector2(0f, 0.5f);
+            rect.anchorMin = new Vector2(0f, 0.5f);
+            rect.anchorMax = new Vector2(0f, 0.5f);
+
+            var background = go.GetComponent<Image>();
+            background.color = new Color(0.15f, 0.15f, 0.15f, 0.9f);
+
+            var toggle = go.GetComponent<Toggle>();
+            toggle.isOn = initial;
+            toggle.targetGraphic = background;
+
+            var checkGo = new GameObject("Checkmark", typeof(RectTransform), typeof(Image));
+            checkGo.transform.SetParent(go.transform, false);
+            var checkRect = checkGo.GetComponent<RectTransform>();
+            checkRect.anchorMin = new Vector2(0f, 0.5f);
+            checkRect.anchorMax = new Vector2(0f, 0.5f);
+            checkRect.pivot = new Vector2(0f, 0.5f);
+            checkRect.anchoredPosition = new Vector2(8f, 0f);
+            checkRect.sizeDelta = new Vector2(16f, 16f);
+            var checkImg = checkGo.GetComponent<Image>();
+            checkImg.color = new Color(0.2f, 0.8f, 0.2f, 1f);
+            toggle.graphic = checkImg;
+
+            var textGo = new GameObject("Label", typeof(RectTransform), typeof(Text));
+            textGo.transform.SetParent(go.transform, false);
+            var textRect = textGo.GetComponent<RectTransform>();
+            textRect.anchorMin = new Vector2(0f, 0f);
+            textRect.anchorMax = new Vector2(1f, 1f);
+            textRect.offsetMin = new Vector2(28f, 0f);
+            textRect.offsetMax = new Vector2(0f, 0f);
+            var text = textGo.GetComponent<Text>();
+            text.text = label;
+            text.alignment = TextAnchor.MiddleLeft;
+            text.color = Color.white;
+            text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+
+            return toggle;
         }
 
         // Staging API

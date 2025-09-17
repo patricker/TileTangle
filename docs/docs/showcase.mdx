@@ -16,11 +16,12 @@ import SolverTool from '@site/src/components/SolverTool';
 The WASM demo above mirrors the classic 15×15 experience: commit moves with drag-and-drop, let the CPU
 respond, and use <kbd>Undo</kbd>/<kbd>Redo</kbd> to scrub the event log.
 
-- Unity scene: `bindings/unity/Samples~/BoardDemo` (toggle “Hex Geometry” and “Commit Move”).
+- Unity scene: `bindings/unity/Samples~/BoardDemo` (toggle “Hex Geometry”, use the **Difficulty** switch, and
+  fire the new **CPU Move** button).
   - Build the native plugin with `make unity-libs`, then open the sample scene and hit Play; the script
     exposes the same drag-and-drop flow showcased here.
 - Godot project: `bindings/godot/examples` (scene `scenes/Main.tscn`). The top bar toggles free-word mode,
-  stacking, and hex adjacency while mirroring the WASM demo logic.
+  stacking, hex adjacency, and now exposes **Difficulty**/ **CPU Move** buttons mirroring the WASM demo logic.
 
 ## Hex Board Variant (web)
 
@@ -66,13 +67,15 @@ covered letters still contribute—toggle back to `TopOnly` to emulate Upwords.
 />
 
 Free-word mode is active and the rack starts with a blank (`✨`). Drop pieces to paint emoji words without
-worrying about dictionary enforcement.
+worrying about dictionary enforcement. On the CLI side, run `python examples/python/emoji_freeplay.py` to
+seed the same rack, commit a colourful horizontal, and dump the resulting board snapshot.
 
 ## 3D Board (Godot)
 
-The Godot sample includes a stacked-layers mode. Load `bindings/godot/examples`, toggle the “3D Slice”
-controls, and use the layer slider to inspect vertical plays. (3D move generation is available through
-`CrosswordRules::validate`—use the same API from Unity or Python.)
+The Godot sample now ships with an overlay that lets you scrub through vertical slices and trigger a
+pre-baked 3D move. Open `bindings/godot/examples`, move the **Layer** slider to fade between stacks, and
+hit **Play sample vertical word** to watch a column placed across layers. (3D move validation still flows
+through `CrosswordRules::validate`, so Unity/Python bindings can drive the exact same configuration.)
 
 ## Solver Tool (web + Python)
 

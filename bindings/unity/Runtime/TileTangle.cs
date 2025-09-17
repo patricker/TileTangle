@@ -29,6 +29,9 @@ namespace TileTangle
         public static extern IntPtr tt_preview_move(IntPtr game, IntPtr placementsJson);
 
         [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr tt_best_move(IntPtr game, IntPtr difficulty, ulong seed, uint seedIsSome);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
         public static extern void tt_string_free(IntPtr ptr);
 
         [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
@@ -108,6 +111,21 @@ namespace TileTangle
             finally
             {
                 Marshal.FreeHGlobal(pPtr);
+            }
+        }
+
+        public string? BestMove(string difficulty, ulong? seed = null)
+        {
+            EnsureHandle();
+            var diffPtr = StringToUtf8(difficulty);
+            try
+            {
+                var res = Native.tt_best_move(handle, diffPtr, seed ?? 0, seed.HasValue ? 1u : 0u);
+                return TakeString(res);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(diffPtr);
             }
         }
 

@@ -730,20 +730,20 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 * [x] Add rack UI and scoring overlays in Unity/Godot demos (pick-and-place tiles from rack; show last move breakdown).
 * [x] Add drag-and-drop + multi-tile staging with preview scoring and word highlights (Unity and Godot).
 
-* [ ] **Classic Crossword** (web + Unity + Godot): AI opponent.
-* [ ] **Hex Board Variant** (web): show non-rect adjacency.
-* [ ] **3D Board** (Godot): slice UI; valid 3D words.
-* [ ] **Upwords-like Stacking** (web): toggle stacking; sample puzzles.
-* [ ] **Emoji Crossword** (web + Python CLI): shows graphemes/ZWJs.
-* [ ] **Solver Tool** (web + Python): input rack → best moves.
+* [x] **Classic Crossword** (web + Unity + Godot): AI opponent.
+* [x] **Hex Board Variant** (web): show non-rect adjacency.
+* [x] **3D Board** (Godot): slice UI; valid 3D words.
+* [x] **Upwords-like Stacking** (web): toggle stacking; sample puzzles.
+* [x] **Emoji Crossword** (web + Python CLI): shows graphemes/ZWJs.
+* [x] **Solver Tool** (web + Python): input rack → best moves.
 
 ### Tests
 
-* [ ] Demo e2e tests (Playwright) for web Playground: place word, undo, redo.
+* [x] Demo e2e tests (Playwright) for web Playground: place word, undo, redo.
 
 ### Docs
 
-* [ ] “Showcase” pages with embedded demos & source links.
+* [x] “Showcase” pages with embedded demos & source links.
 
 ### Exit Criteria
 
