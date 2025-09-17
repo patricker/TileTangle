@@ -1,0 +1,114 @@
+---
+title: Install & Versions
+sidebar_position: 5
+description: How to pull TileTangle into Rust, Python, Web, Unity, and Godot projects, plus current version support.
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+## Release cadence & SemVer
+
+Starting with `0.2.0` the engine and all bindings follow [Semantic Versioning](https://semver.org/). Patch
+releases stay strictly API-compatible; minor bumps may add functionality but never remove or break an
+existing call signature. We aim for a quarterly minor cadence, with fast patch fixes as needed.
+
+| Surface | Package / Feed | Latest | Min Toolchain |
+| --- | --- | --- | --- |
+| Rust core | `tiletangle-engine` (crates.io) | `0.2.0` | Rust stable |
+| Python bindings | `tiletangle` (PyPI) | `0.2.0` | CPython 3.8+ |
+| WebAssembly | `@tiletangle/engine-wasm` (npm) | `0.2.0` | Node 18+, ESM bundler |
+| Unity | `com.tiletangle.engine` (UPM zip/git) | `0.2.0` | Unity 2022.3 LTS |
+| Godot | `addons/tiletangle` (zip) | `0.2.0` | Godot 4.2 |
+
+## Rust crate
+
+```bash
+cargo add tiletangle-engine@0.2.0
+```
+
+Then bootstrap a game loop:
+
+```rust
+use tiletangle_engine::{GameConfig, GameState, CrosswordRules};
+
+let cfg: GameConfig = serde_json::from_str(include_str!("../test_data/configs/classic.json"))?;
+let mut state = GameState::new(&cfg, 2)?;
+let rules = CrosswordRules::default();
+println!("Rack: {:?}", state.players[0].rack.tiles);
+```
+
+## Python bindings
+
+```bash
+pip install tiletangle==0.2.0
+python -c "from tiletangle import Game; print(Game.from_vision('classic'))"
+```
+
+The wheel ships with the same deterministic RNG defaults as the Rust crate—perfect for notebooks or
+serverless hints.
+
+## WebAssembly (npm)
+
+```bash
+npm install @tiletangle/engine-wasm@0.2.0
+```
+
+```ts
+import {generate_moves} from '@tiletangle/engine-wasm';
+const result = await generate_moves(sampleState, sampleRack, 7);
+```
+
+> The package targets modern bundlers (ESM + WebAssembly modules). For pure Node usage enable
+> `--experimental-wasm-modules` or transpile via Vite/ESBuild.
+
+## Unity (UPM)
+
+Add TileTangle to `Packages/manifest.json` either by pointing at the git repo or at the produced
+archive. Git example:
+
+```json
+{
+  "dependencies": {
+    "com.tiletangle.engine": "https://example.com/TileTangle.git?path=bindings/unity#0.2.0"
+  },
+  "scopedRegistries": [
+    {
+      "name": "TileTangle",
+      "url": "https://example.com/packages",
+      "scopes": ["com.tiletangle"]
+    }
+  ]
+}
+```
+
+The packaged zip in `dist/unity/tiletangle-unity-0.2.0.zip` drops directly into Unity's package
+manager via **Add package from disk…** and includes a `Samples~ / BoardDemo` scene plus a prebuilt
+`Plugins/<platform>` folder for the host platform (re-run `package_release.py` on each CI target to
+produce the other binaries).
+
+## Godot
+
+Unzip `dist/godot/tiletangle-godot-0.2.0.zip` into your project root:
+
+```
+res://addons/tiletangle/
+```
+
+Then enable the addon under **Project Settings → Plugins**. The bundle ships a reference project under
+`samples/` showing move validation and board rendering. Each package includes a GDExtension library for
+the host platform; rerun `package_release.py` on your target OSes to collect additional binaries.
+
+## Quick demos
+
+- **Rust:** `cargo run --example cli_play --features demo`
+- **Python:** `python examples/python/top_moves.py`
+- **Web:** `npm run dev` inside `docs/` to load the Playground with WASM hints.
+- **Unity:** Open `bindings/unity/Samples~/BoardDemo` and press Play.
+- **Godot:** Open `bindings/godot/examples/project.godot` and run the main scene.
+
+## Packaging helpers
+
+Use `./tools/package_release.py` to rebuild all distributables locally. The script produces ready-made
+artifacts under `dist/` (Rust crate, wheel, npm tarball, Unity + Godot zips) and runs smoke installs for
+Python and npm consumers.

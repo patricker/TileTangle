@@ -261,7 +261,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "dict-build"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -932,7 +932,7 @@ dependencies = [
 
 [[package]]
 name = "tiletangle-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "fst",
@@ -952,7 +952,7 @@ dependencies = [
 
 [[package]]
 name = "tiletangle-engine-ffi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -962,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "tiletangle-godot"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "godot",
  "serde",
@@ -973,7 +973,7 @@ dependencies = [
 
 [[package]]
 name = "tiletangle-plugin-template"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "tiletangle-engine",
@@ -981,7 +981,7 @@ dependencies = [
 
 [[package]]
 name = "tiletangle-python"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pyo3",
  "serde",
@@ -991,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "tiletangle-wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fst",
  "js-sys",

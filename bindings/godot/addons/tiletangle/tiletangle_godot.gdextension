@@ -1,0 +1,10 @@
+[configuration]
+entry_symbol = "gdext_rust_init"
+
+[libraries]
+linux.debug = "res://addons/tiletangle/bin/linux-x86_64/libtiletangle_godot.so"
+linux.release = "res://addons/tiletangle/bin/linux-x86_64/libtiletangle_godot.so"
+windows.debug = "res://addons/tiletangle/bin/windows-x86_64/tiletangle_godot.dll"
+windows.release = "res://addons/tiletangle/bin/windows-x86_64/tiletangle_godot.dll"
+macos.debug = "res://addons/tiletangle/bin/macos-universal/libtiletangle_godot.dylib"
+macos.release = "res://addons/tiletangle/bin/macos-universal/libtiletangle_godot.dylib"

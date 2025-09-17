@@ -1,0 +1,43 @@
+{
+  "name": "@tiletangle/engine-wasm",
+  "version": "0.2.0",
+  "description": "WebAssembly build of the TileTangle universal word-game engine",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wasm-pack build --release --target bundler --out-dir pkg",
+    "build:web": "wasm-pack build --release --target web --out-dir pkg-web",
+    "test": "node ci_smoke.mjs"
+  },
+  "files": [
+    "pkg",
+    "README.md"
+  ],
+  "keywords": [
+    "scrabble",
+    "word-game",
+    "wasm",
+    "engine"
+  ],
+  "license": "MIT OR Apache-2.0",
+  "homepage": "https://example.com/TileTangle",
+  "repository": {
+    "type": "git",
+    "url": "https://example.com/TileTangle.git"
+  },
+  "bugs": {
+    "url": "https://example.com/TileTangle/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "exports": {
+    ".": {
+      "import": "./pkg/tiletangle_wasm.js",
+      "types": "./pkg/tiletangle_wasm.d.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

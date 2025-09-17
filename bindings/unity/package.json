@@ -1,0 +1,22 @@
+{
+  "name": "com.tiletangle.engine",
+  "version": "0.2.0",
+  "displayName": "TileTangle Engine",
+  "description": "Unity bindings and samples for the TileTangle universal word-game engine.",
+  "unity": "2022.3",
+  "license": "MIT",
+  "documentationUrl": "https://example.com/TileTangle/docs/install#unity",
+  "changelogUrl": "https://example.com/TileTangle/CHANGELOG",
+  "keywords": ["word", "scrabble", "board"],
+  "author": {
+    "name": "TileTangle Team",
+    "url": "https://example.com/TileTangle"
+  },
+  "samples": [
+    {
+      "displayName": "Board Demo",
+      "description": "Minimal drag-and-drop board demo with scoring overlay.",
+      "path": "Samples~/BoardDemo"
+    }
+  ]
+}

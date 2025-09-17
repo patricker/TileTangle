@@ -21,3 +21,12 @@ Getting Started
 - Web (WASM) demo: `make wasm` and open the docs playground
 - Python: `cd bindings/python && maturin develop --release`
 - C header: `make ffi-header` (generates `engine_ffi/include/engine.h`)
+
+Packaging & Releasing
+---------------------
+
+1. Run `./tools/package_release.py` to build the Rust crate tarball, Python wheel, npm bundle, and
+   Unity/Godot archives under `dist/`.
+2. Inspect `dist/manifest.json` to confirm the produced artifacts.
+3. Publish each artifact to its registry (`cargo publish`, `twine upload`, `npm publish`, attach the
+   Unity/Godot zips to the GitHub release) and tag the repo (`git tag v0.2.0`).

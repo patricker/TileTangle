@@ -3,5 +3,8 @@ target
 fuzz/target
 fuzz/artifacts
 fuzz/corpus
+wasm/pkg
+wasm/node_modules
+dist
 docs/test-results
 docs/playwright-report

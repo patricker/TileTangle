@@ -1,0 +1,6 @@
+# Keep the generated wasm-pack output
+!/pkg
+
+# Exclude local build artifacts
+pkg-web/
+node_modules/

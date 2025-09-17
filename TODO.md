@@ -694,25 +694,25 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] Rust crate publish (crates.io).
+* [x] Rust crate publish (crates.io).
 * [x] Python wheels (manylinux, macOS, Windows) via maturin; upload to PyPI.
-* [ ] WASM npm package with TS types.
-* [ ] Unity package: `.unitypackage` or UPM; platform libs prebuilt.
-* [ ] Godot: prebuilt GDExtension for common OS; template project.
-* [ ] Versioning & CHANGELOG; SemVer commitment.
+* [x] WASM npm package with TS types.
+* [x] Unity package: `.unitypackage` or UPM; platform libs prebuilt.
+* [x] Godot: prebuilt GDExtension for common OS; template project.
+* [x] Versioning & CHANGELOG; SemVer commitment.
 
 ### Tests
 
-* [ ] Install from artifacts in clean env; smoke sample runs.
+* [x] Install from artifacts in clean env; smoke sample runs.
 
 ### Docs
 
-* [ ] “Install” pages per platform.
-* [ ] Version matrix & support policy.
+* [x] “Install” pages per platform.
+* [x] Version matrix & support policy.
 
 ### Demo
 
-* [ ] Copy/paste one-liners to run demos after install.
+* [x] Copy/paste one-liners to run demos after install.
 
 ### Exit Criteria
 

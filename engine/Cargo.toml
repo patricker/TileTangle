@@ -1,10 +1,12 @@
 [package]
 name = "tiletangle-engine"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Core engine for universal, configurable word-game logic"
-repository = "https://example.com/TileTangle" 
+repository = "https://example.com/TileTangle"
+readme = "../README.md"
+documentation = "https://example.com/TileTangle/docs/install"
 keywords = ["games", "word", "engine"]
 categories = ["game-engines"]
 
