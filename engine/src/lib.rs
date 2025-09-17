@@ -18,6 +18,8 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
+#[cfg(feature = "simd")]
+use wide::i32x4;
 
 fn splitmix64(mut x: u64) -> u64 {
     x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -1970,8 +1972,12 @@ fn score_word_on_path(
     stack_mode: StackScoring,
 ) -> (String, i32) {
     let mut tokens: Vec<String> = Vec::new();
-    let mut score: i32 = 0;
+    let mut scalar_score: i32 = 0;
     let mut word_mul: i32 = 1;
+    #[cfg(feature = "simd")]
+    let mut top_only_scores: Vec<i32> = Vec::with_capacity(path.len());
+    #[cfg(feature = "simd")]
+    let mut top_only_multipliers: Vec<i32> = Vec::with_capacity(path.len());
     for id in path {
         let cell = &board.cells[id.0 as usize];
         if let Some(tile) = cell.stack.last() {
@@ -1984,27 +1990,65 @@ fn score_word_on_path(
                 letter_mul = b.letter_mul as i32;
                 word_mul *= b.word_mul as i32;
             }
-            let add = match stack_mode {
-                StackScoring::TopOnly => (ls as i32) * letter_mul,
+            match stack_mode {
+                StackScoring::TopOnly => {
+                    #[cfg(feature = "simd")]
+                    {
+                        top_only_scores.push(ls as i32);
+                        top_only_multipliers.push(letter_mul);
+                    }
+                    #[cfg(not(feature = "simd"))]
+                    {
+                        scalar_score += (ls as i32) * letter_mul;
+                    }
+                }
                 StackScoring::SumStack => {
                     let mut sum_under = 0i32;
-                    if !board.cells[id.0 as usize].stack.is_empty() {
-                        for t in board.cells[id.0 as usize]
-                            .stack
-                            .iter()
-                            .take(board.cells[id.0 as usize].stack.len().saturating_sub(1))
-                        {
+                    if cell.stack.len() > 1 {
+                        for t in cell.stack.iter().take(cell.stack.len() - 1) {
                             let (s_u, _) = CrosswordRules::tile_symbol_and_score(tileset, t);
                             sum_under += s_u as i32;
                         }
                     }
-                    sum_under + (ls as i32) * letter_mul
+                    scalar_score += sum_under + (ls as i32) * letter_mul;
                 }
-            };
-            score += add;
+            }
         }
     }
+    let score = match stack_mode {
+        StackScoring::TopOnly => {
+            #[cfg(feature = "simd")]
+            {
+                simd_dot_product(&top_only_scores, &top_only_multipliers)
+            }
+            #[cfg(not(feature = "simd"))]
+            {
+                scalar_score
+            }
+        }
+        StackScoring::SumStack => scalar_score,
+    };
     (tokens.join(""), score * word_mul)
+}
+
+#[cfg(feature = "simd")]
+fn simd_dot_product(lhs: &[i32], rhs: &[i32]) -> i32 {
+    debug_assert_eq!(lhs.len(), rhs.len());
+    let len = lhs.len().min(rhs.len());
+    let mut total = 0i32;
+    let mut i = 0usize;
+    while i + 4 <= len {
+        let a = i32x4::from([lhs[i], lhs[i + 1], lhs[i + 2], lhs[i + 3]]);
+        let b = i32x4::from([rhs[i], rhs[i + 1], rhs[i + 2], rhs[i + 3]]);
+        let prod = (a * b).to_array();
+        total += prod[0] + prod[1] + prod[2] + prod[3];
+        i += 4;
+    }
+    while i < len {
+        total += lhs[i] * rhs[i];
+        i += 1;
+    }
+    total
 }
 // -------- Move Generation (Phase 12 start) --------
 

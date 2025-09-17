@@ -1,0 +1,12 @@
+{
+  "recorded_at": "2025-09-17T18:03:46.913934+00:00",
+  "unit": "ns",
+  "benchmarks": {
+    "ai_greedy_depth0": 10880.129288027,
+    "ai_greedy_depth1": 10772.144374706922,
+    "dictionary_contains": 202.56858968723517,
+    "dictionary_prefix": 485.7719835151118,
+    "generate_moves_initial": 10605.45409179734,
+    "generate_moves_midgame": 23283.366426846955
+  }
+}

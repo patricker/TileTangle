@@ -1,0 +1,42 @@
+{
+  "generated_at": "2025-09-17T18:03:46Z",
+  "unit": "ns",
+  "benchmarks": [
+    {
+      "id": "dictionary_contains",
+      "label": "Dictionary contains",
+      "baseline_ns": 202.57,
+      "current_ns": 202.57
+    },
+    {
+      "id": "dictionary_prefix",
+      "label": "Dictionary prefix",
+      "baseline_ns": 485.77,
+      "current_ns": 485.77
+    },
+    {
+      "id": "generate_moves_initial",
+      "label": "Generate moves (initial board)",
+      "baseline_ns": 10605454.09,
+      "current_ns": 10605454.09
+    },
+    {
+      "id": "generate_moves_midgame",
+      "label": "Generate moves (mid-game board)",
+      "baseline_ns": 23283366.43,
+      "current_ns": 23283366.43
+    },
+    {
+      "id": "ai_greedy_depth0",
+      "label": "AI greedy depth 0",
+      "baseline_ns": 10880129.29,
+      "current_ns": 10880129.29
+    },
+    {
+      "id": "ai_greedy_depth1",
+      "label": "AI greedy depth 1",
+      "baseline_ns": 10772144.37,
+      "current_ns": 10772144.37
+    }
+  ]
+}

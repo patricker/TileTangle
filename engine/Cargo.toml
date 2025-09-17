@@ -24,13 +24,20 @@ serde_json = "1"
 unicode-segmentation = "1"
 serde_cbor = "0.11"
 rayon = { version = "1", optional = true }
+wide = { version = "0.7", optional = true }
 
 [features]
 default = []
 parallel = ["rayon"]
+simd = ["wide"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+
+
+[[bench]]
+name = "core"
+harness = false
 
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -666,12 +666,12 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 * [x] `criterion` benches: dictionary lookups, cross-checks, move gen, AI.
 * [x] `rayon` optional parallelism on evaluation.
 * [x] `cargo-fuzz`: fuzz parsers (config), move validation pipeline.
-* [ ] Memory profiling notes; optional `simd` gates.
+* [x] Memory profiling notes; optional `simd` gates.
 
 ### Unit/Bench
 
-* [ ] Bench thresholds recorded (CI prints previous vs current).
-* [ ] Fuzz targets run on CI (smoke, not soak).
+* [x] Bench thresholds recorded (CI prints previous vs current).
+* [x] Fuzz targets run on CI (smoke, not soak).
 
 ### Docs
 
@@ -680,7 +680,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Demo
 
-* [ ] Docs: run a pre-canned benchmark button → shows results table (static JSON).
+* [x] Docs: run a pre-canned benchmark button → shows results table (static JSON).
 
 ### Exit Criteria
 

@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use tiletangle_engine as eng;
+use engine::{self as eng, BoardGeometry, Rules};
 
 fn seed_config() -> eng::GameConfig {
     let tileset = eng::Tileset {

@@ -1,4 +1,7 @@
 OLD
 target
+fuzz/target
+fuzz/artifacts
+fuzz/corpus
 docs/test-results
 docs/playwright-report

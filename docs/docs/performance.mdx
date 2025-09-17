@@ -4,6 +4,8 @@ sidebar_position: 20
 description: Benchmark and fuzz the engine to catch regressions before they ship.
 ---
 
+import BenchmarkSnapshot from '@site/src/components/BenchmarkSnapshot';
+
 Phase 15 adds a lightweight performance harness so you can keep an eye on hot paths while the engine
 grows. Everything lives in-repo—no external datasets needed.
 
@@ -23,12 +25,34 @@ with the `parallel` feature:
 cargo bench -p tiletangle-engine --features parallel
 ```
 
+<BenchmarkSnapshot />
+
+After running the suite locally you can diff against the checked-in baseline:
+
+```bash
+./tools/report_bench.py --baseline bench/baselines/main.json
+```
+
 ## Optional parallel evaluation
 
 When the `parallel` feature is enabled and `AiConfig::parallel_eval` is set to `true`, the greedy
 AI can fan out candidate evaluation on the root ply when heuristics are deterministic (no noise,
 no node/time budget). Bindings expose a `parallel_eval` flag on `best_move_greedy` so tooling can opt
 in.
+
+## SIMD scoring (optional)
+
+Enable the `simd` feature to use small vector lanes when scoring words under the default
+`StackScoring::TopOnly` policy. The engine folds the per-letter score × multiplier products in chunks
+of four using the [`wide`](https://docs.rs/wide/latest/wide/) crate, which keeps the evaluation fast
+even when bingo bonuses and word multipliers stack up.
+
+```bash
+cargo bench -p tiletangle-engine --features simd
+```
+
+The feature is an additive optimisation—behaviour stays identical with or without it, so you can
+leave it off for targets where SIMD isn't available.
 
 ## Fuzz harnesses
 
@@ -55,3 +79,19 @@ Artifacts land in `fuzz/artifacts/`; keep interesting crashes around for regress
   variants expand.
 - Criterion profiles are deterministic; commit the generated summary tables when you need to track a
   specific performance budget over time.
+- CI runs the `perf` job on Linux to compare results against the stored baseline; a 2× regression
+  fails the build. The `fuzz` job exercises both harnesses for 20 seconds with libFuzzer.
+
+## Memory profiling
+
+Use the same sample configs in `bench/` to capture heap behaviour:
+
+- Linux: `valgrind --tool=massif cargo run -p tiletangle-engine --example stress` for timeline
+  snapshots, or `heaptrack cargo bench -p tiletangle-engine` for flamegraphs.
+- macOS: Instruments' "Allocations" template pairs well with `cargo bench --profile release`.
+- Windows: run `cargo bench` under the Visual Studio Diagnostic Tools or
+  [`wpaexporter`](https://learn.microsoft.com/windows-hardware/test/wpt/) for sampling traces.
+
+Remember to build without `--features parallel` when profiling single-threaded behaviour—this keeps
+the traces easier to interpret. For detailed leak hunts, recompile with `RUSTFLAGS="-Zsanitizer=address"`
+on nightly and run the benches under AddressSanitizer.
