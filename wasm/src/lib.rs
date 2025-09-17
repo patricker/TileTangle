@@ -173,6 +173,16 @@ fn js_get_u64(opts: &JsValue, key: &str) -> Result<Option<u64>, JsValue> {
     Ok(None)
 }
 
+fn js_get_bool(opts: &JsValue, key: &str) -> Result<Option<bool>, JsValue> {
+    if let Some(val) = js_get(opts, key)? {
+        if let Some(b) = val.as_bool() {
+            return Ok(Some(b));
+        }
+        return Err(to_js_err(format!("expected boolean for '{key}'")));
+    }
+    Ok(None)
+}
+
 #[wasm_bindgen]
 pub fn new_game(config_json: &str, players: usize) -> Result<JsGame, JsValue> {
     let cfg: JsConfig = serde_json::from_str(config_json).map_err(to_js_err)?;
@@ -793,6 +803,9 @@ pub fn best_move_greedy(
         }
         if let Some(limit) = js_get_u32(&opts, "reply_limit")? {
             cfg.reply_move_limit = limit as usize;
+        }
+        if let Some(par) = js_get_bool(&opts, "parallel_eval")? {
+            cfg.parallel_eval = par;
         }
     }
     if let Some(m) = max_len {

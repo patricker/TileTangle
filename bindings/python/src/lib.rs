@@ -291,7 +291,7 @@ impl Game {
         Ok(list.into())
     }
 
-    #[pyo3(signature = (max_len=None, lookahead_depth=None, seed=None, node_limit=None, time_limit_ms=None, difficulty=None, noise_range=None, candidate_limit=None, reply_limit=None))]
+    #[pyo3(signature = (max_len=None, lookahead_depth=None, seed=None, node_limit=None, time_limit_ms=None, difficulty=None, noise_range=None, candidate_limit=None, reply_limit=None, parallel_eval=None))]
     fn best_move_greedy(
         &self,
         max_len: Option<usize>,
@@ -303,6 +303,7 @@ impl Game {
         noise_range: Option<i32>,
         candidate_limit: Option<usize>,
         reply_limit: Option<usize>,
+        parallel_eval: Option<bool>,
         py: Python<'_>,
     ) -> PyResult<Option<PyObject>> {
         let mut cfg = AiConfig::default();
@@ -331,6 +332,9 @@ impl Game {
         }
         if let Some(limit) = reply_limit {
             cfg.reply_move_limit = limit;
+        }
+        if let Some(parallel) = parallel_eval {
+            cfg.parallel_eval = parallel;
         }
         let Some(eval) = engine::best_move_greedy(&self.state, &self.rules, &cfg) else {
             return Ok(None);

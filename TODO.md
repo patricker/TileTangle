@@ -663,9 +663,9 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] `criterion` benches: dictionary lookups, cross-checks, move gen, AI.
-* [ ] `rayon` optional parallelism on evaluation.
-* [ ] `cargo-fuzz`: fuzz parsers (config), move validation pipeline.
+* [x] `criterion` benches: dictionary lookups, cross-checks, move gen, AI.
+* [x] `rayon` optional parallelism on evaluation.
+* [x] `cargo-fuzz`: fuzz parsers (config), move validation pipeline.
 * [ ] Memory profiling notes; optional `simd` gates.
 
 ### Unit/Bench
@@ -675,8 +675,8 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Docs
 
-* [ ] “Performance” page with charts (generated offline & embedded).
-* [ ] “Tuning knobs” (parallelism, pruning).
+* [x] “Performance” page with charts (generated offline & embedded).
+* [x] “Tuning knobs” (parallelism, pruning).
 
 ### Demo
 

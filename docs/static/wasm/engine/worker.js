@@ -78,6 +78,7 @@ self.onmessage = async (e) => {
         noise_range: payload?.noise_range,
         candidate_limit: payload?.candidate_limit,
         reply_limit: payload?.reply_limit,
+        parallel_eval: payload?.parallel_eval,
       };
       const opts = Object.fromEntries(
         Object.entries(optsRaw).filter(([, value]) => value !== undefined && value !== null),

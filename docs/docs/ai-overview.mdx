@@ -20,7 +20,8 @@ For every candidate returned by `generate_moves` we compute:
   so the AI actively unloads big tiles.
 
 `AiConfig` lets you override the rack-leave table, limit considered move length, cap explored
-nodes/time, inject noise for easier levels, and more.
+nodes/time, inject noise for easier levels, and enable optional parallel evaluation (when the
+`parallel` cargo feature is enabled).
 
 ```rust title="Rust"
 use std::time::Duration;
@@ -48,6 +49,7 @@ cfg.max_nodes = Some(64);           // stop after 64 evaluated candidates
 cfg.max_duration = Some(Duration::from_millis(20));
 cfg.noise_range = 6;                // favour variety for "easy" bots
 cfg.randomness = Some(123);         // reproducible tie-breaking
+cfg.parallel_eval = true;          // requires `--features parallel`
 if let Some(best) = best_move_greedy(&state, &rules, &cfg) {
     // ..same fields as above
 }
@@ -90,6 +92,7 @@ hint = game.best_move_greedy(
     node_limit=48,
     time_limit_ms=20,
     noise_range=6,
+    parallel_eval=True,
 )
 ```
 

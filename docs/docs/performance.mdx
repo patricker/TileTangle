@@ -1,0 +1,57 @@
+---
+title: Performance Toolkit
+sidebar_position: 20
+description: Benchmark and fuzz the engine to catch regressions before they ship.
+---
+
+Phase 15 adds a lightweight performance harness so you can keep an eye on hot paths while the engine
+grows. Everything lives in-repo—no external datasets needed.
+
+## Criterion benches
+
+Run the core suite with:
+
+```bash
+cargo bench -p tiletangle-engine
+```
+
+The benchmarks cover dictionary lookups, move generation on empty/mid-game boards, and greedy AI
+search (depth 0/1). HTML reports land in `target/criterion`. Enable the optional parallel evaluator
+with the `parallel` feature:
+
+```bash
+cargo bench -p tiletangle-engine --features parallel
+```
+
+## Optional parallel evaluation
+
+When the `parallel` feature is enabled and `AiConfig::parallel_eval` is set to `true`, the greedy
+AI can fan out candidate evaluation on the root ply when heuristics are deterministic (no noise,
+no node/time budget). Bindings expose a `parallel_eval` flag on `best_move_greedy` so tooling can opt
+in.
+
+## Fuzz harnesses
+
+A minimal `cargo fuzz` setup lives under `fuzz/`:
+
+- `fuzz_config_load` throws random JSON at `GameConfig` deserialisation and `GameState::new`.
+- `fuzz_move_draft` generates placements around the centre cell and runs them through
+  `CrosswordRules::validate` / `commit`.
+
+Run them with (requires nightly and `cargo fuzz` installed):
+
+```bash
+cargo fuzz run fuzz_config_load
+cargo fuzz run fuzz_move_draft
+```
+
+Artifacts land in `fuzz/artifacts/`; keep interesting crashes around for regression suites.
+
+## Tips
+
+- Bake `cargo bench --features parallel` into your CI matrix to catch regressions when the parallel
+  evaluator is enabled.
+- Fuzz harnesses are intentionally small—extend them with richer board setups or rule plugins as your
+  variants expand.
+- Criterion profiles are deterministic; commit the generated summary tables when you need to track a
+  specific performance budget over time.

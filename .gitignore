@@ -1,2 +1,4 @@
 OLD
 target
+docs/test-results
+docs/playwright-report

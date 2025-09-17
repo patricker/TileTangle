@@ -3,6 +3,8 @@
 use fst::{Automaton, Streamer};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use rand_chacha::ChaCha12Rng;
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::any::Any;
@@ -2033,6 +2035,7 @@ pub struct AiConfig {
     pub candidate_limit: Option<usize>,
     pub reply_move_limit: usize,
     pub noise_range: i32,
+    pub parallel_eval: bool,
 }
 
 impl Default for AiConfig {
@@ -2047,6 +2050,7 @@ impl Default for AiConfig {
             candidate_limit: None,
             reply_move_limit: usize::MAX,
             noise_range: 0,
+            parallel_eval: false,
         }
     }
 }
@@ -2071,6 +2075,7 @@ impl AiConfig {
                 self.candidate_limit = Some(20);
                 self.reply_move_limit = 6;
                 self.noise_range = 12;
+                self.parallel_eval = false;
             }
             AiDifficulty::Medium => {
                 self.lookahead_depth = 0;
@@ -2079,6 +2084,7 @@ impl AiConfig {
                 self.candidate_limit = Some(32);
                 self.reply_move_limit = 12;
                 self.noise_range = 4;
+                self.parallel_eval = false;
             }
             AiDifficulty::Hard => {
                 self.lookahead_depth = 1;
@@ -2087,6 +2093,7 @@ impl AiConfig {
                 self.candidate_limit = None;
                 self.reply_move_limit = usize::MAX;
                 self.noise_range = 0;
+                self.parallel_eval = false;
             }
         }
     }
@@ -2358,6 +2365,50 @@ fn best_move_inner(
     }
 
     let mut best: Option<BestCandidate> = None;
+
+    #[cfg(feature = "parallel")]
+    if ctx.config.parallel_eval
+        && depth == ctx.config.lookahead_depth
+        && ctx.config.lookahead_depth == 0
+        && ctx.config.noise_range == 0
+        && ctx.config.randomness.is_none()
+        && ctx.config.max_nodes.is_none()
+        && ctx.config.max_duration.is_none()
+    {
+        let evals: Vec<(CandidateMove, EvaluatedMove)> = candidates
+            .par_iter()
+            .map(|cand| {
+                let eval = evaluate_candidate_move(state, cand.clone(), &rack, ctx.config);
+                (cand.clone(), eval)
+            })
+            .collect();
+        for (_cand, eval) in evals {
+            ctx.record_node();
+            let adjusted = eval.total;
+            match &mut best {
+                None => {
+                    best = Some(BestCandidate {
+                        eval,
+                        adjusted_total: adjusted,
+                    });
+                }
+                Some(current) => {
+                    let better = adjusted > current.adjusted_total
+                        || (adjusted == current.adjusted_total && eval.total > current.eval.total)
+                        || (adjusted == current.adjusted_total
+                            && eval.total == current.eval.total
+                            && eval.rack_leave > current.eval.rack_leave);
+                    if better {
+                        *current = BestCandidate {
+                            eval,
+                            adjusted_total: adjusted,
+                        };
+                    }
+                }
+            }
+        }
+        return best.map(|b| b.eval);
+    }
     for cand in candidates {
         if ctx.node_limit_hit() && best.is_some() {
             break;

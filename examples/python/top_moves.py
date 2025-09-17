@@ -71,6 +71,9 @@ if greedy and greedy["word"] != (best["word"] if best else None):
         f"{greedy['total']} pts",
     )
 
+log = game.event_log()
+print(f"Event log entries: {len(log)}")
+
 print("Top candidate moves (word, score, placements):")
 for idx, mv in enumerate(moves, start=1):
     placements = [f"({p['x']}, {p['y']}, {p['kind_id']})" for p in mv["placements"]]
