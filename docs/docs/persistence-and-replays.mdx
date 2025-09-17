@@ -1,0 +1,100 @@
+---
+title: Persistence & Replays
+sidebar_position: 19
+description: Snapshot games to JSON or CBOR, restore them later, and audit moves with the event log.
+---
+
+Phase 14 introduces first-class persistence for TileTangle. Every `GameState` can now be exported to a
+stable snapshot (JSON or CBOR) together with an append-only event log and Zobrist hash of the
+position. Snapshots capture the complete material state (board, racks, bag RNG, scores, turn order)
+so you can resume play, build undo/redo stacks, or ship reproducible fixtures in tests.
+
+## Rust API
+
+```rust title="Rust"
+use tiletangle_engine::{CrosswordRules, GameConfig, GameState, MoveDraft, Tile};
+
+let cfg = GameConfig { /* ... */ };
+let mut state = GameState::new(&cfg, 2)?;
+let rules = CrosswordRules { free_word_mode: true, ..Default::default() };
+
+// play a move
+let mv = MoveDraft { placements: vec![(rules.center_cell(&state.board.geom), Tile { kind_id: "A".into(), mark: None })] };
+let validated = rules.validate(&state, &mv)?;
+let score = rules.score(&state, &validated);
+rules.commit(&mut state, validated, &score)?;
+
+// persist and restore later
+let json = state.snapshot_json()?;
+let hash_before = state.compute_position_hash();
+let restored = GameState::from_snapshot_json(&json)?;
+assert_eq!(hash_before, restored.compute_position_hash());
+assert_eq!(state.event_log(), restored.event_log());
+```
+
+Use `snapshot_cbor` / `from_snapshot_cbor` when you need a compact binary blob (for example in
+network play or on-disk storage). The event log records every play, draw, exchange, and pass together
+with the post-action Zobrist hash so you can verify replay integrity.
+
+## Python
+
+```python
+from tiletangle import Game
+
+game = Game(json.dumps(config), 2)
+# ... play a move ...
+blob = game.snapshot_json()
+
+# Later (or in another process)
+game.load_snapshot_json(blob)
+for event in game.event_log():
+    print(event["turn"], event["type"], event.get("score"), event.get("tiles"))
+```
+
+`Game.snapshot_cbor()` returns a `bytes` object. Both loaders keep the existing dictionary handle so
+there is no need to reattach lexica after a restore.
+
+## WASM / Web
+
+```ts
+const snapshot = await worker.call('snapshot_json');
+await worker.call('load_snapshot_json', { json: snapshot.snapshot });
+const log = JSON.parse(await worker.call('event_log').then(r => r.log));
+```
+
+The direct JS bindings expose `snapshot_state_json`, `snapshot_state_cbor`, `load_state_json`,
+`load_state_cbor`, and `get_event_log`. The Docusaurus playground surfaces these controls so you can
+save a position, paste it back later, or inspect the hashed event stream.
+
+## Event Log Format
+
+Each log entry looks like this (JSON representation):
+
+```json
+{
+  "turn": 3,
+  "player": 0,
+  "type": "play",
+  "score": 12,
+  "total": 28,
+  "position_hash": 7684184055211740539,
+  "placements": [
+    {"x": 7, "y": 7, "kind_id": "A", "mark": null},
+    {"x": 8, "y": 7, "kind_id": "B", "mark": null}
+  ]
+}
+```
+
+Draw, exchange, and pass events follow the same schema with action-specific fields (`tiles`,
+`give`/`take`). Hashes are computed with a Zobrist scheme seeded per game so you can validate that a
+replay produced the expected position.
+
+## Replay Tips
+
+- Keep snapshots alongside a short description of the applied rules. Loading restores only the
+  `GameState`; reuse your existing `CrosswordRules` instance (or reconstruct it from metadata).
+- Use the CBOR form for undo/redo stacks—it is smaller and faster to serialise.
+- The event log is deterministic; combining it with the initial snapshot lets you verify that each
+  client produced identical hashes at every step.
+- Snapshots embed the tileset, rack contents, bag RNG, and `dictionary_id`. Wrap the blob in your
+  own container with an explicit schema version if you plan to store long-lived saves.

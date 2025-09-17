@@ -569,18 +569,18 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 * [x] Reproduce known positions (golden expected move lists).
 * [x] Blank usage test (blank + B → finds AB).
 * [x] Stress tests with long racks, many anchors.
-* [ ] 3D move gen basic correctness.
-* [ ] Stacking-aware cross-checks.
+* [x] 3D move gen basic correctness.
+* [x] Stacking-aware cross-checks.
 
 ### Docs
 
-* [ ] “Move Generation” deep dive with animations.
-* [ ] Complexity notes & tuning parameters.
+* [x] “Move Generation” deep dive with animations.
+* [x] Complexity notes & tuning parameters.
 
 ### Demo
 
-* [ ] Docs Playground: “Show legal moves” overlay; click to play.
-* [ ] Python script: top 10 moves for sample position.
+* [x] Docs Playground: “Show legal moves” overlay; click to play.
+* [x] Python script: top 10 moves for sample position.
 
 ### Exit Criteria
 
@@ -594,29 +594,29 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] Evaluation: raw score + **rack leave** (static table) + board equity (simple heuristics).
-* [ ] Tie-breakers: leave balance (vowels/consonants), openings/defense heuristic.
-* [ ] Search:
+* [x] Evaluation: raw score + **rack leave** (static table) + board equity (simple heuristics).
+* [x] Tie-breakers: leave balance (vowels/consonants), openings/defense heuristic.
+* [x] Search:
 
-  * Greedy baseline.
-  * Optional one-ply lookahead (simulate opponent’s best reply from reduced set).
-  * Time/Node budget & randomness for difficulty levels.
-* [ ] Hint API: `best_move(state, rack, level) -> CandidateMove`.
+  * [x] Greedy baseline.
+  * [x] Optional one-ply lookahead (simulate opponent’s best reply from reduced set).
+  * [x] Time/Node budget & randomness for difficulty levels.
+* [x] Hint API: `best_move(state, rack, level) -> CandidateMove`.
 
 ### Unit Tests
 
-* [ ] Determinism with seed; identical results across bindings.
-* [ ] Edge: endgame (exhaust bag) penalty handling.
-* [ ] Hints never illegal; bounded runtime in tests.
+* [x] Determinism with seed; identical results across bindings.
+* [x] Edge: endgame (exhaust bag) penalty handling.
+* [x] Hints never illegal; bounded runtime in tests.
 
 ### Docs
 
-* [ ] “AI Overview” & difficulty profiles.
-* [ ] “Using AI in bindings” code samples.
+* [x] “AI Overview” & difficulty profiles.
+* [x] “Using AI in bindings” code samples.
 
 ### Demo
 
-* [ ] Docs: play vs CPU (easy/medium).
+* [x] Docs: play vs CPU (easy/medium).
 * [ ] Unity/Godot: CPU opponent toggle.
 
 ### Exit Criteria
@@ -631,25 +631,25 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] `serde` snapshots of `GameState` + compact **CBOR** representation.
-* [ ] **Zobrist hashing** of positions for replay integrity.
-* [ ] Event log (append-only): draw, play, exchange, pass.
-* [ ] Deterministic RNG seeded in `GameConfig`.
+* [x] `serde` snapshots of `GameState` + compact **CBOR** representation.
+* [x] **Zobrist hashing** of positions for replay integrity.
+* [x] Event log (append-only): draw, play, exchange, pass.
+* [x] Deterministic RNG seeded in `GameConfig`.
 
 ### Unit Tests
 
-* [ ] Round-trip save/load equality.
-* [ ] Replays reproduce identical final state.
-* [ ] Hash changes on any legal modification.
+* [x] Round-trip save/load equality.
+* [x] Replays reproduce identical final state.
+* [x] Hash changes on any legal modification.
 
 ### Docs
 
-* [ ] “Persistence & Replays” guide.
-* [ ] Versioning & forward-compat strategy.
+* [x] “Persistence & Replays” guide.
+* [x] Versioning & forward-compat strategy.
 
 ### Demo
 
-* [ ] Docs: download/save game JSON; reload into Playground.
+* [x] Docs: download/save game JSON; reload into Playground.
 
 ### Exit Criteria
 

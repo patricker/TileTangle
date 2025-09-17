@@ -1,0 +1,108 @@
+---
+title: AI Overview
+sidebar_position: 13
+description: Greedy move selection with rack-leave heuristics, endgame awareness, and difficulty presets.
+---
+
+TileTangle ships with a lightweight **greedy** AI that blends raw scoring with rack strategy,
+board pressure, and simple endgame awareness. You can dial the effort level up or down with a
+single difficulty knob, or take full control by tweaking node/time budgets directly.
+
+## Evaluation heuristic
+
+For every candidate returned by `generate_moves` we compute:
+
+- **Raw score** — the immediate points from `CrosswordRules`.
+- **Rack leave** — a configurable lookup table (default Scrabble-inspired values) that rewards
+  keeping balanced vowels/consonants and penalises clunky tiles (`Q`, `Z`, etc.).
+- **Board equity bonus** — a small bonus for opening future anchors (counts fresh neighbours).
+- **Endgame penalty** — when the bag is empty we subtract the face value of tiles left on the rack
+  so the AI actively unloads big tiles.
+
+`AiConfig` lets you override the rack-leave table, limit considered move length, cap explored
+nodes/time, inject noise for easier levels, and more.
+
+```rust title="Rust"
+use std::time::Duration;
+use tiletangle_engine::{AiConfig, AiDifficulty, best_move, best_move_greedy, CrosswordRules};
+
+let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
+
+// Quick preset: applies depth/noise/time caps for the chosen difficulty.
+if let Some(best) = best_move(&state, &rules, AiDifficulty::Medium) {
+    println!(
+        "{} => total {} (raw {}, leave {}, equity {}, endgame {})",
+        best.candidate.word,
+        best.total,
+        best.candidate.score,
+        best.rack_leave,
+        best.board_equity,
+        best.endgame_penalty,
+    );
+}
+
+// Full control: customise budgets and noise.
+let mut cfg = AiConfig::default();
+cfg.lookahead_depth = 1;            // one-ply reply search
+cfg.max_nodes = Some(64);           // stop after 64 evaluated candidates
+cfg.max_duration = Some(Duration::from_millis(20));
+cfg.noise_range = 6;                // favour variety for "easy" bots
+cfg.randomness = Some(123);         // reproducible tie-breaking
+if let Some(best) = best_move_greedy(&state, &rules, &cfg) {
+    // ..same fields as above
+}
+```
+
+## WASM usage
+
+```ts title="WASM"
+// Difficulty presets
+const cpu = JSON.parse(mod.best_move(game, 'medium', 12345));
+
+// Budgeted greedy (all fields optional)
+const tuned = JSON.parse(
+  mod.best_move_greedy(game, undefined, 1, 4242, {
+    node_limit: 64,
+    time_limit_ms: 25,
+    noise_range: 4,
+  }),
+);
+```
+
+Every helper returns JSON with `word`, `score`, `rack_leave`, `board_equity`, `endgame_penalty`,
+`total`, and the placements you can pass straight into `play_move`.
+
+## Python usage
+
+```python
+from tiletangle import Game
+
+# Medium difficulty preset (noise-free, shallow search)
+best = game.best_move("medium", seed=12345)
+if best:
+    print(best["word"], best["total"], best["placements"])
+
+# Custom budgets
+hint = game.best_move_greedy(
+    max_len=7,
+    lookahead_depth=1,
+    seed=4242,
+    node_limit=48,
+    time_limit_ms=20,
+    noise_range=6,
+)
+```
+
+Both helpers return `None` when no legal moves exist.
+
+## Determinism & randomness
+
+Set `randomness`/`seed` to obtain deterministic tie-breaking—handy for reproducible tests and
+tutorials. Without a seed, the AI still tries to stick to the highest score but noise (if enabled)
+adds variety within the `[-noise_range, noise_range]` window.
+
+You can combine node and time ceilings; whichever triggers first ends the search. That makes it easy
+to ship fast hints on mobile while still letting desktop builds think longer.
+
+Contributions to the rack-leave table are welcome—tweak `AiConfig::rack_leave` for your language or
+tile distribution, or swap it entirely for variant-specific heuristics.

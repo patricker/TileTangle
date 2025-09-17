@@ -1,6 +1,8 @@
-use engine::{self, BoardGeometry, Rules};
+use engine::{self, AiConfig, AiDifficulty, BoardGeometry, Rules};
+use js_sys::Reflect;
 use serde::Deserialize;
 use serde_json::json;
+use std::time::Duration;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -67,6 +69,108 @@ struct JsConfig {
     tile_counts: std::collections::HashMap<String, u32>,
     #[serde(default)]
     free_word_mode: bool,
+}
+
+fn parse_difficulty_tag(level: &str) -> Result<AiDifficulty, JsValue> {
+    match level.to_ascii_lowercase().as_str() {
+        "easy" => Ok(AiDifficulty::Easy),
+        "medium" | "normal" => Ok(AiDifficulty::Medium),
+        "hard" => Ok(AiDifficulty::Hard),
+        other => Err(to_js_err(format!("unknown difficulty '{other}'"))),
+    }
+}
+
+fn evaluated_move_to_json(game: &JsGame, eval: engine::EvaluatedMove) -> Result<String, JsValue> {
+    let rack_leave = eval.rack_leave;
+    let board_equity = eval.board_equity;
+    let endgame_penalty = eval.endgame_penalty;
+    let total = eval.total;
+    let candidate = eval.candidate;
+    let word = candidate.word;
+    let score = candidate.score;
+    let placements_vec = candidate.placements;
+    let mut placements = Vec::new();
+    for (cid, tile) in placements_vec {
+        let coord = game
+            .state
+            .board
+            .geom
+            .from_cell_id(cid)
+            .ok_or_else(|| to_js_err("invalid cell"))?;
+        placements.push(json!({
+            "x": coord.x,
+            "y": coord.y,
+            "kind_id": tile.kind_id,
+            "mark": tile.mark
+        }));
+    }
+    let payload = json!({
+        "word": word,
+        "score": score,
+        "rack_leave": rack_leave,
+        "board_equity": board_equity,
+        "endgame_penalty": endgame_penalty,
+        "total": total,
+        "placements": placements,
+    });
+    Ok(serde_json::to_string(&payload).unwrap())
+}
+
+fn js_get(opts: &JsValue, key: &str) -> Result<Option<JsValue>, JsValue> {
+    if !opts.is_object() {
+        return Ok(None);
+    }
+    let val = Reflect::get(opts, &JsValue::from_str(key))
+        .map_err(|_| to_js_err(format!("failed to read property '{key}'")))?;
+    if val.is_undefined() || val.is_null() {
+        Ok(None)
+    } else {
+        Ok(Some(val))
+    }
+}
+
+fn js_get_string(opts: &JsValue, key: &str) -> Result<Option<String>, JsValue> {
+    Ok(js_get(opts, key)?.and_then(|v| v.as_string()))
+}
+
+fn js_get_u32(opts: &JsValue, key: &str) -> Result<Option<u32>, JsValue> {
+    if let Some(val) = js_get(opts, key)? {
+        if let Some(n) = val.as_f64() {
+            if n.is_finite() && n >= 0.0 {
+                return Ok(Some(n as u32));
+            }
+        }
+        return Err(to_js_err(format!(
+            "expected non-negative number for '{key}'"
+        )));
+    }
+    Ok(None)
+}
+
+fn js_get_i32(opts: &JsValue, key: &str) -> Result<Option<i32>, JsValue> {
+    if let Some(val) = js_get(opts, key)? {
+        if let Some(n) = val.as_f64() {
+            if n.is_finite() {
+                return Ok(Some(n as i32));
+            }
+        }
+        return Err(to_js_err(format!("expected number for '{key}'")));
+    }
+    Ok(None)
+}
+
+fn js_get_u64(opts: &JsValue, key: &str) -> Result<Option<u64>, JsValue> {
+    if let Some(val) = js_get(opts, key)? {
+        if let Some(n) = val.as_f64() {
+            if n.is_finite() && n >= 0.0 {
+                return Ok(Some(n as u64));
+            }
+        }
+        return Err(to_js_err(format!(
+            "expected non-negative number for '{key}'"
+        )));
+    }
+    Ok(None)
 }
 
 #[wasm_bindgen]
@@ -662,12 +766,62 @@ pub fn generate_moves(game: &JsGame, max_len: u32, limit: u32) -> String {
 }
 
 #[wasm_bindgen]
+pub fn best_move_greedy(
+    game: &JsGame,
+    max_len: Option<u32>,
+    depth: Option<u32>,
+    seed: Option<u64>,
+    opts: JsValue,
+) -> Result<String, JsValue> {
+    let mut cfg = AiConfig::default();
+    if !opts.is_null() && !opts.is_undefined() {
+        if let Some(level) = js_get_string(&opts, "difficulty")? {
+            let diff = parse_difficulty_tag(&level)?;
+            cfg.apply_difficulty(diff);
+        }
+        if let Some(limit) = js_get_u32(&opts, "node_limit")? {
+            cfg.max_nodes = Some(limit as usize);
+        }
+        if let Some(ms) = js_get_u64(&opts, "time_limit_ms")? {
+            cfg.max_duration = Some(Duration::from_millis(ms));
+        }
+        if let Some(noise) = js_get_i32(&opts, "noise_range")? {
+            cfg.noise_range = noise;
+        }
+        if let Some(limit) = js_get_u32(&opts, "candidate_limit")? {
+            cfg.candidate_limit = Some(limit as usize);
+        }
+        if let Some(limit) = js_get_u32(&opts, "reply_limit")? {
+            cfg.reply_move_limit = limit as usize;
+        }
+    }
+    if let Some(m) = max_len {
+        cfg.max_move_len = m as usize;
+    }
+    if let Some(d) = depth {
+        cfg.lookahead_depth = d as usize;
+    }
+    cfg.randomness = seed;
+    let eval = engine::best_move_greedy(&game.state, &game.rules, &cfg)
+        .ok_or_else(|| to_js_err("no moves available"))?;
+    evaluated_move_to_json(game, eval)
+}
+
+#[wasm_bindgen]
+pub fn best_move(game: &JsGame, difficulty: &str, seed: Option<u64>) -> Result<String, JsValue> {
+    let level = parse_difficulty_tag(difficulty)?;
+    let mut cfg = AiConfig::for_difficulty(level);
+    cfg.randomness = seed;
+    let eval = engine::best_move_greedy(&game.state, &game.rules, &cfg)
+        .ok_or_else(|| to_js_err("no moves available"))?;
+    evaluated_move_to_json(game, eval)
+}
+
+#[wasm_bindgen]
 pub fn pass_turn(game: &mut JsGame) {
     game.future.clear();
     game.history.push(snapshot_json(game));
-    let pid = game.state.to_move.0;
-    game.state.turn_num = game.state.turn_num.saturating_add(1);
-    game.state.to_move = engine::PlayerId((pid + 1) % game.state.players.len());
+    game.state.pass_turn();
 }
 
 #[derive(Deserialize)]
@@ -687,44 +841,53 @@ pub fn exchange_tiles(game: &mut JsGame, kinds_json: &str) -> Result<(), JsValue
                 .kinds
         }
     };
-    let n = kinds.len();
-    // require enough tiles in bag
-    if game.state.bag.remaining() < n as u32 {
-        return Err(to_js_err("not enough tiles in bag to exchange"));
-    }
-    let pid = game.state.to_move.0;
-    // remove from rack
-    for kid in &kinds {
-        // find first tile with that kind_id
-        let pos = game.state.players[pid]
-            .rack
-            .tiles
-            .iter()
-            .position(|t| &t.kind_id == kid)
-            .ok_or_else(|| to_js_err("tile not in rack"))?;
-        let _t = game.state.players[pid].rack.tiles.remove(pos);
-        // return to bag counts
-        // find tilekind by id
-        if let Some(tk) = game
-            .state
-            .tileset
-            .tile_kinds
-            .iter()
-            .find(|tk| &tk.id == kid)
-        {
-            let entry = game.state.bag.counts.entry(tk.clone()).or_insert(0);
-            *entry += 1;
-        }
-    }
-    // draw same number
-    for _ in 0..n {
-        if let Some(t) = game.state.bag.draw_one() {
-            let _ = game.state.players[pid].rack.add(t, 7);
-        }
-    }
-    // advance turn
-    pass_turn(game);
+    game.state
+        .exchange_tiles(&kinds)
+        .map_err(|e| to_js_err(format!("{e}")))?;
     Ok(())
+}
+
+#[wasm_bindgen]
+pub fn snapshot_state_json(game: &JsGame) -> Result<String, JsValue> {
+    game.state
+        .snapshot_json()
+        .map_err(|e| to_js_err(format!("{e}")))
+}
+
+#[wasm_bindgen]
+pub fn snapshot_state_cbor(game: &JsGame) -> Result<Vec<u8>, JsValue> {
+    game.state
+        .snapshot_cbor()
+        .map_err(|e| to_js_err(format!("{e}")))
+}
+
+#[wasm_bindgen]
+pub fn load_state_json(game: &mut JsGame, json: &str) -> Result<(), JsValue> {
+    let dict = game.state.dictionary.take();
+    let mut restored =
+        engine::GameState::from_snapshot_json(json).map_err(|e| to_js_err(format!("{e}")))?;
+    restored.dictionary = dict;
+    game.state = restored;
+    game.future.clear();
+    game.history.clear();
+    Ok(())
+}
+
+#[wasm_bindgen]
+pub fn load_state_cbor(game: &mut JsGame, bytes: &[u8]) -> Result<(), JsValue> {
+    let dict = game.state.dictionary.take();
+    let mut restored =
+        engine::GameState::from_snapshot_cbor(bytes).map_err(|e| to_js_err(format!("{e}")))?;
+    restored.dictionary = dict;
+    game.state = restored;
+    game.future.clear();
+    game.history.clear();
+    Ok(())
+}
+
+#[wasm_bindgen]
+pub fn get_event_log(game: &JsGame) -> Result<String, JsValue> {
+    serde_json::to_string(&game.state.event_log).map_err(|e| to_js_err(format!("{e}")))
 }
 
 // (set_free_word_mode defined above)

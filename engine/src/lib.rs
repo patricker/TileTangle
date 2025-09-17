@@ -2,16 +2,160 @@
 
 use fst::{Automaton, Streamer};
 use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand_chacha::ChaCha12Rng;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::any::Any;
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeSet, HashMap};
+use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
+
+fn splitmix64(mut x: u64) -> u64 {
+    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = x;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+fn zobrist_mix(seed: u64, value: impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    seed.hash(&mut hasher);
+    value.hash(&mut hasher);
+    splitmix64(hasher.finish())
+}
+
+mod serde_cell_bonus {
+    use super::{Bonus, CellId};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashMap;
+
+    pub fn serialize<S>(value: &HashMap<CellId, Bonus>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let vec: Vec<(u32, &Bonus)> = value.iter().map(|(cid, bonus)| (cid.0, bonus)).collect();
+        vec.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<CellId, Bonus>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vec = Vec::<(u32, Bonus)>::deserialize(deserializer)?;
+        Ok(vec
+            .into_iter()
+            .map(|(id, bonus)| (CellId(id), bonus))
+            .collect())
+    }
+}
+
+mod serde_cell_set {
+    use super::CellId;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashSet;
+
+    pub fn serialize<S>(value: &Option<HashSet<CellId>>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let opt: Option<Vec<u32>> = value.as_ref().map(|set| {
+            let mut vec: Vec<u32> = set.iter().map(|cid| cid.0).collect();
+            vec.sort_unstable();
+            vec
+        });
+        opt.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<HashSet<CellId>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let opt = Option::<Vec<u32>>::deserialize(deserializer)?;
+        Ok(opt.map(|vec| vec.into_iter().map(|id| CellId(id)).collect()))
+    }
+}
+
+mod serde_cell_adj {
+    use super::CellId;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashMap;
+
+    pub fn serialize<S>(
+        value: &Option<HashMap<CellId, Vec<(CellId, String)>>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let opt: Option<Vec<(u32, Vec<(u32, String)>)>> = value.as_ref().map(|map| {
+            let mut entries: Vec<(u32, Vec<(u32, String)>)> = map
+                .iter()
+                .map(|(cid, vec)| {
+                    let inner = vec
+                        .iter()
+                        .map(|(other, dir)| (other.0, dir.clone()))
+                        .collect();
+                    (cid.0, inner)
+                })
+                .collect();
+            entries.sort_by_key(|(id, _)| *id);
+            entries
+        });
+        opt.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<Option<HashMap<CellId, Vec<(CellId, String)>>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let opt = Option::<Vec<(u32, Vec<(u32, String)>)>>::deserialize(deserializer)?;
+        Ok(opt.map(|entries| {
+            entries
+                .into_iter()
+                .map(|(id, vec)| {
+                    (
+                        CellId(id),
+                        vec.into_iter()
+                            .map(|(other, dir)| (CellId(other), dir))
+                            .collect(),
+                    )
+                })
+                .collect()
+        }))
+    }
+}
+
+mod serde_tile_counts {
+    use super::TileKind;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashMap;
+
+    pub fn serialize<S>(value: &HashMap<TileKind, u32>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let vec: Vec<(TileKind, u32)> = value.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        vec.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<TileKind, u32>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vec = Vec::<(TileKind, u32)>::deserialize(deserializer)?;
+        Ok(vec.into_iter().collect())
+    }
+}
 
 // -------- Errors --------
 
@@ -29,6 +173,8 @@ pub enum EngineError {
     BagEmpty,
     #[error("config error: {0}")]
     Config(&'static str),
+    #[error("serialization error: {0}")]
+    Serialization(String),
 }
 
 // -------- Version --------
@@ -130,7 +276,7 @@ impl Tokenizer for CharacterTokenizer {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TileKind {
     pub id: String,
     pub symbol: Symbol,
@@ -151,7 +297,7 @@ impl Hash for TileKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tile {
     pub kind_id: String,
     pub mark: Option<String>,
@@ -159,10 +305,11 @@ pub struct Tile {
 
 // -------- Board Geometry --------
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct CellId(pub u32);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Coord2D {
     pub x: i32,
     pub y: i32,
@@ -179,12 +326,14 @@ pub trait BoardGeometry {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RectGridGeometry {
     pub width: u32,
     pub height: u32,
     // Optional graph overlay: restrict present cells and override adjacency with direction tags
-    adj: Option<HashMap<CellId, SmallVec<[(CellId, String); 8]>>>,
+    #[serde(default, with = "serde_cell_adj")]
+    adj: Option<HashMap<CellId, Vec<(CellId, String)>>>,
+    #[serde(default, with = "serde_cell_set")]
     present: Option<HashSet<CellId>>,
 }
 
@@ -216,7 +365,7 @@ impl RectGridGeometry {
                 return Err(EngineError::Config("overlay node outside bounds"));
             }
         }
-        let mut adj: HashMap<CellId, SmallVec<[(CellId, String); 8]>> = HashMap::new();
+        let mut adj: HashMap<CellId, Vec<(CellId, String)>> = HashMap::new();
         for (ai, bi, dir) in overlay.edges.into_iter() {
             if ai >= id_for.len() || bi >= id_for.len() {
                 return Err(EngineError::Config("edge index out of range"));
@@ -356,7 +505,7 @@ impl BoardGeometry for RectGridGeometry {
 
 // -------- Graph Overlay --------
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphOverlay {
     pub nodes: Vec<Coord2D>,
     pub edges: Vec<(usize, usize, String)>,
@@ -364,7 +513,7 @@ pub struct GraphOverlay {
 
 // -------- Board & Bonuses --------
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bonus {
     pub letter_mul: i8, // default 1
     pub word_mul: i8,   // default 1
@@ -381,15 +530,17 @@ impl Default for Bonus {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cell {
     pub stack: Vec<Tile>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound(serialize = "G: Serialize", deserialize = "G: Deserialize<'de>"))]
 pub struct Board<G: BoardGeometry> {
     pub geom: G,
     pub cells: Vec<Cell>,
+    #[serde(default, with = "serde_cell_bonus")]
     pub bonuses: HashMap<CellId, Bonus>,
 }
 
@@ -406,7 +557,7 @@ impl<G: BoardGeometry> Board<G> {
 
 // -------- Rack & Bag --------
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rack {
     pub tiles: Vec<Tile>,
 }
@@ -434,15 +585,16 @@ impl Rack {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tileset {
     pub tile_kinds: Vec<TileKind>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bag {
+    #[serde(with = "serde_tile_counts")]
     pub counts: HashMap<TileKind, u32>,
-    rng: StdRng,
+    rng: ChaCha12Rng,
 }
 
 impl Bag {
@@ -455,14 +607,14 @@ impl Bag {
         }
         Self {
             counts,
-            rng: StdRng::seed_from_u64(seed),
+            rng: ChaCha12Rng::seed_from_u64(seed),
         }
     }
 
     pub fn with_counts(counts: HashMap<TileKind, u32>, seed: u64) -> Self {
         Self {
             counts,
-            rng: StdRng::seed_from_u64(seed),
+            rng: ChaCha12Rng::seed_from_u64(seed),
         }
     }
 
@@ -514,22 +666,47 @@ impl Bag {
 
 // -------- Players & Game State --------
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PlayerId(pub usize);
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Player {
     pub rack: Rack,
     pub score: i32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum GameEventKind {
+    Play {
+        placements: Vec<(CellId, Tile)>,
+        score: i32,
+        total: i32,
+    },
+    Draw {
+        tiles: Vec<String>,
+    },
+    Exchange {
+        give: Vec<String>,
+        take: Vec<String>,
+    },
+    Pass,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GameEvent {
+    pub turn: u32,
+    pub player: usize,
+    pub kind: GameEventKind,
+    pub position_hash: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RectBoardLayout {
     pub width: u32,
     pub height: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameConfig {
     pub tileset: Tileset,
     pub rack_size: usize,
@@ -541,7 +718,7 @@ pub struct GameConfig {
     pub tile_counts: HashMap<String, u32>,
 }
 
-#[derive()]
+#[derive(Serialize, Deserialize)]
 pub struct GameState {
     pub board: Board<RectGridGeometry>,
     pub players: Vec<Player>,
@@ -549,7 +726,46 @@ pub struct GameState {
     pub bag: Bag,
     pub turn_num: u32,
     pub tileset: Tileset,
+    #[serde(skip)]
     pub dictionary: Option<Box<dyn Dictionary + Send + Sync>>,
+    #[serde(default)]
+    pub dictionary_id: Option<String>,
+    #[serde(default)]
+    pub event_log: Vec<GameEvent>,
+    pub zobrist_seed: u64,
+}
+
+impl Clone for GameState {
+    fn clone(&self) -> Self {
+        Self {
+            board: self.board.clone(),
+            players: self.players.clone(),
+            to_move: self.to_move,
+            bag: self.bag.clone(),
+            turn_num: self.turn_num,
+            tileset: self.tileset.clone(),
+            dictionary: self.dictionary.as_ref().map(|d| d.boxed_clone()),
+            dictionary_id: self.dictionary_id.clone(),
+            event_log: self.event_log.clone(),
+            zobrist_seed: self.zobrist_seed,
+        }
+    }
+}
+
+impl fmt::Debug for GameState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GameState")
+            .field("board", &self.board)
+            .field("players", &self.players)
+            .field("to_move", &self.to_move)
+            .field("bag", &self.bag)
+            .field("turn_num", &self.turn_num)
+            .field("tileset", &self.tileset)
+            .field("dictionary_id", &self.dictionary_id)
+            .field("event_log_len", &self.event_log.len())
+            .field("zobrist_seed", &self.zobrist_seed)
+            .finish()
+    }
 }
 
 impl GameState {
@@ -586,7 +802,7 @@ impl GameState {
             counts.insert(tk, c);
         }
         let bag = Bag::with_counts(counts, config.rng_seed);
-
+        let zobrist_seed = splitmix64(config.rng_seed ^ 0x9E37_79B9_7F4A_7C15);
         let players_vec = (0..players).map(|_| Player::default()).collect();
         Ok(Self {
             board,
@@ -596,6 +812,9 @@ impl GameState {
             turn_num: 0,
             tileset,
             dictionary: None,
+            dictionary_id: Some(config.dictionary_id.clone()),
+            event_log: Vec::new(),
+            zobrist_seed,
         })
     }
 
@@ -616,6 +835,156 @@ impl GameState {
     /// Apply a graph overlay (custom adjacency and present cells) to the current rectangular geometry.
     pub fn apply_graph_overlay(&mut self, overlay: GraphOverlay) -> Result<(), EngineError> {
         self.board.geom.apply_graph_overlay(overlay)
+    }
+
+    fn push_event(&mut self, player: usize, kind: GameEventKind) {
+        let hash = self.compute_position_hash();
+        let turn = self.turn_num;
+        self.event_log.push(GameEvent {
+            turn,
+            player,
+            kind,
+            position_hash: hash,
+        });
+    }
+
+    fn advance_turn(&mut self) {
+        let pid = self.to_move.0;
+        self.turn_num = self.turn_num.saturating_add(1);
+        if !self.players.is_empty() {
+            self.to_move = PlayerId((pid + 1) % self.players.len());
+        }
+    }
+
+    fn log_draw(&mut self, player: usize, tiles: &[Tile]) {
+        if tiles.is_empty() {
+            return;
+        }
+        let kinds = tiles.iter().map(|t| t.kind_id.clone()).collect();
+        self.push_event(player, GameEventKind::Draw { tiles: kinds });
+    }
+
+    pub fn compute_position_hash(&self) -> u64 {
+        let mut acc = 0u64;
+        for (idx, cell) in self.board.cells.iter().enumerate() {
+            for (depth, tile) in cell.stack.iter().enumerate() {
+                acc ^= zobrist_mix(
+                    self.zobrist_seed,
+                    (
+                        "cell",
+                        idx as u32,
+                        depth as u32,
+                        tile.kind_id.as_str(),
+                        tile.mark.as_deref(),
+                    ),
+                );
+            }
+        }
+        for (pid, player) in self.players.iter().enumerate() {
+            for (idx, tile) in player.rack.tiles.iter().enumerate() {
+                acc ^= zobrist_mix(
+                    self.zobrist_seed,
+                    (
+                        "rack",
+                        pid as u32,
+                        idx as u32,
+                        tile.kind_id.as_str(),
+                        tile.mark.as_deref(),
+                    ),
+                );
+            }
+            acc ^= zobrist_mix(self.zobrist_seed, ("score", pid as u32, player.score));
+        }
+        for (tk, count) in &self.bag.counts {
+            for i in 0..*count {
+                acc ^= zobrist_mix(self.zobrist_seed, ("bag", tk.id.as_str(), i));
+            }
+        }
+        acc ^= zobrist_mix(self.zobrist_seed, ("turn", self.turn_num));
+        acc ^= zobrist_mix(self.zobrist_seed, ("to_move", self.to_move.0 as u32));
+        acc
+    }
+
+    pub fn pass_turn(&mut self) {
+        let pid = self.to_move.0;
+        self.push_event(pid, GameEventKind::Pass);
+        self.advance_turn();
+    }
+
+    pub fn exchange_tiles(&mut self, kinds: &[String]) -> Result<Vec<String>, EngineError> {
+        if kinds.is_empty() {
+            return Ok(Vec::new());
+        }
+        if self.bag.remaining() < kinds.len() as u32 {
+            return Err(EngineError::Config("not enough tiles in bag to exchange"));
+        }
+        let pid = self.to_move.0;
+        let rack_size = self.players[pid].rack_size().unwrap_or(7);
+        let mut give: Vec<String> = Vec::with_capacity(kinds.len());
+        for kid in kinds {
+            let pos = self.players[pid]
+                .rack
+                .tiles
+                .iter()
+                .position(|t| &t.kind_id == kid)
+                .ok_or(EngineError::Config("tile not in rack"))?;
+            let tile = self.players[pid].rack.tiles.remove(pos);
+            if let Some(tk) = self
+                .tileset
+                .tile_kinds
+                .iter()
+                .find(|tk| tk.id == tile.kind_id)
+            {
+                *self.bag.counts.entry(tk.clone()).or_insert(0) += 1;
+            }
+            give.push(tile.kind_id);
+        }
+
+        let mut taken_tiles: Vec<Tile> = Vec::with_capacity(kinds.len());
+        for _ in 0..kinds.len() {
+            if let Some(tile) = self.bag.draw_one() {
+                let clone_for_log = tile.clone();
+                self.players[pid].rack.add(tile, rack_size)?;
+                taken_tiles.push(clone_for_log);
+            }
+        }
+        let take_ids: Vec<String> = taken_tiles.iter().map(|t| t.kind_id.clone()).collect();
+        self.push_event(
+            pid,
+            GameEventKind::Exchange {
+                give: give.clone(),
+                take: take_ids.clone(),
+            },
+        );
+        self.log_draw(pid, &taken_tiles);
+        self.advance_turn();
+        Ok(take_ids)
+    }
+
+    pub fn snapshot_json(&self) -> Result<String, EngineError> {
+        serde_json::to_string(self).map_err(|e| EngineError::Serialization(e.to_string()))
+    }
+
+    pub fn snapshot_cbor(&self) -> Result<Vec<u8>, EngineError> {
+        serde_cbor::to_vec(self).map_err(|e| EngineError::Serialization(e.to_string()))
+    }
+
+    pub fn from_snapshot_json(json: &str) -> Result<Self, EngineError> {
+        let mut state: GameState =
+            serde_json::from_str(json).map_err(|e| EngineError::Serialization(e.to_string()))?;
+        state.dictionary = None;
+        Ok(state)
+    }
+
+    pub fn from_snapshot_cbor(bytes: &[u8]) -> Result<Self, EngineError> {
+        let mut state: GameState =
+            serde_cbor::from_slice(bytes).map_err(|e| EngineError::Serialization(e.to_string()))?;
+        state.dictionary = None;
+        Ok(state)
+    }
+
+    pub fn event_log(&self) -> &[GameEvent] {
+        &self.event_log
     }
 }
 
@@ -1262,11 +1631,20 @@ impl Rules for CrosswordRules {
         // Refill rack
         let want = state.players[pid].rack.tiles.len();
         let draw_n = (state.players[pid].rack_size().unwrap_or(7)).saturating_sub(want); // default 7
-        let drawn = state.bag.draw(draw_n);
-        state.players[pid].rack.tiles.extend(drawn);
-        // Advance turn
-        state.turn_num += 1;
-        state.to_move = PlayerId((pid + 1) % state.players.len());
+        let mut drawn = state.bag.draw(draw_n);
+        let drawn_clone = drawn.clone();
+        state.players[pid].rack.tiles.append(&mut drawn);
+
+        state.push_event(
+            pid,
+            GameEventKind::Play {
+                placements: mv.placements.clone(),
+                score: score.main_score,
+                total: score.total,
+            },
+        );
+        state.log_draw(pid, &drawn_clone);
+        state.advance_turn();
         Ok(())
     }
 }
@@ -1633,6 +2011,409 @@ pub struct CandidateMove {
     pub placements: Vec<(CellId, Tile)>,
     pub word: String,
     pub score: i32,
+}
+
+// -------- AI (Phase 13) --------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiDifficulty {
+    Easy,
+    Medium,
+    Hard,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiConfig {
+    pub rack_leave: HashMap<String, i32>,
+    pub randomness: Option<u64>,
+    pub max_move_len: usize,
+    pub lookahead_depth: usize,
+    pub max_nodes: Option<usize>,
+    pub max_duration: Option<Duration>,
+    pub candidate_limit: Option<usize>,
+    pub reply_move_limit: usize,
+    pub noise_range: i32,
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            rack_leave: default_rack_leave_table(),
+            randomness: None,
+            max_move_len: 15,
+            lookahead_depth: 0,
+            max_nodes: None,
+            max_duration: None,
+            candidate_limit: None,
+            reply_move_limit: usize::MAX,
+            noise_range: 0,
+        }
+    }
+}
+
+impl AiConfig {
+    fn requires_rng(&self) -> bool {
+        self.noise_range > 0
+    }
+
+    pub fn for_difficulty(level: AiDifficulty) -> Self {
+        let mut cfg = Self::default();
+        cfg.apply_difficulty(level);
+        cfg
+    }
+
+    pub fn apply_difficulty(&mut self, level: AiDifficulty) {
+        match level {
+            AiDifficulty::Easy => {
+                self.lookahead_depth = 0;
+                self.max_nodes = Some(16);
+                self.max_duration = Some(Duration::from_millis(5));
+                self.candidate_limit = Some(20);
+                self.reply_move_limit = 6;
+                self.noise_range = 12;
+            }
+            AiDifficulty::Medium => {
+                self.lookahead_depth = 0;
+                self.max_nodes = Some(64);
+                self.max_duration = Some(Duration::from_millis(25));
+                self.candidate_limit = Some(32);
+                self.reply_move_limit = 12;
+                self.noise_range = 4;
+            }
+            AiDifficulty::Hard => {
+                self.lookahead_depth = 1;
+                self.max_nodes = None;
+                self.max_duration = None;
+                self.candidate_limit = None;
+                self.reply_move_limit = usize::MAX;
+                self.noise_range = 0;
+            }
+        }
+    }
+}
+
+fn default_rack_leave_table() -> HashMap<String, i32> {
+    HashMap::from([
+        ("A".into(), 1),
+        ("E".into(), 1),
+        ("I".into(), 1),
+        ("L".into(), 1),
+        ("N".into(), 1),
+        ("R".into(), 1),
+        ("S".into(), 1),
+        ("T".into(), 1),
+        ("O".into(), 0),
+        ("D".into(), -1),
+        ("G".into(), -1),
+        ("B".into(), -1),
+        ("M".into(), -1),
+        ("P".into(), -1),
+        ("C".into(), -1),
+        ("F".into(), -2),
+        ("H".into(), -2),
+        ("V".into(), -2),
+        ("W".into(), -2),
+        ("Y".into(), -2),
+        ("K".into(), -2),
+        ("J".into(), -3),
+        ("X".into(), -3),
+        ("Q".into(), -4),
+        ("Z".into(), -4),
+        ("?".into(), -2),
+    ])
+}
+
+fn tileset_symbol_for_kind(tileset: &Tileset, kind_id: &str) -> String {
+    tileset
+        .tile_kinds
+        .iter()
+        .find(|tk| tk.id == kind_id)
+        .map(|tk| tk.symbol.clone())
+        .unwrap_or_else(|| kind_id.to_string())
+}
+
+fn leftover_counts_from_rack(
+    rack: &[String],
+    placements: &[(CellId, Tile)],
+) -> HashMap<String, usize> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for kid in rack {
+        *counts.entry(kid.clone()).or_default() += 1;
+    }
+    for (_, tile) in placements {
+        if let Some(entry) = counts.get_mut(&tile.kind_id) {
+            if *entry > 0 {
+                *entry -= 1;
+            }
+        }
+    }
+    counts.retain(|_, v| *v > 0);
+    counts
+}
+
+fn rack_leave_score(
+    config: &AiConfig,
+    tileset: &Tileset,
+    leftover: &HashMap<String, usize>,
+) -> i32 {
+    leftover
+        .iter()
+        .map(|(kid, count)| {
+            let sym = tileset_symbol_for_kind(tileset, kid).to_uppercase();
+            let val = config
+                .rack_leave
+                .get(&sym)
+                .or_else(|| config.rack_leave.get(kid))
+                .copied()
+                .unwrap_or(0);
+            val * (*count as i32)
+        })
+        .sum()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvaluatedMove {
+    pub candidate: CandidateMove,
+    pub rack_leave: i32,
+    pub board_equity: i32,
+    pub endgame_penalty: i32,
+    pub total: i32,
+}
+
+fn board_equity_bonus(state: &GameState, candidate: &CandidateMove) -> i32 {
+    let mut bonus = 0;
+    let placed: HashSet<CellId> = candidate.placements.iter().map(|(cid, _)| *cid).collect();
+    for (cid, _) in &candidate.placements {
+        for neigh in state.board.geom.neighbors(*cid) {
+            if placed.contains(&neigh) {
+                continue;
+            }
+            if state.board.cells[neigh.0 as usize].stack.is_empty() {
+                bonus += 1;
+            }
+        }
+    }
+    bonus
+}
+
+fn endgame_penalty(state: &GameState, leftover: &HashMap<String, usize>) -> i32 {
+    if state.bag.remaining() > 0 {
+        return 0;
+    }
+    let mut penalty = 0;
+    for (kind_id, count) in leftover {
+        if *count == 0 {
+            continue;
+        }
+        if let Some(kind) = state.tileset.tile_kinds.iter().find(|tk| tk.id == *kind_id) {
+            penalty -= (*count as i32) * (kind.score as i32);
+        }
+    }
+    penalty
+}
+
+pub fn evaluate_candidate_move(
+    state: &GameState,
+    candidate: CandidateMove,
+    rack: &[String],
+    config: &AiConfig,
+) -> EvaluatedMove {
+    let leftover = leftover_counts_from_rack(rack, &candidate.placements);
+    let leave_score = rack_leave_score(config, &state.tileset, &leftover);
+    let board_eq = board_equity_bonus(state, &candidate);
+    let end_pen = endgame_penalty(state, &leftover);
+    let total = candidate.score + leave_score + board_eq + end_pen;
+    EvaluatedMove {
+        candidate,
+        rack_leave: leave_score,
+        board_equity: board_eq,
+        endgame_penalty: end_pen,
+        total,
+    }
+}
+
+pub fn best_move_greedy(
+    state: &GameState,
+    rules: &impl Rules,
+    config: &AiConfig,
+) -> Option<EvaluatedMove> {
+    let mut ctx = SearchContext::new(config);
+    best_move_inner(state, rules, config.lookahead_depth, &mut ctx)
+}
+
+pub fn best_move(
+    state: &GameState,
+    rules: &impl Rules,
+    level: AiDifficulty,
+) -> Option<EvaluatedMove> {
+    let cfg = AiConfig::for_difficulty(level);
+    best_move_greedy(state, rules, &cfg)
+}
+
+#[derive(Debug)]
+struct BestCandidate {
+    eval: EvaluatedMove,
+    adjusted_total: i32,
+}
+
+struct SearchContext<'a> {
+    config: &'a AiConfig,
+    rng: Option<StdRng>,
+    nodes: usize,
+    deadline: Option<Instant>,
+}
+
+impl<'a> SearchContext<'a> {
+    fn new(config: &'a AiConfig) -> Self {
+        let mut rng = config.randomness.map(StdRng::seed_from_u64);
+        if rng.is_none() && config.requires_rng() {
+            rng = Some(StdRng::from_entropy());
+        }
+        Self {
+            config,
+            rng,
+            nodes: 0,
+            deadline: config
+                .max_duration
+                .map(|d| Instant::now().checked_add(d).unwrap_or(Instant::now())),
+        }
+    }
+
+    fn rng_mut(&mut self) -> Option<&mut StdRng> {
+        if self.rng.is_none() && (self.config.randomness.is_some() || self.config.requires_rng()) {
+            self.rng = Some(match self.config.randomness {
+                Some(seed) => StdRng::seed_from_u64(seed),
+                None => StdRng::from_entropy(),
+            });
+        }
+        self.rng.as_mut()
+    }
+
+    fn record_node(&mut self) {
+        self.nodes = self.nodes.saturating_add(1);
+    }
+
+    fn node_limit_hit(&self) -> bool {
+        self.config
+            .max_nodes
+            .map(|limit| self.nodes >= limit)
+            .unwrap_or(false)
+    }
+
+    fn time_limit_hit(&self) -> bool {
+        self.deadline
+            .map(|deadline| Instant::now() >= deadline)
+            .unwrap_or(false)
+    }
+
+    fn sample_noise(&mut self) -> i32 {
+        let range = self.config.noise_range;
+        if range <= 0 {
+            return 0;
+        }
+        self.rng_mut()
+            .map(|rng| rng.gen_range(-range..=range))
+            .unwrap_or(0)
+    }
+
+    fn random_bool(&mut self, p: f64) -> bool {
+        if p <= 0.0 {
+            return false;
+        }
+        let p = p.min(1.0);
+        self.rng_mut().map(|rng| rng.gen_bool(p)).unwrap_or(false)
+    }
+}
+
+fn best_move_inner(
+    state: &GameState,
+    rules: &impl Rules,
+    depth: usize,
+    ctx: &mut SearchContext<'_>,
+) -> Option<EvaluatedMove> {
+    let pid = state.to_move.0;
+    let rack: Vec<String> = state.players[pid]
+        .rack
+        .tiles
+        .iter()
+        .map(|t| t.kind_id.clone())
+        .collect();
+    let mut candidates = generate_moves(state, rules, &rack, ctx.config.max_move_len);
+    if candidates.is_empty() {
+        return None;
+    }
+    candidates.sort_by(|a, b| b.score.cmp(&a.score));
+
+    let is_root = depth == ctx.config.lookahead_depth;
+    if is_root {
+        if let Some(limit) = ctx.config.candidate_limit {
+            if candidates.len() > limit {
+                candidates.truncate(limit);
+            }
+        }
+    } else if ctx.config.reply_move_limit != usize::MAX
+        && candidates.len() > ctx.config.reply_move_limit
+    {
+        candidates.truncate(ctx.config.reply_move_limit);
+    }
+
+    let mut best: Option<BestCandidate> = None;
+    for cand in candidates {
+        if ctx.node_limit_hit() && best.is_some() {
+            break;
+        }
+        if ctx.time_limit_hit() && best.is_some() {
+            break;
+        }
+        ctx.record_node();
+        let mut eval = evaluate_candidate_move(state, cand.clone(), &rack, ctx.config);
+        if depth > 0 && !ctx.node_limit_hit() && !ctx.time_limit_hit() {
+            let draft = MoveDraft {
+                placements: cand.placements.clone(),
+            };
+            if let Ok(validated) = rules.validate(state, &draft) {
+                let score = rules.score(state, &validated);
+                let mut next_state = state.clone();
+                if rules.commit(&mut next_state, validated, &score).is_ok() {
+                    if let Some(reply) =
+                        best_move_inner(&next_state, rules, depth.saturating_sub(1), ctx)
+                    {
+                        eval.total -= reply.total;
+                    }
+                }
+            }
+        }
+        let adjusted = eval.total + ctx.sample_noise();
+        match &mut best {
+            None => {
+                best = Some(BestCandidate {
+                    eval,
+                    adjusted_total: adjusted,
+                })
+            }
+            Some(current) => {
+                let better = adjusted > current.adjusted_total
+                    || (adjusted == current.adjusted_total && eval.total > current.eval.total)
+                    || (adjusted == current.adjusted_total
+                        && eval.total == current.eval.total
+                        && eval.rack_leave > current.eval.rack_leave)
+                    || (adjusted == current.adjusted_total
+                        && eval.total == current.eval.total
+                        && eval.rack_leave == current.eval.rack_leave
+                        && ctx.random_bool(0.5));
+                if better {
+                    *current = BestCandidate {
+                        eval,
+                        adjusted_total: adjusted,
+                    };
+                }
+            }
+        }
+        if ctx.time_limit_hit() && best.is_some() {
+            break;
+        }
+    }
+    best.map(|b| b.eval)
 }
 
 /// Generate naive horizontal moves at anchors (place to the right only).
@@ -2501,6 +3282,10 @@ pub fn generate_moves(
         .map(|tk| tk.id.clone())
         .collect();
 
+    if state.board.geom.has_graph() {
+        return generate_moves_graph_basic(state, rules, rack, max_len, &anchors);
+    }
+
     for a in anchors {
         let start = state.board.geom.from_cell_id(a).unwrap();
         let mut rack_counts: std::collections::HashMap<String, usize> =
@@ -2585,6 +3370,80 @@ pub fn generate_moves(
     dedup
 }
 
+fn generate_moves_graph_basic(
+    state: &GameState,
+    rules: &impl Rules,
+    rack: &[String],
+    max_len: usize,
+    anchors: &[CellId],
+) -> Vec<CandidateMove> {
+    let dict = state.dictionary.as_deref();
+    let mut out = Vec::new();
+    let mut seen: std::collections::HashSet<(u32, String, String)> =
+        std::collections::HashSet::new();
+    for &anchor in anchors {
+        if !state.board.cells[anchor.0 as usize].stack.is_empty() {
+            continue;
+        }
+        let neighs = state.board.geom.neighbors_with_tags(anchor);
+        for (neighbor, _tag) in neighs {
+            let cell = &state.board.cells[neighbor.0 as usize];
+            let Some(tile) = cell.stack.last() else {
+                continue;
+            };
+            let (_, prefix_sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, tile);
+            for kid in rack {
+                let Some(sym) = state
+                    .tileset
+                    .tile_kinds
+                    .iter()
+                    .find(|tk| tk.id == *kid && !tk.is_blank)
+                    .map(|tk| tk.symbol.clone())
+                else {
+                    continue;
+                };
+                let candidates = [
+                    format!("{}{}", prefix_sym.clone(), sym.as_str()),
+                    format!("{}{}", sym.as_str(), prefix_sym.clone()),
+                ];
+                for word in candidates {
+                    if word.chars().count() > max_len {
+                        continue;
+                    }
+                    if let Some(dict) = dict {
+                        if !dict.contains(&word) {
+                            continue;
+                        }
+                    }
+                    let placements = vec![(
+                        anchor,
+                        Tile {
+                            kind_id: kid.clone(),
+                            mark: None,
+                        },
+                    )];
+                    let draft = MoveDraft {
+                        placements: placements.clone(),
+                    };
+                    if let Ok(validated) = rules.validate(state, &draft) {
+                        let sc = rules.score(state, &validated);
+                        if sc.total >= 0
+                            && seen.insert((anchor.0, kid.clone(), sc.main_word.clone()))
+                        {
+                            out.push(CandidateMove {
+                                placements,
+                                word: sc.main_word,
+                                score: sc.total,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 impl Player {
     fn rack_size(&self) -> Option<usize> {
         Some(7)
@@ -2599,6 +3458,7 @@ pub trait Dictionary {
         false
     }
     fn as_any(&self) -> &dyn Any;
+    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -2697,6 +3557,9 @@ impl Dictionary for SetDictionary {
     }
     fn as_any(&self) -> &dyn Any {
         self
+    }
+    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> {
+        Box::new(self.clone())
     }
 }
 
@@ -2828,6 +3691,9 @@ impl Dictionary for FstDictionary {
     }
     fn as_any(&self) -> &dyn Any {
         self
+    }
+    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> {
+        Box::new(self.clone())
     }
 }
 
@@ -2987,6 +3853,9 @@ impl Dictionary for DawgDictionary {
     }
     fn as_any(&self) -> &dyn Any {
         self
+    }
+    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> {
+        Box::new(self.clone())
     }
 }
 
@@ -3264,6 +4133,9 @@ impl Dictionary for GaddagDictionary {
     }
     fn as_any(&self) -> &dyn Any {
         self
+    }
+    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> {
+        Box::new(self.clone())
     }
 }
 

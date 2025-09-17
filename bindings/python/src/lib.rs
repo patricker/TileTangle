@@ -1,7 +1,9 @@
-use engine::{self, BoardGeometry, Rules};
+use engine::{self, AiConfig, AiDifficulty, BoardGeometry, GameState, Rules};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyDict, PyList};
 use serde::Deserialize;
+use std::time::Duration;
 
 #[pyclass]
 struct Game {
@@ -52,6 +54,51 @@ struct JsPlacement {
     kind_id: String,
 }
 
+fn parse_difficulty_tag(level: &str) -> PyResult<AiDifficulty> {
+    match level.to_ascii_lowercase().as_str() {
+        "easy" => Ok(AiDifficulty::Easy),
+        "medium" | "normal" => Ok(AiDifficulty::Medium),
+        "hard" => Ok(AiDifficulty::Hard),
+        other => Err(PyValueError::new_err(format!(
+            "unknown difficulty '{other}'"
+        ))),
+    }
+}
+
+impl Game {
+    fn evaluated_move_to_py(
+        &self,
+        eval: engine::EvaluatedMove,
+        py: Python<'_>,
+    ) -> PyResult<PyObject> {
+        let result = PyDict::new(py);
+        let candidate = eval.candidate;
+        result.set_item("word", &candidate.word)?;
+        result.set_item("score", candidate.score)?;
+        result.set_item("rack_leave", eval.rack_leave)?;
+        result.set_item("board_equity", eval.board_equity)?;
+        result.set_item("endgame_penalty", eval.endgame_penalty)?;
+        result.set_item("total", eval.total)?;
+        let placements = PyList::empty(py);
+        for (cid, tile) in candidate.placements {
+            let coord = self
+                .state
+                .board
+                .geom
+                .from_cell_id(cid)
+                .ok_or_else(|| PyValueError::new_err("invalid cell id"))?;
+            let pd = PyDict::new(py);
+            pd.set_item("x", coord.x)?;
+            pd.set_item("y", coord.y)?;
+            pd.set_item("kind_id", tile.kind_id)?;
+            pd.set_item("mark", tile.mark)?;
+            placements.append(pd)?;
+        }
+        result.set_item("placements", placements)?;
+        Ok(result.into_py(py))
+    }
+}
+
 #[pymethods]
 impl Game {
     #[new]
@@ -84,12 +131,25 @@ impl Game {
             rng_seed: cfg.rng_seed,
             tile_counts: cfg.tile_counts,
         };
-        let state = engine::GameState::new(&eng_cfg, players)
+        let mut state = engine::GameState::new(&eng_cfg, players)
             .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
         let rules = engine::CrosswordRules {
             free_word_mode: cfg.free_word_mode,
             ..Default::default()
         };
+        // Deal initial racks deterministically (mirrors WASM helper)
+        for pid in 0..players {
+            loop {
+                if state.players[pid].rack.tiles.len() >= cfg.rack_size {
+                    break;
+                }
+                if let Some(tile) = state.bag.draw_one() {
+                    state.players[pid].rack.tiles.push(tile);
+                } else {
+                    break;
+                }
+            }
+        }
         Ok(Self { state, rules })
     }
 
@@ -157,6 +217,225 @@ impl Game {
         }
         let json = serde_json::json!({"width": w, "height": h, "rows": rows});
         Ok(serde_json::to_string(&json).unwrap())
+    }
+
+    fn set_dictionary_from_words(&mut self, words: Vec<String>, case_fold: bool) -> PyResult<()> {
+        let dict = engine::FstDictionary::from_words(words, case_fold);
+        self.state.dictionary = Some(Box::new(dict));
+        Ok(())
+    }
+
+    fn set_rack(&mut self, tiles: Vec<String>) -> PyResult<()> {
+        let pid = self.state.to_move.0;
+        // Return existing tiles to bag counts
+        for tile in self.state.players[pid].rack.tiles.drain(..) {
+            for (tk, count) in self.state.bag.counts.iter_mut() {
+                if tk.id == tile.kind_id {
+                    *count += 1;
+                    break;
+                }
+            }
+        }
+        for kid in tiles {
+            for (tk, count) in self.state.bag.counts.iter_mut() {
+                if tk.id == kid {
+                    if *count > 0 {
+                        *count -= 1;
+                    }
+                    break;
+                }
+            }
+            self.state.players[pid].rack.tiles.push(engine::Tile {
+                kind_id: kid,
+                mark: None,
+            });
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "(self, max_len, limit)")]
+    fn generate_moves(&self, max_len: usize, limit: usize, py: Python<'_>) -> PyResult<PyObject> {
+        let pid = self.state.to_move.0;
+        let rack: Vec<String> = self.state.players[pid]
+            .rack
+            .tiles
+            .iter()
+            .map(|t| t.kind_id.clone())
+            .collect();
+        let mut cands = engine::generate_moves(&self.state, &self.rules, &rack, max_len);
+        cands.sort_by(|a, b| b.score.cmp(&a.score));
+        let limit = limit.min(cands.len());
+        let list = PyList::empty(py);
+        for cm in cands.into_iter().take(limit) {
+            let entry = PyDict::new(py);
+            entry.set_item("word", &cm.word)?;
+            entry.set_item("score", cm.score)?;
+            let placements = PyList::empty(py);
+            for (cid, tile) in cm.placements {
+                let coord = self
+                    .state
+                    .board
+                    .geom
+                    .from_cell_id(cid)
+                    .ok_or_else(|| PyValueError::new_err("invalid cell id"))?;
+                let pd = PyDict::new(py);
+                pd.set_item("x", coord.x)?;
+                pd.set_item("y", coord.y)?;
+                pd.set_item("kind_id", &tile.kind_id)?;
+                pd.set_item("mark", tile.mark.clone())?;
+                placements.append(pd)?;
+            }
+            entry.set_item("placements", placements)?;
+            list.append(entry)?;
+        }
+        Ok(list.into())
+    }
+
+    #[pyo3(signature = (max_len=None, lookahead_depth=None, seed=None, node_limit=None, time_limit_ms=None, difficulty=None, noise_range=None, candidate_limit=None, reply_limit=None))]
+    fn best_move_greedy(
+        &self,
+        max_len: Option<usize>,
+        lookahead_depth: Option<usize>,
+        seed: Option<u64>,
+        node_limit: Option<usize>,
+        time_limit_ms: Option<u64>,
+        difficulty: Option<&str>,
+        noise_range: Option<i32>,
+        candidate_limit: Option<usize>,
+        reply_limit: Option<usize>,
+        py: Python<'_>,
+    ) -> PyResult<Option<PyObject>> {
+        let mut cfg = AiConfig::default();
+        if let Some(level) = difficulty {
+            let diff = parse_difficulty_tag(level)?;
+            cfg.apply_difficulty(diff);
+        }
+        if let Some(m) = max_len {
+            cfg.max_move_len = m;
+        }
+        if let Some(d) = lookahead_depth {
+            cfg.lookahead_depth = d;
+        }
+        cfg.randomness = seed;
+        if let Some(limit) = node_limit {
+            cfg.max_nodes = Some(limit);
+        }
+        if let Some(ms) = time_limit_ms {
+            cfg.max_duration = Some(Duration::from_millis(ms));
+        }
+        if let Some(noise) = noise_range {
+            cfg.noise_range = noise;
+        }
+        if let Some(limit) = candidate_limit {
+            cfg.candidate_limit = Some(limit);
+        }
+        if let Some(limit) = reply_limit {
+            cfg.reply_move_limit = limit;
+        }
+        let Some(eval) = engine::best_move_greedy(&self.state, &self.rules, &cfg) else {
+            return Ok(None);
+        };
+        self.evaluated_move_to_py(eval, py).map(Some)
+    }
+
+    #[pyo3(signature = (difficulty, seed=None))]
+    fn best_move(
+        &self,
+        difficulty: &str,
+        seed: Option<u64>,
+        py: Python<'_>,
+    ) -> PyResult<Option<PyObject>> {
+        let level = parse_difficulty_tag(difficulty)?;
+        let mut cfg = AiConfig::for_difficulty(level);
+        cfg.randomness = seed;
+        let Some(eval) = engine::best_move_greedy(&self.state, &self.rules, &cfg) else {
+            return Ok(None);
+        };
+        self.evaluated_move_to_py(eval, py).map(Some)
+    }
+
+    fn snapshot_json(&self) -> PyResult<String> {
+        self.state
+            .snapshot_json()
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    fn snapshot_cbor(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let bytes = self
+            .state
+            .snapshot_cbor()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(PyBytes::new(py, &bytes).into())
+    }
+
+    fn load_snapshot_json(&mut self, json: &str) -> PyResult<()> {
+        let dict = self.state.dictionary.take();
+        let mut restored = GameState::from_snapshot_json(json)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        restored.dictionary = dict;
+        self.state = restored;
+        Ok(())
+    }
+
+    fn load_snapshot_cbor(&mut self, data: &PyAny) -> PyResult<()> {
+        let bytes: &PyBytes = data.extract()?;
+        let dict = self.state.dictionary.take();
+        let mut restored = GameState::from_snapshot_cbor(bytes.as_bytes())
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        restored.dictionary = dict;
+        self.state = restored;
+        Ok(())
+    }
+
+    fn event_log(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let list = PyList::empty(py);
+        for ev in &self.state.event_log {
+            let entry = PyDict::new(py);
+            entry.set_item("turn", ev.turn)?;
+            entry.set_item("player", ev.player)?;
+            entry.set_item("position_hash", ev.position_hash)?;
+            match &ev.kind {
+                engine::GameEventKind::Play {
+                    placements,
+                    score,
+                    total,
+                } => {
+                    entry.set_item("type", "play")?;
+                    entry.set_item("score", *score)?;
+                    entry.set_item("total", *total)?;
+                    let placements_list = PyList::empty(py);
+                    for (cid, tile) in placements {
+                        let coord = self
+                            .state
+                            .board
+                            .geom
+                            .from_cell_id(*cid)
+                            .ok_or_else(|| PyValueError::new_err("invalid cell id"))?;
+                        let pd = PyDict::new(py);
+                        pd.set_item("x", coord.x)?;
+                        pd.set_item("y", coord.y)?;
+                        pd.set_item("kind_id", tile.kind_id.clone())?;
+                        pd.set_item("mark", tile.mark.clone())?;
+                        placements_list.append(pd)?;
+                    }
+                    entry.set_item("placements", placements_list)?;
+                }
+                engine::GameEventKind::Draw { tiles } => {
+                    entry.set_item("type", "draw")?;
+                    entry.set_item("tiles", tiles.clone())?;
+                }
+                engine::GameEventKind::Exchange { give, take } => {
+                    entry.set_item("type", "exchange")?;
+                    entry.set_item("give", give.clone())?;
+                    entry.set_item("take", take.clone())?;
+                }
+                engine::GameEventKind::Pass => {
+                    entry.set_item("type", "pass")?;
+                }
+            }
+            list.append(entry)?;
+        }
+        Ok(list.into())
     }
 }
 

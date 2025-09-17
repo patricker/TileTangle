@@ -1,7 +1,23 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 
 type BoardJson = { width: number; height: number; rows: string[][] };
-type Placement = { x: number; y: number; kind_id: string };
+type Placement = { x: number; y: number; kind_id: string; mark?: string | null };
+type GeneratedMove = {
+  word: string;
+  score: number;
+  placements: { x: number; y: number; kind_id: string; mark?: string | null }[];
+};
+
+type AiSuggestion = {
+  difficulty: string;
+  word: string;
+  score: number;
+  total: number;
+  rackLeave: number;
+  boardEquity: number;
+  endgamePenalty: number;
+  placements: Placement[];
+};
 
 export default function Playground(): JSX.Element {
   const [ready, setReady] = useState(false);
@@ -21,6 +37,17 @@ export default function Playground(): JSX.Element {
   const [game, setGame] = useState<any>(null);
   const [board, setBoard] = useState<BoardJson | null>(null);
   const [pending, setPending] = useState<Placement[]>([]);
+  const [showMoves, setShowMoves] = useState(false);
+  const [legalMoves, setLegalMoves] = useState<GeneratedMove[]>([]);
+  const [activeMoveIndex, setActiveMoveIndex] = useState<number | null>(null);
+  const [loadingMoves, setLoadingMoves] = useState(false);
+  const [rack, setRack] = useState<string[]>([]);
+  const [cpuDifficulty, setCpuDifficulty] = useState<'off' | 'easy' | 'medium' | 'hard'>('off');
+  const [cpuThinking, setCpuThinking] = useState(false);
+  const [cpuSuggestion, setCpuSuggestion] = useState<AiSuggestion | null>(null);
+  const [lastCpu, setLastCpu] = useState<AiSuggestion | null>(null);
+  const [snapshotText, setSnapshotText] = useState('');
+  const [eventLogText, setEventLogText] = useState('');
   const workerRef = useRef<Worker | null>(null);
 
   const cfg = useMemo(() => {
@@ -162,8 +189,11 @@ export default function Playground(): JSX.Element {
           }
         }
         const { board: b } = await call('get_board');
+        const { rack: r } = await call('get_rack');
         setGame({ call });
         setBoard(JSON.parse(b as string) as BoardJson);
+        setRack(JSON.parse(r as string).map((t: any) => t.kind_id));
+        setLastCpu(null);
         setReady(true);
       } else {
         const mod = await import('/wasm/engine/pkg/tiletangle_wasm.js');
@@ -197,6 +227,10 @@ export default function Playground(): JSX.Element {
         }
         setGame({ mod, g });
         setBoard(JSON.parse(mod.get_board(g)) as BoardJson);
+        setRack(
+          (JSON.parse(mod.get_rack(g)) as { kind_id: string }[]).map((t) => t.kind_id),
+        );
+        setLastCpu(null);
         setReady(true);
       }
     })();
@@ -208,7 +242,30 @@ export default function Playground(): JSX.Element {
     };
   }, [useWorker, useDict, cfg, rtl, stackOn, stackScoring, forbidSame, dictEngine]);
 
-  const rack = useMemo(() => ['A','A','A','B','B'], []);
+  const clearMoves = useCallback(() => {
+    setShowMoves(false);
+    setLegalMoves([]);
+    setActiveMoveIndex(null);
+  }, []);
+
+  const refreshRack = useCallback(async () => {
+    if (!game) {
+      setRack([]);
+      return;
+    }
+    try {
+      if (useWorker) {
+        const resp = await game.call('get_rack');
+        const arr = JSON.parse(resp.rack as string) as { kind_id: string }[];
+        setRack(arr.map(t => t.kind_id));
+      } else {
+        const arr = JSON.parse(game.mod.get_rack(game.g)) as { kind_id: string }[];
+        setRack(arr.map(t => t.kind_id));
+      }
+    } catch (err) {
+      console.error('get_rack failed', err);
+    }
+  }, [game, useWorker]);
 
   const commit = async () => {
     if (!game || pending.length === 0) return;
@@ -241,7 +298,10 @@ export default function Playground(): JSX.Element {
         game.mod.play_move(game.g, JSON.stringify(placements));
         setBoard(JSON.parse(game.mod.get_board(game.g)) as BoardJson);
       }
+      await refreshRack();
+      setLastCpu(null);
       setPending([]);
+      clearMoves();
     } catch (e) { console.error(e); }
   };
 
@@ -276,6 +336,179 @@ export default function Playground(): JSX.Element {
     }
     return (board?.rows[y][x] || '');
   };
+
+  const highlightCells = useMemo(() => {
+    if (activeMoveIndex === null) return new Set<string>();
+    const mv = legalMoves[activeMoveIndex];
+    if (!mv) return new Set<string>();
+    const set = new Set<string>();
+    mv.placements.forEach(p => set.add(`${p.x},${p.y}`));
+    return set;
+  }, [activeMoveIndex, legalMoves]);
+
+  const fetchMoves = useCallback(async () => {
+    if (!game) return;
+    setLoadingMoves(true);
+    try {
+      let moves: GeneratedMove[] = [];
+      const maxLen = 7;
+      if (useWorker) {
+        const resp = await game.call('generate_moves', { max_len: maxLen, limit: 20 });
+        moves = JSON.parse(resp.moves as string) as GeneratedMove[];
+      } else {
+        const json = game.mod.generate_moves(game.g, maxLen, 20);
+        moves = JSON.parse(json) as GeneratedMove[];
+      }
+      setLegalMoves(moves);
+      setActiveMoveIndex(moves.length ? 0 : null);
+      setShowMoves(true);
+    } catch (err) {
+      console.error('generate_moves failed', err);
+      setLegalMoves([]);
+      setActiveMoveIndex(null);
+      setShowMoves(true);
+    } finally {
+      setLoadingMoves(false);
+    }
+  }, [game, useWorker, use3D, depth]);
+
+  const playGeneratedMove = useCallback(async (move: GeneratedMove) => {
+    if (!game) return;
+    try {
+      if (useWorker) {
+        await game.call('play_move', { placements: move.placements });
+        const { board: b } = await game.call('get_board');
+        setBoard(JSON.parse(b as string) as BoardJson);
+      } else {
+        game.mod.play_move(game.g, JSON.stringify(move.placements));
+        setBoard(JSON.parse(game.mod.get_board(game.g)) as BoardJson);
+      }
+      await refreshRack();
+      setPending([]);
+      clearMoves();
+    } catch (err) {
+      console.error('play_generated_move failed', err);
+    }
+  }, [game, useWorker, refreshRack, clearMoves]);
+
+  const requestCpuHint = useCallback(async () => {
+    if (!game || cpuDifficulty === 'off') {
+      setCpuSuggestion(null);
+      return;
+    }
+    setCpuThinking(true);
+    try {
+      let bestJson: string;
+      if (useWorker) {
+        const resp = await game.call('best_move', {
+          difficulty: cpuDifficulty,
+          seed: 42,
+        });
+        bestJson = resp.best as string;
+      } else {
+        bestJson = game.mod.best_move(game.g, cpuDifficulty, 42);
+      }
+      const payload = JSON.parse(bestJson);
+      const placements: Placement[] = (payload.placements || []).map((p: any) => ({
+        x: p.x,
+        y: p.y,
+        kind_id: p.kind_id,
+        mark: p.mark ?? null,
+      }));
+      const suggestion: AiSuggestion = {
+        difficulty: cpuDifficulty,
+        word: payload.word,
+        score: payload.score,
+        total: payload.total,
+        rackLeave: payload.rack_leave,
+        boardEquity: payload.board_equity,
+        endgamePenalty: payload.endgame_penalty,
+        placements,
+      };
+      setCpuSuggestion(suggestion);
+      setLastCpu(suggestion);
+    } catch (err) {
+      console.error('best_move failed', err);
+      setCpuSuggestion(null);
+    } finally {
+      setCpuThinking(false);
+    }
+  }, [game, useWorker, cpuDifficulty]);
+
+  const playCpuSuggestion = useCallback(async () => {
+    if (!cpuSuggestion) return;
+    await playGeneratedMove({
+      word: cpuSuggestion.word,
+      score: cpuSuggestion.score,
+      placements: cpuSuggestion.placements,
+    });
+    setLastCpu(cpuSuggestion);
+    setCpuSuggestion(null);
+  }, [cpuSuggestion, playGeneratedMove]);
+
+  useEffect(() => {
+    if (cpuDifficulty === 'off') {
+      setCpuSuggestion(null);
+    }
+  }, [cpuDifficulty]);
+
+  const exportSnapshot = useCallback(async () => {
+    if (!game) return;
+    try {
+      if (useWorker) {
+        const resp = await game.call('snapshot_json');
+        setSnapshotText(String((resp as any)?.snapshot ?? ''));
+      } else {
+        const snap = game.mod.snapshot_state_json(game.g);
+        setSnapshotText(snap);
+      }
+    } catch (err) {
+      console.error('snapshot export failed', err);
+    }
+  }, [game, useWorker]);
+
+  const importSnapshot = useCallback(async () => {
+    if (!game || !snapshotText.trim()) return;
+    try {
+      if (useWorker) {
+        await game.call('load_snapshot_json', { json: snapshotText });
+        const { board: b } = await game.call('get_board');
+        setBoard(JSON.parse(b as string) as BoardJson);
+      } else {
+        game.mod.load_state_json(game.g, snapshotText);
+        setBoard(JSON.parse(game.mod.get_board(game.g)) as BoardJson);
+      }
+      await refreshRack();
+      setPending([]);
+      clearMoves();
+      setCpuSuggestion(null);
+      setLastCpu(null);
+    } catch (err) {
+      console.error('snapshot import failed', err);
+    }
+  }, [game, snapshotText, useWorker, refreshRack, clearMoves]);
+
+  const fetchEventLog = useCallback(async () => {
+    if (!game) return;
+    try {
+      let payload: string;
+      if (useWorker) {
+        const resp = await game.call('event_log');
+        payload = String((resp as any)?.log ?? '[]');
+      } else {
+        payload = game.mod.get_event_log(game.g);
+      }
+      let formatted = payload;
+      try {
+        formatted = JSON.stringify(JSON.parse(payload), null, 2);
+      } catch {
+        // leave as raw string
+      }
+      setEventLogText(formatted);
+    } catch (err) {
+      console.error('fetch event log failed', err);
+    }
+  }, [game, useWorker]);
 
   if (!ready || !board) return <div>Loading WASM…</div>;
 
@@ -313,6 +546,49 @@ export default function Playground(): JSX.Element {
         </>)}
         <button onClick={commit} disabled={pending.length === 0}>Commit Move ({pending.length})</button>
         <button onClick={() => setPending([])} disabled={pending.length === 0}>Reset</button>
+        <button onClick={() => {
+          if (showMoves) {
+            clearMoves();
+          } else {
+            fetchMoves();
+          }
+        }} disabled={!game || loadingMoves}>
+          {showMoves ? 'Hide legal moves' : 'Show legal moves'}
+        </button>
+        {loadingMoves && <span style={{fontSize:12}}> loading…</span>}
+        <label>CPU:
+          <select
+            value={cpuDifficulty}
+            onChange={e => setCpuDifficulty(e.target.value as 'off' | 'easy' | 'medium' | 'hard')}
+            style={{marginLeft: 4}}
+          >
+            <option value="off">Off</option>
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+        </label>
+        <button
+          onClick={requestCpuHint}
+          disabled={!game || cpuDifficulty === 'off' || cpuThinking}
+        >
+          CPU Hint
+        </button>
+        <button
+          onClick={playCpuSuggestion}
+          disabled={!game || cpuSuggestion == null || cpuThinking}
+        >
+          Play as CPU
+        </button>
+        {cpuThinking && <span style={{fontSize: 12}}> computing…</span>}
+        <button onClick={exportSnapshot} disabled={!game}>Save Snapshot</button>
+        <button
+          onClick={importSnapshot}
+          disabled={!game || snapshotText.trim() === ''}
+        >
+          Load Snapshot
+        </button>
+        <button onClick={fetchEventLog} disabled={!game}>Show Event Log</button>
       </div>
       <div style={{display:'flex', gap: 16, alignItems:'flex-start'}}>
         <div style={{display: 'grid', gridTemplateColumns: `repeat(${board.width}, 28px)`, gap: 4}}>
@@ -321,7 +597,22 @@ export default function Playground(): JSX.Element {
               <div key={`${x}-${y}`}
                    onDragOver={(e)=>e.preventDefault()}
                    onDrop={(e)=>onDropCell(x, y, e)}
-                   style={{width: 28, height: 28, border: '1px solid #ccc', display:'flex', alignItems:'center', justifyContent:'center', background:'#fff'}}>
+                   style={{
+                     width: 28,
+                     height: 28,
+                     border: '1px solid #ccc',
+                     display:'flex',
+                     alignItems:'center',
+                     justifyContent:'center',
+                     background: highlightCells.has(`${x},${use3D ? (y + z * Math.floor(board.height / depth)) : y}`) ? '#e0f2fe' : '#fff'
+                   }}
+                   onMouseEnter={() => {
+                     if (!showMoves) return;
+                     const gy = use3D ? (y + z * Math.floor(board.height / depth)) : y;
+                     const idx = legalMoves.findIndex(mv => mv.placements.some(p => p.x === x && p.y === gy));
+                     if (idx >= 0) setActiveMoveIndex(idx);
+                   }}
+               >
                 {cellDisplay(x,y).slice(0,1)}
               </div>
             ))
@@ -337,8 +628,59 @@ export default function Playground(): JSX.Element {
               </div>
             ))}
           </div>
+          {cpuSuggestion && (
+            <div style={{marginTop: 12, fontSize: 12, padding: 8, border: '1px solid var(--ifm-color-emphasis-200)', borderRadius: 4}}>
+              <div style={{fontWeight: 600, marginBottom: 4}}>CPU ({cpuSuggestion.difficulty}) suggests:</div>
+              <div><strong>{cpuSuggestion.word}</strong> — {cpuSuggestion.total} pts</div>
+              <div style={{opacity:0.7}}>Raw {cpuSuggestion.score}, leave {cpuSuggestion.rackLeave}, equity {cpuSuggestion.boardEquity}, endgame {cpuSuggestion.endgamePenalty}</div>
+            </div>
+          )}
+          {!cpuSuggestion && lastCpu && (
+            <div style={{marginTop: 12, fontSize: 12, padding: 8, border: '1px solid var(--ifm-color-emphasis-200)', borderRadius: 4}}>
+              <div style={{fontWeight: 600, marginBottom: 4}}>Last CPU hint ({lastCpu.difficulty}):</div>
+              <div><strong>{lastCpu.word}</strong> — {lastCpu.total} pts</div>
+              <div style={{opacity:0.7}}>Raw {lastCpu.score}, leave {lastCpu.rackLeave}, equity {lastCpu.boardEquity}, endgame {lastCpu.endgamePenalty}</div>
+            </div>
+          )}
         </div>
+        {showMoves && (
+          <div style={{minWidth: 180, maxWidth: 220, fontSize: 13}}>
+            <div style={{fontWeight: 600, marginBottom: 8}}>Legal moves</div>
+            {legalMoves.length === 0 && !loadingMoves && (
+              <div style={{opacity: 0.7}}>No moves available for the current rack.</div>
+            )}
+            {legalMoves.map((mv, idx) => (
+              <div key={`${mv.word}-${idx}`} style={{marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--ifm-color-emphasis-200)'}}>
+                <div style={{fontWeight: 600}}>
+                  #{idx + 1} {mv.word} <span style={{opacity:0.7}}>({mv.score} pts)</span>
+                </div>
+                <div style={{marginTop: 4, display:'flex', gap: 6}}>
+                  <button onClick={() => setActiveMoveIndex(idx)} style={{fontSize:12}}>Highlight</button>
+                  <button onClick={() => playGeneratedMove(mv)} style={{fontSize:12}}>Play</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
+      <div style={{marginTop: 16}}>
+        <div style={{fontSize: 12, fontWeight: 600, marginBottom: 4}}>Snapshot JSON</div>
+        <textarea
+          value={snapshotText}
+          onChange={e => setSnapshotText(e.target.value)}
+          rows={4}
+          style={{width: '100%', fontFamily: 'monospace'}}
+          placeholder="Click Save Snapshot to capture the current game state"
+        />
+      </div>
+      {eventLogText && (
+        <div style={{marginTop: 12}}>
+          <div style={{fontSize: 12, fontWeight: 600, marginBottom: 4}}>Event Log</div>
+          <pre style={{maxHeight: 180, overflow: 'auto', background: '#f9fafb', padding: 8, border: '1px solid var(--ifm-color-emphasis-200)'}}>
+            {eventLogText}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }

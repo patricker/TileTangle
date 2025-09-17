@@ -1,0 +1,77 @@
+---
+title: Move Generation
+sidebar_position: 12
+description: How TileTangle enumerates legal plays across 2D, 3D, and stacked boards.
+---
+
+TileTangle ships with a solver-grade move generator that works for classic Scrabble boards, custom
+graph layouts, stacked tiles, and even 3D layers. This page explains the core pipeline and how to
+integrate it from Rust, WASM, and Python.
+
+## Pipeline overview
+
+1. **Anchor discovery** – find empty (or stack-eligible) cells adjacent to placed tiles. On an empty
+   board the generator seeds the centre cell.
+2. **Left/right expansion** – for each anchor we walk left (or "pre" direction on graphs) using the
+   rack multiset and optionally a GADDAG automaton to stitch prefixes in reverse order.
+3. **Rightward DFS** – we extend placements cell-by-cell, pruning using dictionary prefix checks and
+   pre-computed cross-check sets for perpendicular words.
+4. **Scoring** – candidate moves are scored in-place using the same `CrosswordRules` implementation
+   that powers validation, ensuring bonuses, stacking rules, and bingo logic remain consistent.
+
+The generator returns a `Vec<CandidateMove>` where each entry captures the word, score, and the tiles
+that must be placed. You can feed the result directly to `Rules::commit` for execution.
+
+```rust title="Rust"
+use tiletangle_engine::{generate_moves, CrosswordRules};
+
+let rack = vec!["T".into(), "E".into(), "N".into()];
+let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
+let moves = generate_moves(&state, &rules, &rack, 7);
+for cand in moves.iter().take(5) {
+    println!("{} -> {}", cand.word, cand.score);
+}
+```
+
+## Graphs, 3D, and stacking
+
+The move generator is graph-aware. When you apply a `GraphOverlay` (for hex boards or 3D layers)
+anchor discovery and line traversal switch to direction tags instead of the rectangular heuristics.
+The new regression test `generate_3d_vertical_move` ensures a word spanning the Z axis is detected
+correctly.
+
+Stacked cells work out of the box: we treat the top tile as the visible symbol while still including
+underlying tiles in score calculations when `StackScoring::SumStack` is enabled. Cross-check logic
+now inspects stacked neighbours so perpendicular words formed against a stack use the visible symbol
+— see the `generate_respects_stacking_cross_checks` test.
+
+## Complexity and tuning
+
+The default depth-first search runs in **O(A × B)** where `A` is the anchor count and `B` is the
+branching factor determined by rack size and cross-check sets. Practical performance hinges on:
+
+- **Dictionary structure** – using a GADDAG dramatically reduces prefix backtracking when stacking
+  or graph overlays are enabled. FSTs remain the best fit for pure lookup speed.
+- **Cross-check pruning** – perpendicular sets trim illegal letters early. Enabling dictionaries in
+  the generator (`free_word_mode = false`) ensures these sets are populated.
+- **Max length / limit** – both Rust and WASM paths accept `max_len` so you can short-circuit on
+  shallow racks or UI previews.
+
+For heavy solver workloads consider precomputing rack permutations (rack leave tables) and leveraging
+multiple threads; the generator itself is deterministic and free of interior mutability.
+
+## Using from WASM & Python
+
+- **WASM** – Call `generate_moves(game, max_len, limit)` from JS or via the Playground's *Show legal
+  moves* button. Each entry is serialised as `{word, score, placements}` and can be replayed through
+  `play_move`.
+- **Python** – The `Game.generate_moves(max_len, limit)` helper (see `examples/python/top_moves.py`)
+  returns a list of dictionaries with coordinates ready to pipe into your own UI.
+
+## Try it live
+
+The docs playground now features a **Show legal moves** toggle that lists candidate plays, highlights
+placements on hover, and lets you commit a generated move with a single click. Combine it with the
+“Dictionary engine” dropdown to see how different lexicon structures influence the generator.
+For automated picks, jump to the [AI Overview](./ai-overview.md) page which covers greedy move
+selection and rack-leave configuration.

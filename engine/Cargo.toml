@@ -17,11 +17,12 @@ thiserror = "1"
 serde = { version = "1", features = ["derive"] }
 unicode-normalization = "0.1"
 smallvec = "1"
-rand = { version = "0.8", features = ["std_rng"] }
-rand_chacha = "0.3"
+rand = { version = "0.8", features = ["std_rng", "serde1"] }
+rand_chacha = { version = "0.3", features = ["serde1"] }
 fst = "0.4"
 serde_json = "1"
 unicode-segmentation = "1"
+serde_cbor = "0.11"
 
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

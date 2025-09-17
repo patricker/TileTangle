@@ -40,6 +40,26 @@ self.onmessage = async (e) => {
       if (!game) throw new Error('no game');
       const s = mod.get_scores(game);
       self.postMessage({ id, ok: true, scores: s });
+    } else if (action === 'snapshot_json') {
+      if (!game) throw new Error('no game');
+      const snap = mod.snapshot_state_json(game);
+      self.postMessage({ id, ok: true, snapshot: snap });
+    } else if (action === 'snapshot_cbor') {
+      if (!game) throw new Error('no game');
+      const snap = mod.snapshot_state_cbor(game);
+      self.postMessage({ id, ok: true, snapshot: snap });
+    } else if (action === 'load_snapshot_json') {
+      if (!game) throw new Error('no game');
+      mod.load_state_json(game, payload?.json ?? '');
+      self.postMessage({ id, ok: true });
+    } else if (action === 'load_snapshot_cbor') {
+      if (!game) throw new Error('no game');
+      mod.load_state_cbor(game, payload?.bytes ?? new Uint8Array());
+      self.postMessage({ id, ok: true });
+    } else if (action === 'event_log') {
+      if (!game) throw new Error('no game');
+      const log = mod.get_event_log(game);
+      self.postMessage({ id, ok: true, log });
     } else if (action === 'set_bonuses') {
       if (!game) throw new Error('no game');
       mod.set_bonuses(game, JSON.stringify(payload || []));
@@ -48,6 +68,28 @@ self.onmessage = async (e) => {
       if (!game) throw new Error('no game');
       const moves = mod.generate_moves(game, payload?.max_len ?? 7, payload?.limit ?? 50);
       self.postMessage({ id, ok: true, moves });
+    } else if (action === 'best_move') {
+      if (!game) throw new Error('no game');
+      const seed = payload?.seed ?? undefined;
+      const optsRaw = {
+        node_limit: payload?.node_limit,
+        time_limit_ms: payload?.time_limit_ms,
+        difficulty: payload?.difficulty,
+        noise_range: payload?.noise_range,
+        candidate_limit: payload?.candidate_limit,
+        reply_limit: payload?.reply_limit,
+      };
+      const opts = Object.fromEntries(
+        Object.entries(optsRaw).filter(([, value]) => value !== undefined && value !== null),
+      );
+      const res = mod.best_move_greedy(
+        game,
+        payload?.max_len ?? undefined,
+        payload?.depth ?? undefined,
+        seed,
+        Object.keys(opts).length ? opts : undefined,
+      );
+      self.postMessage({ id, ok: true, best: res });
     } else if (action === 'pass_turn') {
       if (!game) throw new Error('no game');
       mod.pass_turn(game);
