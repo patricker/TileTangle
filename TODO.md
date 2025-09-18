@@ -277,6 +277,8 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 * [x] Docs homepage hero: **Try it now** button opens Playground.
 * [x] “Place a word” walkthrough via Playground page.
+* [x] Wire up real move generation & CPU search paths for custom adjacency boards (graph / hex) instead of disabling them in the Playground.
+* [x] Add per-shape presets (true hex mask, diamond/cross defaults) so graph boards feel native without manual tweaking.
 
 ### Exit Criteria
 

@@ -602,7 +602,6 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const [anagramIndex, setAnagramIndex] = useState<Map<string, string> | null>(null);
 
   const effectiveDepth = use3D ? appliedSettings.depth : 1;
-  const graphAdjacencyActive = useHex || useDiag || (!use3D && appliedSettings.shape !== 'rect');
 
   useEffect(() => {
     setZ(prev => Math.min(prev, Math.max(0, effectiveDepth - 1)));
@@ -1091,13 +1090,6 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       setShowMoves(true);
       return;
     }
-    if (graphAdjacencyActive) {
-      setInfoMessage('Automatic move suggestions are not yet available for custom adjacency boards. Place tiles manually or switch back to the classic grid.');
-      setLegalMoves([]);
-      setActiveMoveIndex(null);
-      setShowMoves(true);
-      return;
-    }
     setInfoMessage(null);
     setLoadingMoves(true);
     try {
@@ -1123,7 +1115,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     } finally {
       setLoadingMoves(false);
     }
-  }, [game, useWorker, use3D, appliedSettings.rackSize, graphAdjacencyActive]);
+  }, [game, useWorker, use3D, appliedSettings.rackSize]);
 
   const commitMove = useCallback(async () => {
     if (!game || pending.length === 0) return;
@@ -1183,12 +1175,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   }, [game, useWorker, updateFromGame]);
 
   const requestCpuHint = useCallback(async () => {
-    if (graphAdjacencyActive || use3D) {
-      setCpuError('CPU assistant is not yet available for custom adjacency boards.');
-      setCpuSuggestion(null);
-      return;
-    }
-    if (!game || cpuDifficulty === 'off' || !dictReady) {
+    if (!game || cpuDifficulty === 'off' || !dictReady || use3D) {
       setCpuSuggestion(null);
       return;
     }
@@ -1233,7 +1220,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     } finally {
       setCpuThinking(false);
     }
-  }, [game, useWorker, cpuDifficulty, dictReady, graphAdjacencyActive, use3D]);
+  }, [game, useWorker, cpuDifficulty, dictReady, use3D]);
 
   const playCpuSuggestion = useCallback(async () => {
     if (!cpuSuggestion) return;
@@ -1632,6 +1619,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
               if (e.target.checked) {
                 setUseDiag(false);
                 setUse3D(false);
+                setDraftSettings(prev => ({...prev, shape: 'diamond'}));
               }
             }}
           />{' '}
@@ -1786,7 +1774,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
               fetchMoves();
             }
           }}
-          disabled={!game || loadingMoves || (useDict && !dictReady) || graphAdjacencyActive || use3D}
+          disabled={!game || loadingMoves || (useDict && !dictReady) || use3D}
         >
           {showMoves ? 'Hide legal moves' : 'Show legal moves'}
         </button>
@@ -1799,7 +1787,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           <select
             value={cpuDifficulty}
             onChange={e => setCpuDifficulty(e.target.value as 'off' | 'easy' | 'medium' | 'hard')}
-            disabled={!dictReady || dictLoading || graphAdjacencyActive || use3D}
+            disabled={!dictReady || dictLoading || use3D}
           >
             <option value="off">Off</option>
             <option value="easy">Easy</option>
@@ -1809,23 +1797,18 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
         </label>
         <button
           onClick={requestCpuHint}
-          disabled={!game || cpuDifficulty === 'off' || cpuThinking || !dictReady || graphAdjacencyActive || use3D}
+          disabled={!game || cpuDifficulty === 'off' || cpuThinking || !dictReady || use3D}
         >
           CPU hint
         </button>
         <button
           data-testid="cpu-play-button"
           onClick={playCpuSuggestion}
-          disabled={!game || cpuSuggestion == null || cpuThinking || graphAdjacencyActive || use3D}
+          disabled={!game || cpuSuggestion == null || cpuThinking || use3D}
         >
           Play as CPU
         </button>
         {cpuThinking && <span style={{fontSize: 12}}>computing…</span>}
-        {(graphAdjacencyActive || use3D) && (
-          <div style={{fontSize: 12, color: palette.textSubtle}}>
-            CPU assistant is disabled for custom adjacency boards.
-          </div>
-        )}
         {cpuSuggestion && (
           <div
             style={{

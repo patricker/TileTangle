@@ -3472,70 +3472,265 @@ fn generate_moves_graph_basic(
     max_len: usize,
     anchors: &[CellId],
 ) -> Vec<CandidateMove> {
-    let dict = state.dictionary.as_deref();
+    use std::collections::{HashMap, HashSet};
+
+    fn build_line(geom: &RectGridGeometry, start: CellId, tag: &str) -> Vec<CellId> {
+        use std::collections::{HashSet, VecDeque};
+        let mut visited: HashSet<CellId> = HashSet::new();
+        let mut deque: VecDeque<CellId> = VecDeque::new();
+        visited.insert(start);
+        deque.push_back(start);
+        for pass in 0..2 {
+            let mut current = start;
+            loop {
+                let mut next_opt = None;
+                for (n, t) in geom.neighbors_with_tags(current) {
+                    if t == tag && !visited.contains(&n) {
+                        next_opt = Some(n);
+                        break;
+                    }
+                }
+                if let Some(next_id) = next_opt {
+                    if pass == 0 {
+                        deque.push_back(next_id);
+                    } else {
+                        deque.push_front(next_id);
+                    }
+                    visited.insert(next_id);
+                    current = next_id;
+                } else {
+                    break;
+                }
+            }
+        }
+        deque.into_iter().collect()
+    }
+
+    fn explore_segment(
+        state: &GameState,
+        rules: &impl Rules,
+        segment: &[CellId],
+        idx: usize,
+        rack_counts: &mut HashMap<String, usize>,
+        placements: &mut Vec<(CellId, Tile)>,
+        tile_symbols: &[(String, String)],
+        blank_ids: &[String],
+        seen: &mut HashSet<String>,
+        out: &mut Vec<CandidateMove>,
+    ) {
+        if idx == segment.len() {
+            if placements.is_empty() {
+                return;
+            }
+            let draft = MoveDraft {
+                placements: placements.clone(),
+            };
+            if let Ok(validated) = rules.validate(state, &draft) {
+                let sc = rules.score(state, &validated);
+                if sc.total >= 0 {
+                    let mut key_parts: Vec<String> = placements
+                        .iter()
+                        .map(|(cid, tile)| {
+                            format!(
+                                "{}:{}:{}",
+                                cid.0,
+                                tile.kind_id,
+                                tile.mark.clone().unwrap_or_default()
+                            )
+                        })
+                        .collect();
+                    key_parts.sort();
+                    let key = format!("{}|{}", key_parts.join(";"), sc.main_word);
+                    if seen.insert(key) {
+                        out.push(CandidateMove {
+                            placements: placements.clone(),
+                            word: sc.main_word,
+                            score: sc.total,
+                        });
+                    }
+                }
+            }
+            return;
+        }
+
+        let cid = segment[idx];
+        let cell = &state.board.cells[cid.0 as usize];
+        if let Some(tile) = cell.stack.last() {
+            let (_, _sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, tile);
+            explore_segment(
+                state,
+                rules,
+                segment,
+                idx + 1,
+                rack_counts,
+                placements,
+                tile_symbols,
+                blank_ids,
+                seen,
+                out,
+            );
+            return;
+        }
+
+        // Try normal tiles
+        for (kind_id, _symbol) in tile_symbols.iter() {
+            let available = rack_counts.get(kind_id).copied().unwrap_or(0);
+            if available == 0 {
+                continue;
+            }
+            {
+                let entry = rack_counts.get_mut(kind_id).unwrap();
+                *entry -= 1;
+            }
+            placements.push((
+                cid,
+                Tile {
+                    kind_id: kind_id.clone(),
+                    mark: None,
+                },
+            ));
+            explore_segment(
+                state,
+                rules,
+                segment,
+                idx + 1,
+                rack_counts,
+                placements,
+                tile_symbols,
+                blank_ids,
+                seen,
+                out,
+            );
+            placements.pop();
+            {
+                let entry = rack_counts.get_mut(kind_id).unwrap();
+                *entry += 1;
+            }
+        }
+
+        // Try blank tiles
+        for blank_id in blank_ids {
+            let available = rack_counts.get(blank_id).copied().unwrap_or(0);
+            if available == 0 {
+                continue;
+            }
+            {
+                let entry = rack_counts.get_mut(blank_id).unwrap();
+                *entry -= 1;
+            }
+            for (_, symbol) in tile_symbols.iter() {
+                placements.push((
+                    cid,
+                    Tile {
+                        kind_id: blank_id.clone(),
+                        mark: Some(symbol.clone()),
+                    },
+                ));
+                explore_segment(
+                    state,
+                    rules,
+                    segment,
+                    idx + 1,
+                    rack_counts,
+                    placements,
+                    tile_symbols,
+                    blank_ids,
+                    seen,
+                    out,
+                );
+                placements.pop();
+            }
+            {
+                let entry = rack_counts.get_mut(blank_id).unwrap();
+                *entry += 1;
+            }
+        }
+    }
+
+    let tile_symbols: Vec<(String, String)> = state
+        .tileset
+        .tile_kinds
+        .iter()
+        .filter(|tk| !tk.is_blank)
+        .map(|tk| (tk.id.clone(), tk.symbol.clone()))
+        .collect();
+    let blank_ids: Vec<String> = state
+        .tileset
+        .tile_kinds
+        .iter()
+        .filter(|tk| tk.is_blank)
+        .map(|tk| tk.id.clone())
+        .collect();
+
+    let rack_template: HashMap<String, usize> = {
+        let mut map = HashMap::new();
+        for k in rack {
+            *map.entry(k.clone()).or_default() += 1;
+        }
+        map
+    };
+
     let mut out = Vec::new();
-    let mut seen: std::collections::HashSet<(u32, String, String)> =
-        std::collections::HashSet::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
     for &anchor in anchors {
         if !state.board.cells[anchor.0 as usize].stack.is_empty() {
             continue;
         }
-        let neighs = state.board.geom.neighbors_with_tags(anchor);
-        for (neighbor, _tag) in neighs {
-            let cell = &state.board.cells[neighbor.0 as usize];
-            let Some(tile) = cell.stack.last() else {
+        let mut tags: HashSet<String> = HashSet::new();
+        for (_, tag) in state.board.geom.neighbors_with_tags(anchor) {
+            tags.insert(tag.to_string());
+        }
+        if tags.is_empty() {
+            continue;
+        }
+
+        for tag in tags {
+            let line = build_line(&state.board.geom, anchor, &tag);
+            if line.is_empty() {
+                continue;
+            }
+            let Some(anchor_idx) = line.iter().position(|id| *id == anchor) else {
                 continue;
             };
-            let (_, prefix_sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, tile);
-            for kid in rack {
-                let Some(sym) = state
-                    .tileset
-                    .tile_kinds
-                    .iter()
-                    .find(|tk| tk.id == *kid && !tk.is_blank)
-                    .map(|tk| tk.symbol.clone())
-                else {
-                    continue;
-                };
-                let candidates = [
-                    format!("{}{}", prefix_sym.clone(), sym.as_str()),
-                    format!("{}{}", sym.as_str(), prefix_sym.clone()),
-                ];
-                for word in candidates {
-                    if word.chars().count() > max_len {
+            let line_len = line.len();
+            for start in 0..=anchor_idx {
+                for end in anchor_idx..line_len {
+                    let seg_len = end - start + 1;
+                    if seg_len == 0 || seg_len > max_len {
                         continue;
                     }
-                    if let Some(dict) = dict {
-                        if !dict.contains(&word) {
-                            continue;
-                        }
+                    let segment = &line[start..=end];
+                    let blanks_needed = segment
+                        .iter()
+                        .filter(|cid| state.board.cells[cid.0 as usize].stack.is_empty())
+                        .count();
+                    if blanks_needed == 0 {
+                        continue;
                     }
-                    let placements = vec![(
-                        anchor,
-                        Tile {
-                            kind_id: kid.clone(),
-                            mark: None,
-                        },
-                    )];
-                    let draft = MoveDraft {
-                        placements: placements.clone(),
-                    };
-                    if let Ok(validated) = rules.validate(state, &draft) {
-                        let sc = rules.score(state, &validated);
-                        if sc.total >= 0
-                            && seen.insert((anchor.0, kid.clone(), sc.main_word.clone()))
-                        {
-                            out.push(CandidateMove {
-                                placements,
-                                word: sc.main_word,
-                                score: sc.total,
-                            });
-                        }
+                    if blanks_needed > rack.len() {
+                        continue;
                     }
+
+                    let mut rack_counts = rack_template.clone();
+                    let mut placements: Vec<(CellId, Tile)> = Vec::new();
+                    explore_segment(
+                        state,
+                        rules,
+                        segment,
+                        0,
+                        &mut rack_counts,
+                        &mut placements,
+                        &tile_symbols,
+                        &blank_ids,
+                        &mut seen,
+                        &mut out,
+                    );
                 }
             }
         }
     }
+
     out
 }
 
