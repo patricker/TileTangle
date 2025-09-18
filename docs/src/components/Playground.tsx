@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useColorMode} from '@docusaurus/theme-common';
 import {classicTilesets} from './demoUtils';
+import styles from './PlaygroundLayout.module.css';
 
 const fallbackDictionaryWords = [
   'AA', 'AB', 'AD', 'AE', 'AGO', 'ALE', 'ARK', 'ART', 'BAD', 'BAG', 'BAL', 'BAR',
@@ -177,11 +178,6 @@ type PlaygroundProps = {
   initial?: PlaygroundInitial;
 };
 
-type ControlSectionProps = {
-  title: string;
-  children: React.ReactNode;
-};
-
 type PlayerSummary = {
   index: number;
   score: number;
@@ -205,11 +201,90 @@ type SetupState = {
   shape: BoardShape;
 };
 
-function ControlSection({title, children}: ControlSectionProps): JSX.Element {
+type PanelProps = {
+  title: string;
+  subtitle?: string;
+  actions?: React.ReactNode;
+  accent?: boolean;
+  density?: 'spacious' | 'compact';
+  children: React.ReactNode;
+};
+
+type StatChipProps = {
+  label: string;
+  value: React.ReactNode;
+};
+
+type SegmentedOption = {
+  value: string;
+  label: string;
+  hint?: string;
+  testId?: string;
+};
+
+type SegmentedControlProps = {
+  name: string;
+  value: string;
+  options: SegmentedOption[];
+  onChange: (value: string) => void;
+};
+
+type QuickPreset = {
+  id: string;
+  title: string;
+  description: string;
+  onApply: () => void;
+};
+
+function Panel({title, subtitle, actions, accent, density = 'spacious', children}: PanelProps): JSX.Element {
+  const bodyClass = density === 'compact' ? styles.panelBodyCompact : styles.panelBody;
   return (
-    <div style={{display: 'flex', flexDirection: 'column', gap: 4}}>
-      <div style={{fontWeight: 600, fontSize: 13}}>{title}</div>
-      <div style={{display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center'}}>{children}</div>
+    <section className={`${styles.panel} ${accent ? styles.panelAccent : ''}`}>
+      <div className={styles.panelHeader}>
+        <div>
+          <div className={styles.panelTitle}>{title}</div>
+          {subtitle && <div className={styles.panelSubtitle}>{subtitle}</div>}
+        </div>
+        {actions && <div className={styles.panelActions}>{actions}</div>}
+      </div>
+      <div className={bodyClass}>{children}</div>
+    </section>
+  );
+}
+
+function StatChip({label, value}: StatChipProps): JSX.Element {
+  return (
+    <div className={styles.statChip}>
+      <span className={styles.statChipLabel}>{label}</span>
+      <span className={styles.statChipValue}>{value}</span>
+    </div>
+  );
+}
+
+function SegmentedControl({name, value, options, onChange}: SegmentedControlProps): JSX.Element {
+  return (
+    <div className={styles.segmentedControl} role="radiogroup" aria-label={name}>
+      {options.map(option => {
+        const active = option.value === value;
+        return (
+          <label
+            key={option.value}
+            className={styles.segmentedControlOption}
+            data-active={active ? '1' : '0'}
+          >
+            <input
+              type="radio"
+              name={`segmented-${name}`}
+              value={option.value}
+              data-testid={option.testId}
+              checked={active}
+              onChange={() => onChange(option.value)}
+            />
+            <span>{option.label}</span>
+            {option.hint && <small>{option.hint}</small>}
+          </label>
+        );
+      })}
     </div>
   );
 }
@@ -227,45 +302,73 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const palette = useMemo(() => {
     if (colorMode === 'dark') {
       return {
-        panelBg: 'rgba(26, 32, 44, 0.85)',
-        panelBorder: 'rgba(148, 163, 184, 0.35)',
-        playerActiveBg: 'rgba(56, 189, 248, 0.25)',
-        playerBg: 'rgba(30, 41, 59, 0.35)',
-        boardCellBg: 'rgba(15, 23, 42, 0.9)',
+        shellBg: 'linear-gradient(122deg, rgba(15, 23, 42, 0.96) 0%, rgba(30, 64, 175, 0.45) 100%)',
+        shellBorder: 'rgba(94, 234, 212, 0.22)',
+        heroGradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.32) 0%, rgba(14, 165, 233, 0.28) 55%, rgba(56, 189, 248, 0.22) 100%)',
+        heroText: '#e2e8f0',
+        heroAccent: 'rgba(125, 211, 252, 0.55)',
+        heroShadow: '0 40px 95px rgba(2, 6, 23, 0.6)',
+        panelBg: 'rgba(15, 23, 42, 0.82)',
+        panelBorder: 'rgba(148, 163, 184, 0.28)',
+        panelShadow: '0 30px 60px rgba(2, 6, 23, 0.55)',
+        playerActiveBg: 'rgba(56, 189, 248, 0.32)',
+        playerBg: 'rgba(17, 24, 39, 0.55)',
+        boardCellBg: 'rgba(15, 23, 42, 0.92)',
         boardCellBorder: 'rgba(148, 163, 184, 0.35)',
-        boardCellHighlight: 'rgba(56, 189, 248, 0.35)',
-        rackTileBg: 'rgba(30, 41, 59, 0.85)',
+        boardCellHighlight: 'rgba(125, 211, 252, 0.4)',
+        rackTileBg: 'rgba(30, 41, 59, 0.88)',
         rackTileBorder: 'rgba(148, 163, 184, 0.4)',
-        rackTileHighlight: 'rgba(56, 189, 248, 0.35)',
-        warningBg: 'rgba(234, 179, 8, 0.12)',
+        rackTileHighlight: 'rgba(56, 189, 248, 0.38)',
+        warningBg: 'rgba(234, 179, 8, 0.15)',
         warningBorder: 'rgba(250, 204, 21, 0.45)',
-        errorBg: 'rgba(248, 113, 113, 0.12)',
-        errorBorder: 'rgba(248, 113, 113, 0.55)',
-        infoBg: 'rgba(59, 130, 246, 0.18)',
-        infoBorder: 'rgba(96, 165, 250, 0.5)',
-        accentBorder: 'rgba(59, 130, 246, 0.65)',
-        textSubtle: 'rgba(226, 232, 240, 0.75)',
+        errorBg: 'rgba(248, 113, 113, 0.16)',
+        errorBorder: 'rgba(248, 113, 113, 0.6)',
+        infoBg: 'rgba(56, 189, 248, 0.18)',
+        infoBorder: 'rgba(129, 199, 212, 0.5)',
+        accentBorder: 'rgba(56, 189, 248, 0.68)',
+        textSubtle: 'rgba(226, 232, 240, 0.78)',
+        statChipBg: 'rgba(30, 41, 59, 0.72)',
+        statChipBorder: 'rgba(148, 196, 255, 0.42)',
+        segmentedBg: 'rgba(17, 24, 39, 0.78)',
+        segmentedBorder: 'rgba(71, 85, 105, 0.65)',
+        segmentedActiveBg: 'rgba(56, 189, 248, 0.38)',
+        segmentedActiveBorder: 'rgba(125, 211, 252, 0.65)',
+        alertShadow: '0 18px 45px rgba(2, 6, 23, 0.55)',
       } as const;
     }
     return {
-      panelBg: '#f9fafb',
-      panelBorder: 'var(--ifm-color-emphasis-200)',
-      playerActiveBg: '#e0f2fe',
-      playerBg: '#f9fafb',
+      shellBg: 'linear-gradient(128deg, rgba(248, 250, 252, 0.95) 0%, rgba(224, 242, 254, 0.9) 100%)',
+      shellBorder: 'rgba(148, 163, 184, 0.28)',
+      heroGradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.22) 0%, rgba(14, 165, 233, 0.18) 55%, rgba(2, 132, 199, 0.15) 100%)',
+      heroText: '#0f172a',
+      heroAccent: 'rgba(59, 130, 246, 0.45)',
+      heroShadow: '0 30px 75px rgba(15, 23, 42, 0.25)',
+      panelBg: 'rgba(255, 255, 255, 0.96)',
+      panelBorder: 'rgba(148, 163, 184, 0.4)',
+      panelShadow: '0 30px 60px rgba(15, 23, 42, 0.12)',
+      playerActiveBg: 'rgba(147, 197, 253, 0.4)',
+      playerBg: 'rgba(241, 245, 249, 0.9)',
       boardCellBg: '#ffffff',
-      boardCellBorder: '#d1d5db',
-      boardCellHighlight: '#e0f2fe',
-      rackTileBg: '#f9fafb',
-      rackTileBorder: '#d1d5db',
-      rackTileHighlight: '#bae6fd',
-      warningBg: '#fef3c7',
-      warningBorder: '#facc15',
-      errorBg: '#fee2e2',
-      errorBorder: '#f87171',
-      infoBg: '#dbeafe',
-      infoBorder: '#60a5fa',
-      accentBorder: '#38bdf8',
-      textSubtle: 'rgba(15, 23, 42, 0.65)',
+      boardCellBorder: 'rgba(148, 163, 184, 0.38)',
+      boardCellHighlight: 'rgba(59, 130, 246, 0.25)',
+      rackTileBg: '#f8fafc',
+      rackTileBorder: 'rgba(148, 163, 184, 0.45)',
+      rackTileHighlight: 'rgba(59, 130, 246, 0.22)',
+      warningBg: 'rgba(251, 191, 36, 0.2)',
+      warningBorder: 'rgba(217, 119, 6, 0.4)',
+      errorBg: 'rgba(248, 113, 113, 0.18)',
+      errorBorder: 'rgba(220, 38, 38, 0.55)',
+      infoBg: 'rgba(59, 130, 246, 0.14)',
+      infoBorder: 'rgba(37, 99, 235, 0.4)',
+      accentBorder: 'rgba(59, 130, 246, 0.6)',
+      textSubtle: 'rgba(71, 85, 105, 0.9)',
+      statChipBg: 'rgba(226, 232, 240, 0.72)',
+      statChipBorder: 'rgba(148, 163, 184, 0.55)',
+      segmentedBg: 'rgba(244, 247, 255, 0.9)',
+      segmentedBorder: 'rgba(148, 163, 184, 0.5)',
+      segmentedActiveBg: 'rgba(59, 130, 246, 0.2)',
+      segmentedActiveBorder: 'rgba(37, 99, 235, 0.55)',
+      alertShadow: '0 18px 40px rgba(15, 23, 42, 0.18)',
     } as const;
   }, [colorMode]);
 
@@ -1071,17 +1174,17 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     }
   }, [game, useWorker, applySnapshot]);
 
-  const handleApplySettings = useCallback(() => {
-    const width = clamp(draftSettings.width, 2, 30);
-    const height = clamp(draftSettings.height, 2, 30);
-    const depth = clamp(draftSettings.depth, 1, 12);
-    const rackSize = clamp(draftSettings.rackSize, 1, 14);
-    const countsParsed = parseTileCounts(draftSettings.tileCountsText, defaultTileCounts);
+  const applySettings = useCallback((settings: SetupState) => {
+    const width = clamp(settings.width, 2, 30);
+    const height = clamp(settings.height, 2, 30);
+    const depth = clamp(settings.depth, 1, 12);
+    const rackSize = clamp(settings.rackSize, 1, 14);
+    const countsParsed = parseTileCounts(settings.tileCountsText, defaultTileCounts);
     if (countsParsed.error) {
       setTileCountsError(countsParsed.error);
       return;
     }
-    const scoresParsed = parseTileScores(draftSettings.tileScoresText, defaultTileScores);
+    const scoresParsed = parseTileScores(settings.tileScoresText, defaultTileScores);
     if (scoresParsed.error) {
       setTileScoresError(scoresParsed.error);
       return;
@@ -1095,10 +1198,14 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       rackSize,
       tileCountsText: formatTileCounts(countsParsed.map),
       tileScoresText: formatTileScores(scoresParsed.map),
-      shape: draftSettings.shape,
+      shape: settings.shape,
     });
     setDictMessagesVersion(v => v + 1);
-  }, [draftSettings, defaultTileCounts, defaultTileScores]);
+  }, [defaultTileCounts, defaultTileScores]);
+
+  const handleApplySettings = useCallback(() => {
+    applySettings(draftSettings);
+  }, [applySettings, draftSettings]);
 
   const dedupeMoves = (moves: GeneratedMove[]): GeneratedMove[] => {
     const map = new Map<string, GeneratedMove>();
@@ -1417,664 +1524,803 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     return entries.join(', ');
   }, [bagSummary]);
 
+  const adjacencyMode = useMemo(() => {
+    if (useHex) return 'hex';
+    if (useDiag) return 'diagonal';
+    return 'orthogonal';
+  }, [useHex, useDiag]);
+
+  const handleAdjacencyModeChange = useCallback((mode: string) => {
+    if (mode === 'hex') {
+      setUseHex(true);
+      setUseDiag(false);
+      setUse3D(false);
+      setDraftSettings(prev => ({...prev, shape: 'diamond'}));
+      return;
+    }
+    if (mode === 'diagonal') {
+      setUseDiag(true);
+      setUseHex(false);
+      return;
+    }
+    setUseHex(false);
+    setUseDiag(false);
+  }, [setUseDiag, setUseHex, setUse3D]);
+
+  const dimensionMode = use3D ? '3d' : '2d';
+
+  const handleDimensionModeChange = useCallback((mode: string) => {
+    if (mode === '3d') {
+      setUse3D(true);
+      setUseHex(false);
+      setUseDiag(false);
+      return;
+    }
+    setUse3D(false);
+    setZ(0);
+    setInfoMessage(null);
+  }, [setUse3D, setUseHex, setUseDiag, setZ, setInfoMessage]);
+
+  const boardSizeLabel = useMemo(() => {
+    const size = `${appliedSettings.width}×${appliedSettings.height}`;
+    if (use3D) {
+      return `${size}×${Math.max(1, appliedSettings.depth)}`;
+    }
+    return size;
+  }, [appliedSettings.width, appliedSettings.height, appliedSettings.depth, use3D]);
+
+  const adjacencyLabel = useMemo(() => {
+    if (adjacencyMode === 'hex') return 'Hex graph';
+    if (adjacencyMode === 'diagonal') return 'Diagonal';
+    return 'Orthogonal';
+  }, [adjacencyMode]);
+
+  const dimensionLabel = useMemo(() => {
+    if (use3D) {
+      return `${Math.max(1, appliedSettings.depth)} layers`;
+    }
+    return '2D board';
+  }, [use3D, appliedSettings.depth]);
+
+  const cpuLabel = useMemo(() => {
+    if (cpuDifficulty === 'off') return 'CPU disabled';
+    return `CPU ${cpuDifficulty}`;
+  }, [cpuDifficulty]);
+
+  const heroStats = useMemo(() => [
+    {label: 'Board', value: boardSizeLabel},
+    {label: 'Adjacency', value: adjacencyLabel},
+    {label: 'Dimensions', value: dimensionLabel},
+    {label: 'Rack', value: `${appliedSettings.rackSize} tiles`},
+  ], [boardSizeLabel, adjacencyLabel, dimensionLabel, appliedSettings.rackSize]);
+
+  const quickPresets = useMemo<QuickPreset[]>(() => [
+    {
+      id: 'classic',
+      title: 'Classic 15×15',
+      description: 'Crossword feel with orthogonal adjacency and rack of seven.',
+      onApply: () => {
+        const next: SetupState = {
+          width: 15,
+          height: 15,
+          depth: 1,
+          rackSize: 7,
+          tileCountsText: draftSettings.tileCountsText,
+          tileScoresText: draftSettings.tileScoresText,
+          shape: 'rect',
+        };
+        setDraftSettings(next);
+        setUseHex(false);
+        setUseDiag(false);
+        setUse3D(false);
+        setCpuSuggestion(null);
+        setLastCpu(null);
+        setPending([]);
+        applySettings(next);
+      },
+    },
+    {
+      id: 'hex',
+      title: 'Hex Garden',
+      description: 'Diamond mask with full hex connectivity.',
+      onApply: () => {
+        const next: SetupState = {
+          width: Math.max(7, appliedSettings.width),
+          height: Math.max(7, appliedSettings.height),
+          depth: 1,
+          rackSize: appliedSettings.rackSize,
+          tileCountsText: draftSettings.tileCountsText,
+          tileScoresText: draftSettings.tileScoresText,
+          shape: 'diamond',
+        };
+        setDraftSettings(next);
+        setUseHex(true);
+        setUseDiag(false);
+        setUse3D(false);
+        setCpuSuggestion(null);
+        setLastCpu(null);
+        setPending([]);
+        applySettings(next);
+      },
+    },
+    {
+      id: 'speed',
+      title: 'Sprint 11×11',
+      description: 'Smaller board, six-tile rack, great for quick rounds.',
+      onApply: () => {
+        const next: SetupState = {
+          width: 11,
+          height: 11,
+          depth: 1,
+          rackSize: 6,
+          tileCountsText: draftSettings.tileCountsText,
+          tileScoresText: draftSettings.tileScoresText,
+          shape: 'rect',
+        };
+        setDraftSettings(next);
+        setUseHex(false);
+        setUseDiag(true);
+        setUse3D(false);
+        setCpuSuggestion(null);
+        setLastCpu(null);
+        setPending([]);
+        applySettings(next);
+      },
+    },
+    {
+      id: 'stacked',
+      title: '3D Tower',
+      description: 'Nine-by-nine with layered play; perfect for stack mode.',
+      onApply: () => {
+        const next: SetupState = {
+          width: 9,
+          height: 9,
+          depth: Math.max(3, appliedSettings.depth),
+          rackSize: appliedSettings.rackSize,
+          tileCountsText: draftSettings.tileCountsText,
+          tileScoresText: draftSettings.tileScoresText,
+          shape: 'rect',
+        };
+        setDraftSettings(next);
+        setUseHex(false);
+        setUseDiag(false);
+        setUse3D(true);
+        setZ(0);
+        setCpuSuggestion(null);
+        setLastCpu(null);
+        setPending([]);
+        applySettings(next);
+      },
+    },
+  ], [
+    appliedSettings.depth,
+    appliedSettings.height,
+    appliedSettings.rackSize,
+    appliedSettings.width,
+    applySettings,
+    draftSettings.tileCountsText,
+    draftSettings.tileScoresText,
+    setUseHex,
+    setUseDiag,
+    setUse3D,
+    setCpuSuggestion,
+    setLastCpu,
+    setPending,
+    setDraftSettings,
+    setZ,
+  ]);
+
+  const themeVars = useMemo(() => ({
+    '--tt-shell-bg': palette.shellBg,
+    '--tt-shell-border': palette.shellBorder,
+    '--tt-hero-gradient': palette.heroGradient,
+    '--tt-hero-text': palette.heroText,
+    '--tt-hero-accent': palette.heroAccent,
+    '--tt-hero-shadow': palette.heroShadow,
+    '--tt-panel-bg': palette.panelBg,
+    '--tt-panel-border': palette.panelBorder,
+    '--tt-panel-shadow': palette.panelShadow,
+    '--tt-accent-border': palette.accentBorder,
+    '--tt-text-subtle': palette.textSubtle,
+    '--tt-stat-chip-bg': palette.statChipBg,
+    '--tt-stat-chip-border': palette.statChipBorder,
+    '--tt-segmented-bg': palette.segmentedBg,
+    '--tt-segmented-border': palette.segmentedBorder,
+    '--tt-segmented-active-bg': palette.segmentedActiveBg,
+    '--tt-segmented-active-border': palette.segmentedActiveBorder,
+    '--tt-alert-error-bg': palette.errorBg,
+    '--tt-alert-error-border': palette.errorBorder,
+    '--tt-alert-warning-bg': palette.warningBg,
+    '--tt-alert-warning-border': palette.warningBorder,
+    '--tt-alert-info-bg': palette.infoBg,
+    '--tt-alert-info-border': palette.infoBorder,
+    '--tt-alert-shadow': palette.alertShadow,
+  }) as React.CSSProperties, [palette]);
+
+  const layerHeight = use3D && board ? Math.floor(board.height / Math.max(1, effectiveDepth)) : board?.height ?? 0;
+
   if (!ready || !board) {
-    return <div>Loading WASM…</div>;
+    return <div className={styles.loading}>Loading WASM…</div>;
   }
 
-  const layerHeight = use3D ? Math.floor(board.height / Math.max(1, effectiveDepth)) : board.height;
-
   return (
-    <div style={{display: 'flex', flexDirection: 'column', gap: 16}}>
-      {(errorMessage || dictError || cpuError) && (
-        <div style={{display: 'flex', flexDirection: 'column', gap: 6}}>
-          {errorMessage && (
-            <div style={{background: palette.errorBg, border: `1px solid ${palette.errorBorder}`, borderRadius: 4, padding: 8}}>
-              {errorMessage}
-            </div>
-          )}
-          {dictError && (
-            <div style={{background: palette.warningBg, border: `1px solid ${palette.warningBorder}`, borderRadius: 4, padding: 8}}>
-              {dictError}
-            </div>
-          )}
-          {cpuError && (
-            <div style={{background: palette.warningBg, border: `1px solid ${palette.warningBorder}`, borderRadius: 4, padding: 8}}>
-              {cpuError}
-            </div>
-          )}
+    <div className={styles.shell} style={themeVars}>
+      <header className={styles.hero}>
+        <div className={styles.heroCopy}>
+          <div className={styles.heroEyebrow}>TileTangle Playground</div>
+          <h2 className={styles.heroTitle}>Design. Experiment. Solve.</h2>
+          <p className={styles.heroDescription}>
+            Tune adjacency, stack rules, and automation to watch the engine reshape every move in real time.
+          </p>
+          <div className={styles.heroStatsRow}>
+            {heroStats.map(stat => (
+              <StatChip key={stat.label} label={stat.label} value={stat.value} />
+            ))}
+            <StatChip label="Automation" value={cpuLabel} />
+          </div>
         </div>
-      )}
-      {infoMessage && (
-        <div style={{background: palette.infoBg, border: `1px solid ${palette.infoBorder}`, borderRadius: 4, padding: 8}}>
-          {infoMessage}
+        <div className={styles.heroPresets}>
+          <div className={styles.presetsHeading}>Quick presets</div>
+          <div className={styles.presetGrid}>
+            {quickPresets.map(preset => (
+              <button
+                key={preset.id}
+                type="button"
+                className={styles.presetCard}
+                onClick={preset.onApply}
+              >
+                <span className={styles.presetTitle}>{preset.title}</span>
+                <span className={styles.presetDescription}>{preset.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+      {(errorMessage || dictError || cpuError || infoMessage) && (
+        <div className={styles.alertStack}>
+          {errorMessage && <div className={`${styles.alert} ${styles.alertError}`}>{errorMessage}</div>}
+          {dictError && <div className={`${styles.alert} ${styles.alertWarning}`}>{dictError}</div>}
+          {cpuError && <div className={`${styles.alert} ${styles.alertWarning}`}>{cpuError}</div>}
+          {infoMessage && <div className={`${styles.alert} ${styles.alertInfo}`}>{infoMessage}</div>}
         </div>
       )}
 
-      <ControlSection title="Game Setup">
-        <label>Width:
-          <input
-            type="number"
-            min={2}
-            max={30}
-            value={draftSettings.width}
-            onChange={e => setDraftSettings(prev => ({...prev, width: Number(e.target.value)}))}
-            style={{width: 70}}
-          />
-        </label>
-        <label>Height:
-          <input
-            type="number"
-            min={2}
-            max={30}
-            value={draftSettings.height}
-            onChange={e => setDraftSettings(prev => ({...prev, height: Number(e.target.value)}))}
-            style={{width: 70}}
-          />
-        </label>
-        <label>Layers (3D depth):
-          <input
-            type="number"
-            min={1}
-            max={12}
-            value={draftSettings.depth}
-            onChange={e => setDraftSettings(prev => ({...prev, depth: Number(e.target.value)}))}
-            title="Number of board layers used when 3D mode is enabled"
-            style={{width: 70}}
-          />
-        </label>
-        <label>Rack size:
-          <input
-            type="number"
-            min={1}
-            max={14}
-            value={draftSettings.rackSize}
-            onChange={e => setDraftSettings(prev => ({...prev, rackSize: Number(e.target.value)}))}
-            style={{width: 70}}
-          />
-        </label>
-        <label>Shape:
-          <select
-            value={draftSettings.shape}
-            data-testid="board-shape-select"
-            onChange={e => setDraftSettings(prev => ({...prev, shape: e.target.value as BoardShape}))}
+      <div className={styles.layout}>
+        <aside className={styles.sidebar}>
+          <Panel
+            title="Board Setup"
+            subtitle="Adjust dimensions and masks, then relaunch with Apply."
+            actions={
+              <button type="button" className={styles.applyButton} onClick={handleApplySettings}>
+                Apply configuration
+              </button>
+            }
+            density="compact"
           >
-            <option value="rect">Full grid</option>
-            <option value="diamond">Diamond</option>
-            <option value="cross">Cross</option>
-          </select>
-        </label>
-        <details style={{fontSize: 12}}>
-          <summary style={{cursor: 'pointer', fontWeight: 600}}>Tile pool editor</summary>
-          <div style={{marginTop: 8, display: 'flex', flexDirection: 'column', gap: 12}}>
-            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8}}>
-              <span style={{fontSize: 12, color: palette.textSubtle}}>Adjust tile counts and scores.</span>
-              <button type="button" onClick={handleResetTiles} style={{fontSize: 12}}>Reset to defaults</button>
+            <div className={styles.fieldGrid}>
+              <label className={styles.field}>
+                <span>Width</span>
+                <input
+                  type="number"
+                  min={2}
+                  max={30}
+                  value={draftSettings.width}
+                  onChange={e => setDraftSettings(prev => ({...prev, width: Number(e.target.value)}))}
+                />
+              </label>
+              <label className={styles.field}>
+                <span>Height</span>
+                <input
+                  type="number"
+                  min={2}
+                  max={30}
+                  value={draftSettings.height}
+                  onChange={e => setDraftSettings(prev => ({...prev, height: Number(e.target.value)}))}
+                />
+              </label>
+              <label className={styles.field} title="Number of layers when 3D mode is active">
+                <span>Layers</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={draftSettings.depth}
+                  onChange={e => setDraftSettings(prev => ({...prev, depth: Number(e.target.value)}))}
+                />
+              </label>
+              <label className={styles.field}>
+                <span>Rack size</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={14}
+                  value={draftSettings.rackSize}
+                  onChange={e => setDraftSettings(prev => ({...prev, rackSize: Number(e.target.value)}))}
+                />
+              </label>
             </div>
-            <div style={{overflowX: 'auto'}}>
-              <table style={{width: '100%', borderCollapse: 'collapse', minWidth: 320, fontSize: 13}}>
-                <thead>
-                  <tr>
-                    <th style={{textAlign: 'left', padding: '4px 6px', borderBottom: `1px solid ${palette.panelBorder}`}}>Tile</th>
-                    <th style={{textAlign: 'left', padding: '4px 6px', borderBottom: `1px solid ${palette.panelBorder}`}}>Count</th>
-                    <th style={{textAlign: 'left', padding: '4px 6px', borderBottom: `1px solid ${palette.panelBorder}`}}>Score</th>
-                    <th style={{padding: '4px 6px', borderBottom: `1px solid ${palette.panelBorder}`}}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {draftTileRows.map(row => (
-                    <tr key={row.id}>
-                      <td style={{padding: '4px 6px'}}>{row.id}</td>
-                      <td style={{padding: '4px 6px', width: 90}}>
+            <label className={styles.field}>
+              <span>Shape</span>
+              <select
+                value={draftSettings.shape}
+                data-testid="board-shape-select"
+                onChange={e => setDraftSettings(prev => ({...prev, shape: e.target.value as BoardShape}))}
+              >
+                <option value="rect">Full grid</option>
+                <option value="diamond">Diamond</option>
+                <option value="cross">Cross</option>
+              </select>
+            </label>
+            <div className={styles.helperText}>Layers only apply when 3D mode is enabled.</div>
+          </Panel>
+
+          <Panel title="Tile Pool" subtitle="Fine-tune counts and scoring." density="compact">
+            <div className={styles.tileEditor}>
+              <div className={styles.tileEditorHeader}>
+                <span>Adjust distribution.</span>
+                <button type="button" className={styles.linkButton} onClick={handleResetTiles}>
+                  Reset defaults
+                </button>
+              </div>
+              <div className={styles.tileTableWrapper}>
+                <table className={styles.tileTable}>
+                  <thead>
+                    <tr>
+                      <th>Tile</th>
+                      <th>Count</th>
+                      <th>Score</th>
+                      <th aria-hidden="true"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {draftTileRows.map(row => (
+                      <tr key={row.id}>
+                        <td>{row.id}</td>
+                        <td>
+                          <input
+                            type="number"
+                            min={0}
+                            value={row.count ?? 0}
+                            onChange={e => updateTileEntry(row.id, {count: Number(e.target.value)})}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            value={row.score ?? 0}
+                            onChange={e => updateTileEntry(row.id, {score: Number(e.target.value)})}
+                          />
+                        </td>
+                        <td className={styles.tableActions}>
+                          <button type="button" onClick={() => removeTile(row.id)} disabled={draftTileRows.length <= 1}>
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td>
                         <input
-                          type="number"
-                          min={0}
-                          value={row.count ?? 0}
-                          onChange={e => updateTileEntry(row.id, {count: Number(e.target.value)})}
-                          style={{width: '100%'}}
+                          type="text"
+                          value={newTileId}
+                          onChange={e => setNewTileId(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
+                          placeholder="ID"
                         />
                       </td>
-                      <td style={{padding: '4px 6px', width: 90}}>
+                      <td>
                         <input
                           type="number"
-                          value={row.score ?? 0}
-                          onChange={e => updateTileEntry(row.id, {score: Number(e.target.value)})}
-                          style={{width: '100%'}}
+                          min={1}
+                          value={newTileCount}
+                          onChange={e => setNewTileCount(Number(e.target.value) || 1)}
                         />
                       </td>
-                      <td style={{padding: '4px 6px', textAlign: 'right'}}>
-                        <button
-                          type="button"
-                          onClick={() => removeTile(row.id)}
-                          disabled={draftTileRows.length <= 1}
-                          style={{fontSize: 12}}
-                        >
-                          Remove
+                      <td>
+                        <input
+                          type="number"
+                          value={newTileScore}
+                          onChange={e => setNewTileScore(Number(e.target.value) || 0)}
+                        />
+                      </td>
+                      <td className={styles.tableActions}>
+                        <button type="button" onClick={handleAddTile} disabled={newTileId.trim() === ''}>
+                          Add
                         </button>
                       </td>
                     </tr>
-                  ))}
-                  <tr>
-                    <td style={{padding: '4px 6px'}}>
-                      <input
-                        type="text"
-                        value={newTileId}
-                        onChange={e => setNewTileId(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
-                        placeholder="ID"
-                        style={{width: '100%'}}
-                      />
-                    </td>
-                    <td style={{padding: '4px 6px'}}>
-                      <input
-                        type="number"
-                        min={1}
-                        value={newTileCount}
-                        onChange={e => setNewTileCount(Number(e.target.value) || 1)}
-                        style={{width: '100%'}}
-                      />
-                    </td>
-                    <td style={{padding: '4px 6px'}}>
-                      <input
-                        type="number"
-                        value={newTileScore}
-                        onChange={e => setNewTileScore(Number(e.target.value) || 0)}
-                        style={{width: '100%'}}
-                      />
-                    </td>
-                    <td style={{padding: '4px 6px', textAlign: 'right'}}>
-                      <button
-                        type="button"
-                        onClick={handleAddTile}
-                        disabled={newTileId.trim() === ''}
-                        style={{fontSize: 12}}
-                      >
-                        Add
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            {(tileCountsError || tileScoresError) && (
-              <div style={{fontSize: 12, color: palette.errorBorder}}>
-                {[tileCountsError, tileScoresError]
-                  .filter(Boolean)
-                  .map((msg, idx) => (
-                    <div key={idx}>{msg}</div>
-                  ))}
+                  </tbody>
+                </table>
               </div>
-            )}
-          </div>
-        </details>
-        <div style={{fontSize: 12, color: palette.textSubtle}}>Layers are only used when 3D mode is enabled.</div>
-        <button onClick={handleApplySettings}>Apply configuration</button>
-      </ControlSection>
-
-      <ControlSection title="Turn & Scores">
-        <div style={{fontSize: 13}}>Turn {turnNumber + 1} • Player {activePlayer + 1}</div>
-        <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
-          {players.length === 0 && <div style={{fontSize: 12, opacity: 0.7}}>Loading players…</div>}
-          {players.map(player => (
-            <div
-              key={player.index}
-              style={{
-                padding: 8,
-                minWidth: 120,
-                borderRadius: 6,
-                border: `1px solid ${palette.panelBorder}`,
-                background: player.index === activePlayer ? palette.playerActiveBg : palette.playerBg,
-              }}
-            >
-              <div style={{fontWeight: 600}}>Player {player.index + 1}</div>
-              <div>{player.score} pts</div>
-              <div style={{fontSize: 12, color: palette.textSubtle}}>Rack: {player.rack.join(' ') || '—'}</div>
+              {(tileCountsError || tileScoresError) && (
+                <div className={styles.errorText}>
+                  {[tileCountsError, tileScoresError]
+                    .filter(Boolean)
+                    .map((msg, idx) => (
+                      <div key={idx}>{msg}</div>
+                    ))}
+                </div>
+              )}
             </div>
-          ))}
-        </div>
-        <div style={{fontSize: 12, color: palette.textSubtle}}>
-          Bag: {bagSummary.total} tiles{bagSummary.total > 0 && bagPreview ? ` • ${bagPreview}` : ''}
-        </div>
-      </ControlSection>
+          </Panel>
 
-      <ControlSection title="Runtime & Board Layout">
-        <label>
-          <input
-            type="checkbox"
-            checked={useWorker}
-            onChange={e => setUseWorker(e.target.checked)}
-          />{' '}
-          Use Web Worker
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={useHex}
-            data-testid="toggle-hex-adjacency"
-            onChange={e => {
-              setUseHex(e.target.checked);
-              if (e.target.checked) {
-                setUseDiag(false);
-                setUse3D(false);
-                setDraftSettings(prev => ({...prev, shape: 'diamond'}));
-              }
-            }}
-          />{' '}
-          Hex adjacency
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={useDiag}
-            onChange={e => {
-              setUseDiag(e.target.checked);
-              if (e.target.checked) {
-                setUseHex(false);
-                setUse3D(false);
-              }
-            }}
-          />{' '}
-          Diagonal adjacency
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={use3D}
-            onChange={e => {
-              setUse3D(e.target.checked);
-              if (e.target.checked) {
-                setUseHex(false);
-              } else {
-                setInfoMessage(null);
-              }
-            }}
-          />{' '}
-          3D (layers)
-        </label>
-        {useHex && (
-          <div style={{fontSize: 12, color: palette.textSubtle}}>
-            Hex adjacency uses staggered rows with three axes (E, NE, SE).
-          </div>
-        )}
-        {useDiag && (
-          <div style={{fontSize: 12, color: palette.textSubtle}}>
-            Diagonal adjacency enables moves in all eight directions.
-          </div>
-        )}
-        {use3D && (
-          <>
-            <span style={{fontSize: 12}}>Layer {z + 1} / {effectiveDepth}</span>
-            <input
-              type="range"
-              min={0}
-              max={Math.max(0, effectiveDepth - 1)}
-              value={Math.min(z, Math.max(0, effectiveDepth - 1))}
-              onChange={e => setZ(Number(e.target.value))}
-            />
-          </>
-        )}
-      </ControlSection>
-
-      <ControlSection title="Dictionary & Language">
-        <label>
-          <input
-            type="checkbox"
-            checked={useDict}
-            onChange={e => {
-              const next = e.target.checked;
-              setUseDict(next);
-              setDictReady(!next);
-              setDictError(null);
-              setDictMessagesVersion(v => v + 1);
-            }}
-            disabled={dictLoading}
-          />{' '}
-          Dictionary checks
-        </label>
-        <label>
-          Engine:{' '}
-          <select
-            value={dictEngine}
-            onChange={e => {
-              setDictEngine(e.target.value as 'fst' | 'set' | 'dawg' | 'gaddag');
-              setDictMessagesVersion(v => v + 1);
-            }}
-            disabled={!useDict || dictLoading}
-          >
-            <option value="fst">FST</option>
-            <option value="set">Set</option>
-            <option value="dawg">DAWG</option>
-            <option value="gaddag">GADDAG</option>
-          </select>
-        </label>
-        <label title="Reorder placed tiles to any valid anagram on commit (row/column only)">
-          <input
-            type="checkbox"
-            checked={useAnagram}
-            onChange={e => setUseAnagram(e.target.checked)}
-          />{' '}
-          Anagram mode
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={rtl}
-            onChange={e => setRtl(e.target.checked)}
-          />{' '}
-          RTL reading
-        </label>
-        {dictLoading && <span data-testid="dictionary-loading" style={{fontSize: 12}}>Loading dictionary…</span>}
-      </ControlSection>
-
-      <ControlSection title="Stacking Rules">
-        <label>
-          <input
-            type="checkbox"
-            checked={stackOn}
-            onChange={e => setStackOn(e.target.checked)}
-          />{' '}
-          Enable stacking
-        </label>
-        {stackOn && (
-          <>
-            <label>
-              Scoring:{' '}
-              <select value={stackScoring} onChange={e => setStackScoring(e.target.value as 'top' | 'sum')}>
-                <option value="top">Top only</option>
-                <option value="sum">Sum stack</option>
+          <Panel title="Language & Dictionary" subtitle="Guard rails for move validation." density="compact">
+            <label className={styles.toggleRow}>
+              <input type="checkbox" checked={useDict} onChange={e => setUseDict(e.target.checked)} />
+              <span>Use dictionary validation</span>
+            </label>
+            <label className={styles.field}>
+              <span>Engine</span>
+              <select
+                value={dictEngine}
+                onChange={e => setDictEngine(e.target.value as 'fst' | 'set' | 'dawg' | 'gaddag')}
+                disabled={!useDict || dictLoading}
+              >
+                <option value="fst">FST</option>
+                <option value="set">Set</option>
+                <option value="dawg">DAWG</option>
+                <option value="gaddag">GADDAG</option>
               </select>
             </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={forbidSame}
-                onChange={e => setForbidSame(e.target.checked)}
-              />{' '}
-              Forbid same overlay
+            <label className={styles.toggleRow} title="Reorder placed tiles into any valid anagram when committing the move">
+              <input type="checkbox" checked={useAnagram} onChange={e => setUseAnagram(e.target.checked)} />
+              <span>Anagram commit</span>
             </label>
-          </>
-        )}
-      </ControlSection>
+            <label className={styles.toggleRow}>
+              <input type="checkbox" checked={rtl} onChange={e => setRtl(e.target.checked)} />
+              <span>RTL reading direction</span>
+            </label>
+            {dictLoading && (
+              <span data-testid="dictionary-loading" className={styles.helperText}>
+                Loading dictionary…
+              </span>
+            )}
+          </Panel>
 
-      <ControlSection title="Move Controls">
-        <button onClick={commitMove} disabled={pending.length === 0}>Commit move ({pending.length})</button>
-        <button onClick={handlePendingReset} disabled={pending.length === 0}>Reset pending</button>
-        <button onClick={undoMove} disabled={!game}>Undo</button>
-        <button onClick={redoMove} disabled={!game}>Redo</button>
-        <button
-          onClick={() => {
-            if (showMoves) {
-              setShowMoves(false);
-              setLegalMoves([]);
-              setActiveMoveIndex(null);
-            } else {
-              fetchMoves();
-            }
-          }}
-          disabled={!game || loadingMoves || (useDict && !dictReady) || use3D}
-        >
-          {showMoves ? 'Hide legal moves' : 'Show legal moves'}
-        </button>
-        {loadingMoves && <span style={{fontSize: 12}}>loading…</span>}
-      </ControlSection>
+          <Panel title="Stacking Rules" subtitle="Experiment with layered tiles." density="compact">
+            <label className={styles.toggleRow}>
+              <input type="checkbox" checked={stackOn} onChange={e => setStackOn(e.target.checked)} />
+              <span>Enable stacking</span>
+            </label>
+            {stackOn && (
+              <div className={styles.fieldStack}>
+                <label className={styles.field}>
+                  <span>Scoring</span>
+                  <select value={stackScoring} onChange={e => setStackScoring(e.target.value as 'top' | 'sum')}>
+                    <option value="top">Top only</option>
+                    <option value="sum">Sum stack</option>
+                  </select>
+                </label>
+                <label className={styles.toggleRow}>
+                  <input type="checkbox" checked={forbidSame} onChange={e => setForbidSame(e.target.checked)} />
+                  <span>Forbid identical overlays</span>
+                </label>
+              </div>
+            )}
+          </Panel>
+        </aside>
 
-      <ControlSection title="AI Assistant">
-        <label>
-          CPU difficulty:{' '}
-          <select
-            value={cpuDifficulty}
-            onChange={e => setCpuDifficulty(e.target.value as 'off' | 'easy' | 'medium' | 'hard')}
-            disabled={!dictReady || dictLoading || use3D}
+        <main className={styles.stage}>
+          <Panel
+            title="Board"
+            subtitle={`Turn ${turnNumber + 1} • Player ${activePlayer + 1}`}
+            accent
           >
-            <option value="off">Off</option>
-            <option value="easy">Easy</option>
-            <option value="medium">Medium</option>
-            <option value="hard">Hard</option>
-          </select>
-        </label>
-        <button
-          onClick={requestCpuHint}
-          disabled={!game || cpuDifficulty === 'off' || cpuThinking || !dictReady || use3D}
-        >
-          CPU hint
-        </button>
-        <button
-          data-testid="cpu-play-button"
-          onClick={playCpuSuggestion}
-          disabled={!game || cpuSuggestion == null || cpuThinking || use3D}
-        >
-          Play as CPU
-        </button>
-        {cpuThinking && <span style={{fontSize: 12}}>computing…</span>}
-        {cpuSuggestion && (
-          <div
-            style={{
-              marginTop: 8,
-              fontSize: 12,
-              padding: 8,
-              border: `1px solid ${palette.panelBorder}`,
-              borderRadius: 4,
-              background: colorMode === 'dark' ? 'rgba(30, 64, 175, 0.25)' : '#eff6ff',
-            }}
-          >
-            <div style={{fontWeight: 600}}>CPU ({cpuSuggestion.difficulty}) suggests</div>
-            <div><strong>{cpuSuggestion.word}</strong> — {cpuSuggestion.total} pts</div>
-            <div style={{color: palette.textSubtle}}>Raw {cpuSuggestion.score}, leave {cpuSuggestion.rackLeave}, equity {cpuSuggestion.boardEquity}</div>
-          </div>
-        )}
-        {!cpuSuggestion && lastCpu && (
-          <div
-            style={{
-              marginTop: 8,
-              fontSize: 12,
-              padding: 8,
-              border: `1px solid ${palette.panelBorder}`,
-              borderRadius: 4,
-              background: colorMode === 'dark' ? 'rgba(15, 118, 110, 0.2)' : '#ecfdf5',
-            }}
-          >
-            <div style={{fontWeight: 600}}>Last CPU hint ({lastCpu.difficulty})</div>
-            <div><strong>{lastCpu.word}</strong> — {lastCpu.total} pts</div>
-            <div style={{color: palette.textSubtle}}>Raw {lastCpu.score}, leave {lastCpu.rackLeave}, equity {lastCpu.boardEquity}</div>
-          </div>
-        )}
-      </ControlSection>
-
-      <div style={{display: 'flex', gap: 16, alignItems: 'flex-start'}}>
-        <div style={{display: 'grid', gridTemplateColumns: `repeat(${board.width}, 28px)`, gap: 4}}>
-          {Array.from({length: layerHeight}).map((_, y) => (
-            Array.from({length: board.width}).map((__, x) => {
-              const globalY = use3D ? y + z * layerHeight : y;
-              const key = `${x}-${globalY}`;
-              const highlighted = highlightCells.has(`${x},${globalY}`);
-              const activeCell = use3D || isCellActive(x, globalY);
-              const cellStyle: React.CSSProperties = {
-                width: 28,
-                height: 28,
-                border: `1px solid ${palette.boardCellBorder}`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                position: 'relative',
-                background: highlighted
-                  ? palette.boardCellHighlight
-                  : activeCell
-                    ? palette.boardCellBg
-                    : 'rgba(148, 163, 184, 0.15)',
-                fontWeight: highlighted ? 600 : 400,
-                opacity: activeCell ? 1 : 0.5,
-                cursor: activeCell ? 'default' : 'not-allowed',
-              };
-              return (
-                <div
-                  key={key}
-                  data-testid="playground-board-cell"
-                  data-x={x}
-                  data-y={globalY}
-                  data-active={activeCell ? '1' : '0'}
-                  onDragOver={e => {
-                    if (!activeCell) return;
-                    e.preventDefault();
-                  }}
-                  onDrop={e => {
-                    if (!activeCell) return;
-                    onDropCell(x, y, e);
-                  }}
-                  style={cellStyle}
-                  onMouseEnter={() => {
-                    if (!showMoves) return;
-                    const idx = legalMoves.findIndex(mv => mv.placements.some(p => p.x === x && p.y === globalY));
-                    if (idx >= 0) setActiveMoveIndex(idx);
-                  }}
-                >
-                  {(() => {
-                    const tileId = cellDisplay(x, y);
-                    if (!tileId) return null;
-                    const meta = getTileMeta(tileId);
-                    const symbol = meta?.symbol ?? tileId.slice(0, 1);
-                    const score = meta?.score;
-                    return (
-                      <>
-                        <span>{symbol.slice(0, 2)}</span>
-                        {typeof score === 'number' && !Number.isNaN(score) && (
-                          <span
-                            style={{
-                              position: 'absolute',
-                              bottom: 2,
-                              right: 3,
-                              fontSize: 10,
-                              fontWeight: 600,
-                              opacity: 0.75,
-                            }}
-                          >
-                            {score}
-                          </span>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-              );
-            })
-          ))}
-        </div>
-        <div>
-          <div style={{marginBottom: 6, fontSize: 12, opacity: 0.7}}>Active rack (Player {activePlayer + 1}) — drag onto board</div>
-          <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
-            {availableRackTiles.map(({id, index}) => (
+            <div className={styles.boardWrapper}>
               <div
-                key={`${id}-${index}`}
-                draggable
-                data-testid="playground-rack-tile"
-                data-kind={id}
-                onDragStart={e => onDragStartTile(id, e)}
-                style={{
-                  width: 32,
-                  height: 32,
-                  border: `1px solid ${palette.rackTileBorder}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  position: 'relative',
-                  background: palette.rackTileBg,
-                  cursor: 'grab',
-                  fontWeight: 600,
-                }}
+                className={styles.boardGrid}
+                style={{gridTemplateColumns: `repeat(${board.width}, 28px)`}}
               >
-                {(() => {
+                {Array.from({length: layerHeight}).map((_, y) => (
+                  Array.from({length: board.width}).map((__, x) => {
+                    const globalY = use3D ? y + z * layerHeight : y;
+                    const key = `${x}-${globalY}`;
+                    const highlighted = highlightCells.has(`${x},${globalY}`);
+                    const activeCell = use3D || isCellActive(x, globalY);
+                    const tileId = cellDisplay(x, y);
+                    const meta = tileId ? getTileMeta(tileId) : null;
+                    const symbol = meta?.symbol ?? tileId?.slice(0, 2) ?? '';
+                    const score = meta?.score;
+                    const cellStyle: React.CSSProperties = {
+                      border: `1px solid ${palette.boardCellBorder}`,
+                      background: highlighted
+                        ? palette.boardCellHighlight
+                        : activeCell
+                          ? palette.boardCellBg
+                          : 'rgba(148, 163, 184, 0.12)',
+                      fontWeight: highlighted ? 600 : 500,
+                      opacity: activeCell ? 1 : 0.55,
+                      cursor: activeCell ? 'default' : 'not-allowed',
+                    };
+                    return (
+                      <div
+                        key={key}
+                        data-testid="playground-board-cell"
+                        data-x={x}
+                        data-y={globalY}
+                        data-active={activeCell ? '1' : '0'}
+                        className={styles.boardCell}
+                        style={cellStyle}
+                        onDragOver={e => {
+                          if (!activeCell) return;
+                          e.preventDefault();
+                        }}
+                        onDrop={e => {
+                          if (!activeCell) return;
+                          onDropCell(x, y, e);
+                        }}
+                        onMouseEnter={() => {
+                          if (!showMoves) return;
+                          const idx = legalMoves.findIndex(mv => mv.placements.some(p => p.x === x && p.y === globalY));
+                          if (idx >= 0) setActiveMoveIndex(idx);
+                        }}
+                      >
+                        {symbol && <span>{symbol.slice(0, 2)}</span>}
+                        {typeof score === 'number' && !Number.isNaN(score) && (
+                          <span className={styles.boardCellScore}>{score}</span>
+                        )}
+                      </div>
+                    );
+                  })
+                ))}
+              </div>
+            </div>
+            {use3D && (
+              <label className={styles.layerSlider}>
+                <span>Viewing layer {z + 1} / {effectiveDepth}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(0, effectiveDepth - 1)}
+                  value={z}
+                  onChange={e => setZ(Number(e.target.value))}
+                />
+              </label>
+            )}
+          </Panel>
+
+          <div className={styles.stageSplit}>
+            <Panel title={`Active Rack • Player ${activePlayer + 1}`} density="compact">
+              <div className={styles.rackRow}>
+                {availableRackTiles.map(({id, index}) => {
                   const meta = getTileMeta(id);
                   const symbol = meta?.symbol ?? id.slice(0, 2);
                   const score = meta?.score;
                   return (
-                    <>
+                    <div
+                      key={`${id}-${index}`}
+                      draggable
+                      data-testid="playground-rack-tile"
+                      data-kind={id}
+                      className={styles.rackTile}
+                      onDragStart={e => onDragStartTile(id, e)}
+                    >
                       <span>{symbol.slice(0, 2)}</span>
                       {typeof score === 'number' && !Number.isNaN(score) && (
-                        <span
-                          style={{
-                            position: 'absolute',
-                            bottom: 3,
-                            right: 4,
-                            fontSize: 11,
-                            fontWeight: 600,
-                            opacity: 0.75,
-                          }}
-                        >
-                          {score}
-                        </span>
+                        <span className={styles.rackTileScore}>{score}</span>
                       )}
-                    </>
+                    </div>
                   );
-                })()}
+                })}
+                {availableRackTiles.length === 0 && (
+                  <div className={styles.helperText}>Rack empty or all tiles placed.</div>
+                )}
               </div>
-            ))}
-            {availableRackTiles.length === 0 && <div style={{fontSize: 12, color: palette.textSubtle}}>Rack empty or all tiles placed</div>}
-          </div>
-          {cpuSuggestion && (
-            <div
-              style={{
-                marginTop: 12,
-                fontSize: 12,
-                padding: 8,
-                border: `1px dashed ${palette.panelBorder}`,
-                borderRadius: 4,
-                background: colorMode === 'dark' ? 'rgba(56, 189, 248, 0.1)' : '#f8fbff',
-              }}
-            >
-              <div style={{fontWeight: 600, marginBottom: 4}}>CPU placements preview</div>
-              <div>{cpuSuggestion.placements.map(p => `(${p.x},${p.y})`).join(', ') || '—'}</div>
-            </div>
-          )}
-        </div>
-        {showMoves && (
-          <div style={{minWidth: 200, maxWidth: 240, fontSize: 13}}>
-            <div style={{fontWeight: 600, marginBottom: 8}}>Legal moves</div>
-            {legalMoves.length === 0 && !loadingMoves && (
-              <div style={{opacity: 0.7}}>No moves available for the current rack.</div>
-            )}
-            {legalMoves.map((mv, idx) => (
-              <div
-                key={`${mv.word}-${idx}`}
-                data-testid={`legal-move-${idx}`}
-                style={{marginBottom: 8, paddingBottom: 8, borderBottom: `1px solid ${palette.panelBorder}`}}
-              >
-                <div style={{fontWeight: 600}}>
-                  #{idx + 1} {mv.word} <span style={{opacity: 0.7}}>({mv.total ?? mv.score} pts)</span>
+              {cpuSuggestion && (
+                <div className={styles.cpuPreview}>
+                  <div className={styles.cpuPreviewTitle}>CPU placements preview</div>
+                  <div>{cpuSuggestion.placements.map(p => `(${p.x},${p.y})`).join(', ') || '—'}</div>
                 </div>
-                <div style={{marginTop: 4, display: 'flex', gap: 6}}>
-                  <button onClick={() => setActiveMoveIndex(idx)} style={{fontSize: 12}}>Highlight</button>
-                  <button onClick={() => playGeneratedMove(mv)} style={{fontSize: 12}}>Play</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              )}
+            </Panel>
 
-      <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
-        <div style={{fontSize: 12, fontWeight: 600}}>Snapshot JSON</div>
-        <textarea
-          value={snapshotText}
-          onChange={e => setSnapshotText(e.target.value)}
-          rows={4}
-          style={{width: '100%', fontFamily: 'monospace'}}
-          placeholder="Click Save snapshot to capture the current game state"
-        />
-        <div style={{display: 'flex', gap: 8}}>
-          <button onClick={exportSnapshot} disabled={!game}>Save snapshot</button>
-          <button onClick={importSnapshot} disabled={!game || snapshotText.trim() === ''}>Load snapshot</button>
-          <button onClick={fetchEventLog} disabled={!game}>Show event log</button>
-        </div>
-        {eventLogText && (
-          <pre
-            style={{
-              maxHeight: 200,
-              overflow: 'auto',
-              background: palette.panelBg,
-              padding: 8,
-              border: `1px solid ${palette.panelBorder}`,
-            }}
+            <Panel title="Move Controls" density="compact">
+              <div className={styles.buttonRow}>
+                <button onClick={commitMove} disabled={pending.length === 0}>
+                  Commit move ({pending.length})
+                </button>
+                <button onClick={handlePendingReset} disabled={pending.length === 0}>
+                  Reset pending
+                </button>
+              </div>
+              <div className={styles.buttonRow}>
+                <button onClick={undoMove} disabled={!game}>Undo</button>
+                <button onClick={redoMove} disabled={!game}>Redo</button>
+                <button
+                  onClick={() => {
+                    if (showMoves) {
+                      setShowMoves(false);
+                      setLegalMoves([]);
+                      setActiveMoveIndex(null);
+                    } else {
+                      fetchMoves();
+                    }
+                  }}
+                  disabled={!game || loadingMoves || (useDict && !dictReady) || use3D}
+                >
+                  {showMoves ? 'Hide legal moves' : 'Show legal moves'}
+                </button>
+              </div>
+              {loadingMoves && <div className={styles.helperText}>Loading legal moves…</div>}
+            </Panel>
+          </div>
+        </main>
+
+        <aside className={styles.rightRail}>
+          <Panel title="Turn Tracker" subtitle="Scoreboard and bag" density="compact">
+            <div className={styles.playerList}>
+              {players.length === 0 && <div className={styles.helperText}>Loading players…</div>}
+              {players.map(player => (
+                <div
+                  key={player.index}
+                  className={`${styles.playerCard} ${player.index === activePlayer ? styles.playerCardActive : ''}`}
+                >
+                  <div className={styles.playerCardHeader}>Player {player.index + 1}</div>
+                  <div className={styles.playerScore}>{player.score} pts</div>
+                  <div className={styles.playerRack}>{player.rack.join(' ') || '—'}</div>
+                </div>
+              ))}
+            </div>
+            <div className={styles.helperText}>
+              Bag: {bagSummary.total} tiles{bagSummary.total > 0 && bagPreview ? ` • ${bagPreview}` : ''}
+            </div>
+          </Panel>
+
+          <Panel title="Playground Modes" subtitle="Switch adjacency and runtime modes." density="compact">
+            <div className={styles.modeGroup}>
+              <div className={styles.modeLabel}>Adjacency</div>
+              <SegmentedControl
+                name="Adjacency"
+                value={adjacencyMode}
+                onChange={handleAdjacencyModeChange}
+                options={[
+                  {value: 'orthogonal', label: 'Orthogonal', hint: 'Classic'},
+                  {value: 'diagonal', label: 'Diagonal', hint: 'Eight-way'},
+                  {value: 'hex', label: 'Hex', hint: 'Three axes', testId: 'toggle-hex-adjacency'},
+                ]}
+              />
+            </div>
+            <div className={styles.modeGroup}>
+              <div className={styles.modeLabel}>Dimensions</div>
+              <SegmentedControl
+                name="Dimensions"
+                value={dimensionMode}
+                onChange={handleDimensionModeChange}
+                options={[
+                  {value: '2d', label: '2D'},
+                  {value: '3d', label: '3D', hint: 'Stacked'},
+                ]}
+              />
+            </div>
+            <label className={styles.toggleRow}>
+              <input type="checkbox" checked={useWorker} onChange={e => setUseWorker(e.target.checked)} />
+              <span>Run heavy work in a Web Worker</span>
+            </label>
+            {adjacencyMode === 'hex' && (
+              <div className={styles.helperText}>Hex adjacency uses staggered rows with three axes (E, NE, SE).</div>
+            )}
+            {adjacencyMode === 'diagonal' && (
+              <div className={styles.helperText}>Diagonal mode enables moves along all eight directions.</div>
+            )}
+          </Panel>
+
+          <Panel title="Automation & Hints" subtitle="Let the engine explore." density="compact">
+            <SegmentedControl
+              name="CPU Difficulty"
+              value={cpuDifficulty}
+              onChange={value => setCpuDifficulty(value as 'off' | 'easy' | 'medium' | 'hard')}
+              options={[
+                {value: 'off', label: 'Off'},
+                {value: 'easy', label: 'Easy'},
+                {value: 'medium', label: 'Medium'},
+                {value: 'hard', label: 'Hard'},
+              ]}
+            />
+            <div className={styles.buttonRow}>
+              <button
+                onClick={requestCpuHint}
+                disabled={!game || cpuDifficulty === 'off' || cpuThinking || !dictReady || use3D}
+              >
+                CPU hint
+              </button>
+              <button
+                data-testid="cpu-play-button"
+                onClick={playCpuSuggestion}
+                disabled={!game || cpuSuggestion == null || cpuThinking || use3D}
+              >
+                Play as CPU
+              </button>
+            </div>
+            {cpuThinking && <div className={styles.helperText}>Computing best move…</div>}
+            {cpuSuggestion && (
+              <div className={styles.cpuCard}>
+                <div className={styles.cpuCardTitle}>CPU ({cpuSuggestion.difficulty}) suggests</div>
+                <div className={styles.cpuCardBody}>
+                  <strong>{cpuSuggestion.word}</strong> — {cpuSuggestion.total} pts
+                </div>
+                <div className={styles.cpuCardMeta}>Raw {cpuSuggestion.score}, leave {cpuSuggestion.rackLeave}, equity {cpuSuggestion.boardEquity}</div>
+              </div>
+            )}
+            {!cpuSuggestion && lastCpu && (
+              <div className={styles.cpuCardMuted}>
+                <div className={styles.cpuCardTitle}>Last hint ({lastCpu.difficulty})</div>
+                <div className={styles.cpuCardBody}>
+                  <strong>{lastCpu.word}</strong> — {lastCpu.total} pts
+                </div>
+                <div className={styles.cpuCardMeta}>Raw {lastCpu.score}, leave {lastCpu.rackLeave}, equity {lastCpu.boardEquity}</div>
+              </div>
+            )}
+          </Panel>
+
+          <Panel
+            title="Explore Moves"
+            subtitle="Generate legal plays for the current rack."
+            density="compact"
+            accent={showMoves}
           >
-            {eventLogText}
-          </pre>
-        )}
+            <div className={styles.buttonRow}>
+              <button
+                onClick={() => fetchMoves()}
+                disabled={!game || loadingMoves || (useDict && !dictReady) || use3D}
+              >
+                {showMoves ? 'Refresh legal moves' : 'Show legal moves'}
+              </button>
+              {showMoves && (
+                <button
+                  onClick={() => {
+                    setShowMoves(false);
+                    setLegalMoves([]);
+                    setActiveMoveIndex(null);
+                  }}
+                >
+                  Hide list
+                </button>
+              )}
+            </div>
+            {showMoves && (
+              <div className={styles.movesList}>
+                {legalMoves.length === 0 && !loadingMoves && (
+                  <div className={styles.helperText}>No moves available for the current rack.</div>
+                )}
+                {legalMoves.map((mv, idx) => (
+                  <div key={`${mv.word}-${idx}`} data-testid={`legal-move-${idx}`} className={styles.moveCard}>
+                    <div className={styles.moveHeader}>
+                      <span>#{idx + 1}</span>
+                      <strong>{mv.word}</strong>
+                      <span className={styles.moveScore}>{mv.total ?? mv.score} pts</span>
+                    </div>
+                    <div className={styles.buttonRow}>
+                      <button type="button" onClick={() => setActiveMoveIndex(idx)}>
+                        Highlight
+                      </button>
+                      <button type="button" onClick={() => playGeneratedMove(mv)}>
+                        Play move
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {loadingMoves && <div className={styles.helperText}>Loading legal moves…</div>}
+          </Panel>
+
+          <Panel title="Snapshots & Log" subtitle="Export state or inspect history." density="compact">
+            <textarea
+              value={snapshotText}
+              onChange={e => setSnapshotText(e.target.value)}
+              rows={5}
+              className={styles.snapshotArea}
+              placeholder="Click Save snapshot to capture the current game state"
+            />
+            <div className={styles.buttonRow}>
+              <button onClick={exportSnapshot} disabled={!game}>Save snapshot</button>
+              <button onClick={importSnapshot} disabled={!game || snapshotText.trim() === ''}>Load snapshot</button>
+              <button onClick={fetchEventLog} disabled={!game}>Show event log</button>
+            </div>
+            {eventLogText && (
+              <pre className={styles.logViewer}>{eventLogText}</pre>
+            )}
+          </Panel>
+        </aside>
       </div>
     </div>
   );
