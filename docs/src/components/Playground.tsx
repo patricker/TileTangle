@@ -406,6 +406,10 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const [useHex, setUseHex] = useState(initial?.useHex ?? false);
   const [useDiag, setUseDiag] = useState(initial?.useDiag ?? false);
   const [use3D, setUse3D] = useState(initial?.use3D ?? false);
+  const [draftAdjacencyMode, setDraftAdjacencyMode] = useState<'orthogonal' | 'diagonal' | 'hex'>(
+    initial?.useHex ? 'hex' : initial?.useDiag ? 'diagonal' : 'orthogonal',
+  );
+  const [draftDimensionMode, setDraftDimensionMode] = useState<'2d' | '3d'>(initial?.use3D ? '3d' : '2d');
   const [rtl, setRtl] = useState(initial?.rtl ?? false);
   const [stackOn, setStackOn] = useState(initial?.stackOn ?? false);
   const [stackScoring, setStackScoring] = useState<'top' | 'sum'>(initial?.stackScoring ?? 'top');
@@ -1174,7 +1178,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     }
   }, [game, useWorker, applySnapshot]);
 
-  const applySettings = useCallback((settings: SetupState) => {
+  const applySettings = useCallback((settings: SetupState): boolean => {
     const width = clamp(settings.width, 2, 30);
     const height = clamp(settings.height, 2, 30);
     const depth = clamp(settings.depth, 1, 12);
@@ -1182,16 +1186,16 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     const countsParsed = parseTileCounts(settings.tileCountsText, defaultTileCounts);
     if (countsParsed.error) {
       setTileCountsError(countsParsed.error);
-      return;
+      return false;
     }
     const scoresParsed = parseTileScores(settings.tileScoresText, defaultTileScores);
     if (scoresParsed.error) {
       setTileScoresError(scoresParsed.error);
-      return;
+      return false;
     }
     setTileCountsError(null);
     setTileScoresError(null);
-    setAppliedSettings({
+    const nextSettings: SetupState = {
       width,
       height,
       depth,
@@ -1199,15 +1203,36 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       tileCountsText: formatTileCounts(countsParsed.map),
       tileScoresText: formatTileScores(scoresParsed.map),
       shape: settings.shape,
-    });
+    };
+    setAppliedSettings(nextSettings);
+    setDraftSettings(prev => ({
+      ...prev,
+      width,
+      height,
+      depth,
+      rackSize,
+      tileCountsText: nextSettings.tileCountsText,
+      tileScoresText: nextSettings.tileScoresText,
+      shape: settings.shape,
+    }));
     setDictMessagesVersion(v => v + 1);
+    return true;
   }, [defaultTileCounts, defaultTileScores]);
 
   const handleApplySettings = useCallback(() => {
-    applySettings(draftSettings);
-  }, [applySettings, draftSettings]);
+    const ok = applySettings(draftSettings);
+    if (!ok) return;
+    setUseHex(draftAdjacencyMode === 'hex');
+    setUseDiag(draftAdjacencyMode === 'diagonal');
+    const enable3D = draftDimensionMode === '3d';
+    setUse3D(enable3D);
+    if (!enable3D) {
+      setZ(0);
+      setInfoMessage(null);
+    }
+  }, [applySettings, draftSettings, draftAdjacencyMode, draftDimensionMode]);
 
-  const dedupeMoves = (moves: GeneratedMove[]): GeneratedMove[] => {
+  const dedupeMoves = useCallback((moves: GeneratedMove[]): GeneratedMove[] => {
     const map = new Map<string, GeneratedMove>();
     for (const mv of moves) {
       const placements = [...mv.placements]
@@ -1219,7 +1244,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       }
     }
     return Array.from(map.values());
-  };
+  }, []);
 
   const fetchMoves = useCallback(async () => {
     if (!game) return;
@@ -1351,7 +1376,48 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     } catch (err) {
       console.warn('best_move failed', err);
       const message = err instanceof Error ? err.message : String(err);
-      if (message.toLowerCase().includes('no moves available')) {
+      const lowered = message.toLowerCase();
+      if (lowered.includes('unreachable')) {
+        try {
+          let movesJson: string;
+          const limit = 50;
+          if (useWorker) {
+            const resp = await game.call('generate_moves', {max_len: appliedSettings.rackSize, limit});
+            movesJson = String(resp.moves ?? '[]');
+          } else {
+            movesJson = game.mod.generate_moves(game.g, appliedSettings.rackSize, limit);
+          }
+          const moves: GeneratedMove[] = dedupeMoves(JSON.parse(movesJson) as GeneratedMove[]);
+          if (moves.length === 0) {
+            setCpuSuggestion(null);
+            setCpuError('CPU has no available moves for the current rack.');
+          } else {
+            const best = moves.reduce((acc, mv) => {
+              const total = mv.total ?? mv.score ?? 0;
+              const accTotal = acc?.total ?? acc?.score ?? Number.NEGATIVE_INFINITY;
+              return total > accTotal ? mv : acc;
+            }, moves[0]);
+            const placements: Placement[] = best.placements.map(p => ({x: p.x, y: p.y, kind_id: p.kind_id, mark: p.mark ?? null}));
+            const suggestion: AiSuggestion = {
+              difficulty: cpuDifficulty,
+              word: best.word,
+              score: best.score,
+              total: best.total ?? best.score,
+              rackLeave: 0,
+              boardEquity: 0,
+              endgamePenalty: 0,
+              placements,
+            };
+            setCpuSuggestion(suggestion);
+            setLastCpu(suggestion);
+            setCpuError(null);
+          }
+          return;
+        } catch (fallbackErr) {
+          console.warn('CPU fallback from generate_moves failed', fallbackErr);
+        }
+      }
+      if (lowered.includes('no moves available')) {
         setCpuError('CPU has no available moves for the current rack.');
       } else {
         setCpuError(`CPU hint failed: ${message}`);
@@ -1360,7 +1426,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     } finally {
       setCpuThinking(false);
     }
-  }, [game, useWorker, cpuDifficulty, dictReady, use3D]);
+  }, [game, useWorker, cpuDifficulty, dictReady, use3D, appliedSettings.rackSize, dedupeMoves]);
 
   const playCpuSuggestion = useCallback(async () => {
     if (!cpuSuggestion) return;
@@ -1524,42 +1590,30 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     return entries.join(', ');
   }, [bagSummary]);
 
-  const adjacencyMode = useMemo(() => {
+  const appliedAdjacencyMode = useMemo(() => {
     if (useHex) return 'hex';
     if (useDiag) return 'diagonal';
     return 'orthogonal';
   }, [useHex, useDiag]);
 
   const handleAdjacencyModeChange = useCallback((mode: string) => {
-    if (mode === 'hex') {
-      setUseHex(true);
-      setUseDiag(false);
-      setUse3D(false);
+    const next = mode as 'orthogonal' | 'diagonal' | 'hex';
+    setDraftAdjacencyMode(next);
+    if (next === 'hex') {
       setDraftSettings(prev => ({...prev, shape: 'diamond'}));
-      return;
+      setDraftDimensionMode('2d');
+    } else if (next === 'diagonal') {
+      setDraftDimensionMode('2d');
     }
-    if (mode === 'diagonal') {
-      setUseDiag(true);
-      setUseHex(false);
-      return;
-    }
-    setUseHex(false);
-    setUseDiag(false);
-  }, [setUseDiag, setUseHex, setUse3D]);
-
-  const dimensionMode = use3D ? '3d' : '2d';
+  }, []);
 
   const handleDimensionModeChange = useCallback((mode: string) => {
-    if (mode === '3d') {
-      setUse3D(true);
-      setUseHex(false);
-      setUseDiag(false);
-      return;
+    const next = mode as '2d' | '3d';
+    setDraftDimensionMode(next);
+    if (next === '3d') {
+      setDraftAdjacencyMode('orthogonal');
     }
-    setUse3D(false);
-    setZ(0);
-    setInfoMessage(null);
-  }, [setUse3D, setUseHex, setUseDiag, setZ, setInfoMessage]);
+  }, []);
 
   const boardSizeLabel = useMemo(() => {
     const size = `${appliedSettings.width}×${appliedSettings.height}`;
@@ -1570,10 +1624,10 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   }, [appliedSettings.width, appliedSettings.height, appliedSettings.depth, use3D]);
 
   const adjacencyLabel = useMemo(() => {
-    if (adjacencyMode === 'hex') return 'Hex graph';
-    if (adjacencyMode === 'diagonal') return 'Diagonal';
+    if (appliedAdjacencyMode === 'hex') return 'Hex graph';
+    if (appliedAdjacencyMode === 'diagonal') return 'Diagonal';
     return 'Orthogonal';
-  }, [adjacencyMode]);
+  }, [appliedAdjacencyMode]);
 
   const dimensionLabel = useMemo(() => {
     if (use3D) {
@@ -1600,6 +1654,8 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       title: 'Classic 15×15',
       description: 'Crossword feel with orthogonal adjacency and rack of seven.',
       onApply: () => {
+        const adjacency = 'orthogonal' as const;
+        const dimension = '2d' as const;
         const next: SetupState = {
           width: 15,
           height: 15,
@@ -1610,13 +1666,18 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           shape: 'rect',
         };
         setDraftSettings(next);
-        setUseHex(false);
-        setUseDiag(false);
-        setUse3D(false);
+        setDraftAdjacencyMode(adjacency);
+        setDraftDimensionMode(dimension);
         setCpuSuggestion(null);
         setLastCpu(null);
         setPending([]);
-        applySettings(next);
+        const ok = applySettings(next);
+        if (!ok) return;
+        setUseHex(false);
+        setUseDiag(false);
+        setUse3D(false);
+        setZ(0);
+        setInfoMessage(null);
       },
     },
     {
@@ -1624,6 +1685,8 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       title: 'Hex Garden',
       description: 'Diamond mask with full hex connectivity.',
       onApply: () => {
+        const adjacency = 'hex' as const;
+        const dimension = '2d' as const;
         const next: SetupState = {
           width: Math.max(7, appliedSettings.width),
           height: Math.max(7, appliedSettings.height),
@@ -1634,13 +1697,18 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           shape: 'diamond',
         };
         setDraftSettings(next);
-        setUseHex(true);
-        setUseDiag(false);
-        setUse3D(false);
+        setDraftAdjacencyMode(adjacency);
+        setDraftDimensionMode(dimension);
         setCpuSuggestion(null);
         setLastCpu(null);
         setPending([]);
-        applySettings(next);
+        const ok = applySettings(next);
+        if (!ok) return;
+        setUseHex(true);
+        setUseDiag(false);
+        setUse3D(false);
+        setZ(0);
+        setInfoMessage(null);
       },
     },
     {
@@ -1648,6 +1716,8 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       title: 'Sprint 11×11',
       description: 'Smaller board, six-tile rack, great for quick rounds.',
       onApply: () => {
+        const adjacency = 'diagonal' as const;
+        const dimension = '2d' as const;
         const next: SetupState = {
           width: 11,
           height: 11,
@@ -1658,13 +1728,18 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           shape: 'rect',
         };
         setDraftSettings(next);
-        setUseHex(false);
-        setUseDiag(true);
-        setUse3D(false);
+        setDraftAdjacencyMode(adjacency);
+        setDraftDimensionMode(dimension);
         setCpuSuggestion(null);
         setLastCpu(null);
         setPending([]);
-        applySettings(next);
+        const ok = applySettings(next);
+        if (!ok) return;
+        setUseHex(false);
+        setUseDiag(true);
+        setUse3D(false);
+        setZ(0);
+        setInfoMessage(null);
       },
     },
     {
@@ -1672,6 +1747,8 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       title: '3D Tower',
       description: 'Nine-by-nine with layered play; perfect for stack mode.',
       onApply: () => {
+        const adjacency = 'orthogonal' as const;
+        const dimension = '3d' as const;
         const next: SetupState = {
           width: 9,
           height: 9,
@@ -1682,14 +1759,17 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           shape: 'rect',
         };
         setDraftSettings(next);
-        setUseHex(false);
-        setUseDiag(false);
-        setUse3D(true);
+        setDraftAdjacencyMode(adjacency);
+        setDraftDimensionMode(dimension);
         setZ(0);
         setCpuSuggestion(null);
         setLastCpu(null);
         setPending([]);
-        applySettings(next);
+        const ok = applySettings(next);
+        if (!ok) return;
+        setUseHex(false);
+        setUseDiag(false);
+        setUse3D(true);
       },
     },
   ], [
@@ -1700,14 +1780,16 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     applySettings,
     draftSettings.tileCountsText,
     draftSettings.tileScoresText,
-    setUseHex,
-    setUseDiag,
-    setUse3D,
+    setDraftAdjacencyMode,
+    setDraftDimensionMode,
     setCpuSuggestion,
     setLastCpu,
     setPending,
-    setDraftSettings,
+    setUseHex,
+    setUseDiag,
+    setUse3D,
     setZ,
+    setInfoMessage,
   ]);
 
   const themeVars = useMemo(() => ({
@@ -1738,55 +1820,73 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   }) as React.CSSProperties, [palette]);
 
   const layerHeight = use3D && board ? Math.floor(board.height / Math.max(1, effectiveDepth)) : board?.height ?? 0;
+  const cellSize = useMemo(() => {
+    if (!board) return 32;
+    const target = use3D ? 420 : 560;
+    const computed = Math.floor(target / Math.max(board.width, 1));
+    return clamp(computed, 22, 44);
+  }, [board, use3D]);
+
+  const cellGap = useMemo(() => Math.max(2, Math.min(6, Math.round(cellSize * 0.12))), [cellSize]);
+  const tileFontSize = useMemo(() => Math.max(12, Math.round(cellSize * 0.62)), [cellSize]);
+  const tileScoreFontSize = useMemo(() => Math.max(9, Math.round(cellSize * 0.26)), [cellSize]);
+  const rackTileSize = useMemo(() => Math.max(34, cellSize + 6), [cellSize]);
+  const rackFontSize = useMemo(() => Math.max(12, Math.round(rackTileSize * 0.55)), [rackTileSize]);
+  const rackScoreFont = useMemo(() => Math.max(10, Math.round(rackTileSize * 0.28)), [rackTileSize]);
 
   if (!ready || !board) {
-    return <div className={styles.loading}>Loading WASM…</div>;
+    return (
+      <div className={styles.breakout}>
+        <div className={styles.loading}>Loading WASM…</div>
+      </div>
+    );
   }
 
   return (
-    <div className={styles.shell} style={themeVars}>
-      <header className={styles.hero}>
-        <div className={styles.heroCopy}>
-          <div className={styles.heroEyebrow}>TileTangle Playground</div>
-          <h2 className={styles.heroTitle}>Design. Experiment. Solve.</h2>
-          <p className={styles.heroDescription}>
-            Tune adjacency, stack rules, and automation to watch the engine reshape every move in real time.
-          </p>
-          <div className={styles.heroStatsRow}>
-            {heroStats.map(stat => (
-              <StatChip key={stat.label} label={stat.label} value={stat.value} />
-            ))}
-            <StatChip label="Automation" value={cpuLabel} />
+    <div className={styles.breakout}>
+      <div className={styles.shell} style={themeVars}>
+        <header className={styles.hero}>
+          <div className={styles.heroCopy}>
+            <div className={styles.heroEyebrow}>TileTangle Playground</div>
+            <h2 className={styles.heroTitle}>Design. Experiment. Solve.</h2>
+            <p className={styles.heroDescription}>
+              Tune adjacency, stack rules, and automation to watch the engine reshape every move in real time.
+            </p>
+            <div className={styles.heroStatsRow}>
+              {heroStats.map(stat => (
+                <StatChip key={stat.label} label={stat.label} value={stat.value} />
+              ))}
+              <StatChip label="Automation" value={cpuLabel} />
+            </div>
           </div>
-        </div>
-        <div className={styles.heroPresets}>
-          <div className={styles.presetsHeading}>Quick presets</div>
-          <div className={styles.presetGrid}>
-            {quickPresets.map(preset => (
-              <button
-                key={preset.id}
-                type="button"
-                className={styles.presetCard}
-                onClick={preset.onApply}
-              >
-                <span className={styles.presetTitle}>{preset.title}</span>
-                <span className={styles.presetDescription}>{preset.description}</span>
-              </button>
-            ))}
+          <div className={styles.heroPresets}>
+            <div className={styles.presetsHeading}>Quick presets</div>
+            <div className={styles.presetGrid}>
+              {quickPresets.map(preset => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={styles.presetCard}
+                  onClick={preset.onApply}
+                >
+                  <span className={styles.presetTitle}>{preset.title}</span>
+                  <span className={styles.presetDescription}>{preset.description}</span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      </header>
-      {(errorMessage || dictError || cpuError || infoMessage) && (
-        <div className={styles.alertStack}>
-          {errorMessage && <div className={`${styles.alert} ${styles.alertError}`}>{errorMessage}</div>}
-          {dictError && <div className={`${styles.alert} ${styles.alertWarning}`}>{dictError}</div>}
-          {cpuError && <div className={`${styles.alert} ${styles.alertWarning}`}>{cpuError}</div>}
-          {infoMessage && <div className={`${styles.alert} ${styles.alertInfo}`}>{infoMessage}</div>}
-        </div>
-      )}
+        </header>
+        {(errorMessage || dictError || cpuError || infoMessage) && (
+          <div className={styles.alertStack}>
+            {errorMessage && <div className={`${styles.alert} ${styles.alertError}`}>{errorMessage}</div>}
+            {dictError && <div className={`${styles.alert} ${styles.alertWarning}`}>{dictError}</div>}
+            {cpuError && <div className={`${styles.alert} ${styles.alertWarning}`}>{cpuError}</div>}
+            {infoMessage && <div className={`${styles.alert} ${styles.alertInfo}`}>{infoMessage}</div>}
+          </div>
+        )}
 
-      <div className={styles.layout}>
-        <aside className={styles.sidebar}>
+        <div className={styles.layout}>
+          <aside className={styles.sidebar}>
           <Panel
             title="Board Setup"
             subtitle="Adjust dimensions and masks, then relaunch with Apply."
@@ -2008,7 +2108,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
             <div className={styles.boardWrapper}>
               <div
                 className={styles.boardGrid}
-                style={{gridTemplateColumns: `repeat(${board.width}, 28px)`}}
+                style={{gridTemplateColumns: `repeat(${board.width}, ${cellSize}px)`, gap: cellGap, margin: '0 auto'}}
               >
                 {Array.from({length: layerHeight}).map((_, y) => (
                   Array.from({length: board.width}).map((__, x) => {
@@ -2021,6 +2121,8 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
                     const symbol = meta?.symbol ?? tileId?.slice(0, 2) ?? '';
                     const score = meta?.score;
                     const cellStyle: React.CSSProperties = {
+                      width: cellSize,
+                      height: cellSize,
                       border: `1px solid ${palette.boardCellBorder}`,
                       background: highlighted
                         ? palette.boardCellHighlight
@@ -2030,6 +2132,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
                       fontWeight: highlighted ? 600 : 500,
                       opacity: activeCell ? 1 : 0.55,
                       cursor: activeCell ? 'default' : 'not-allowed',
+                      fontSize: tileFontSize,
                     };
                     return (
                       <div
@@ -2056,7 +2159,12 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
                       >
                         {symbol && <span>{symbol.slice(0, 2)}</span>}
                         {typeof score === 'number' && !Number.isNaN(score) && (
-                          <span className={styles.boardCellScore}>{score}</span>
+                          <span
+                            className={styles.boardCellScore}
+                            style={{fontSize: tileScoreFontSize, bottom: Math.max(2, Math.round(cellSize * 0.12)), right: Math.max(2, Math.round(cellSize * 0.12))}}
+                          >
+                            {score}
+                          </span>
                         )}
                       </div>
                     );
@@ -2092,11 +2200,12 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
                       data-testid="playground-rack-tile"
                       data-kind={id}
                       className={styles.rackTile}
+                      style={{width: rackTileSize, height: rackTileSize, fontSize: rackFontSize}}
                       onDragStart={e => onDragStartTile(id, e)}
                     >
                       <span>{symbol.slice(0, 2)}</span>
                       {typeof score === 'number' && !Number.isNaN(score) && (
-                        <span className={styles.rackTileScore}>{score}</span>
+                        <span className={styles.rackTileScore} style={{fontSize: rackScoreFont}}>{score}</span>
                       )}
                     </div>
                   );
@@ -2170,7 +2279,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
               <div className={styles.modeLabel}>Adjacency</div>
               <SegmentedControl
                 name="Adjacency"
-                value={adjacencyMode}
+                value={draftAdjacencyMode}
                 onChange={handleAdjacencyModeChange}
                 options={[
                   {value: 'orthogonal', label: 'Orthogonal', hint: 'Classic'},
@@ -2183,7 +2292,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
               <div className={styles.modeLabel}>Dimensions</div>
               <SegmentedControl
                 name="Dimensions"
-                value={dimensionMode}
+                value={draftDimensionMode}
                 onChange={handleDimensionModeChange}
                 options={[
                   {value: '2d', label: '2D'},
@@ -2195,10 +2304,10 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
               <input type="checkbox" checked={useWorker} onChange={e => setUseWorker(e.target.checked)} />
               <span>Run heavy work in a Web Worker</span>
             </label>
-            {adjacencyMode === 'hex' && (
+            {draftAdjacencyMode === 'hex' && (
               <div className={styles.helperText}>Hex adjacency uses staggered rows with three axes (E, NE, SE).</div>
             )}
-            {adjacencyMode === 'diagonal' && (
+            {draftAdjacencyMode === 'diagonal' && (
               <div className={styles.helperText}>Diagonal mode enables moves along all eight directions.</div>
             )}
           </Panel>
@@ -2323,5 +2432,6 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
         </aside>
       </div>
     </div>
+  </div>
   );
 }

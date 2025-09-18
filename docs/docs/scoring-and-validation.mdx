@@ -1,0 +1,183 @@
+---
+id: scoring-and-validation
+title: Move Validation & Scoring
+description: How the engine validates moves across rect, graph, and 3D boards—plus how scores are assembled, bonuses applied, and animations tie in.
+sidebar_position: 5
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+import Link from '@docusaurus/Link';
+
+The engine treats **validation** and **scoring** as two halves of the same pipeline. Validation proves that
+an incoming move is legal for the current geometry and rule set; scoring then walks the validated placements
+and totals every affected word using the active bonuses, stacking mode, and bingo rules.
+
+Use this page together with the <Link to="/docs/animated-move-breakdown">Animated Move Breakdown</Link>
+for a visual walkthrough, and the <Link to="/docs/move-generation">Move Generation</Link> chapter to see
+how the rules feed back into automated search.
+
+## Validation pipeline
+
+1. **Collect placements** – The caller provides board coordinates plus a tile payload (`kind_id`, optional
+   `mark`, and for blanks the `as_symbol`). For graph boards, coordinates are node IDs; for grids they are
+   `(x, y)` pairs.
+2. **Check occupancy & rack** – No placement may overwrite an existing tile unless stacking is enabled and
+   the stack height limit allows it. Rack multiset counts ensure you cannot place the same tile twice.
+3. **Detect direction** –
+   - Rectangular boards infer a direction (row/column) by inspecting whether all `x` or all `y` coordinates
+     are equal.
+   - Graph boards follow their `DirTag` metadata. Placements must lie on a path where every consecutive
+     edge shares the same direction family (e.g. `E`, `NE`, `SE` for hex boards).
+   - 3D boards treat layer offsets as an additional direction family (`Up`, `Down`).
+4. **Contiguity** – The placements are sorted along the inferred vector. The validator confirms that
+   there are no gaps between newly placed tiles after accounting for existing board tiles. First move must
+   anchor the origin node/center cell; subsequent moves must touch at least one existing tile (or stack).
+5. **Dictionary / rule plugins** – The `RulePlugin` chain runs `pre_validate` hooks, then dictionary lookups
+   (unless free-word mode is active) for the main word plus every crossing word. Custom plugins may apply
+   extra checks (e.g., forbidding diagonals, stacking restrictions, or alternate scoring prototypes).
+6. **Produce `ValidatedMove`** – The engine returns a rich object holding sorted placements, affected
+   words, applied bonuses, and any plugin annotations so the scoring phase can run without recomputing
+   geometry.
+
+:::tip Graph & Hex Boards
+The validator only requires that the provided graph has consistent direction metadata. You can generate
+it through the helper mask builders used by the Playground (`BoardGraph::from_mask`) or load it from JSON.
+Line detection works even for irregular shapes (holes, diamonds) because the direction test relies on
+edge labels, not cartesian math.
+:::
+
+:::info Stacking & 3D
+If stacking is enabled (`stack_on = true`), validation ensures the target stack height does not exceed
+`max_height` and optional `forbid_same` rules are respected. For 3D boards the validator flattens a `(x, y, z)`
+placement into a virtual row so that scoring can keep using the existing 2D matrix representation while the
+slice slider rewinds the correct layer.
+:::
+
+## Scoring pipeline
+
+1. **Letter base values** – Each placement contributes its letter score. For blanks, the mapped symbol is
+   used for dictionary checks but the base value remains the blank’s configured score (often zero).
+2. **Letter bonuses** – Only *newly placed* tiles receive letter multipliers (double/triple letter etc.).
+   Stacking adds the multiplier to the tile on top of the stack only.
+3. **Word bonuses** – Word multipliers apply once per word if any newly placed tile sits on the bonus. The
+   default implementation matches Scrabble™, but plugins can swap in alternate behavior.
+4. **Cross words** – Every perpendicular word is scored with the same rules (letter bonus for new tiles,
+   word multipliers from cells touched by the placement). Total score is the sum of the main word and all
+   cross words.
+5. **Bingos / combo bonuses** – If the move uses all tiles from the player’s rack, the bingo bonus defined
+   in the ruleset is added. Additional plugin-specific bonuses (e.g., directional achievements) run here.
+6. **Stack scoring modes** – Rules expose `StackScoring::TopOnly` (default) and `StackScoring::SumStack`.
+   With `SumStack`, every tile already in the stack is added to the subtotal before word bonuses.
+7. **Audit trail** – The `ScoreBreakdown` returned by the engine includes per-word subtotals, matched
+   bonuses, and plugin annotations so the UI can display a detailed breakdown or feed animations.
+
+:::note
+All calculations happen in integer space. If you add custom plugins that apply fractional modifiers, pair
+them with a deterministic rounding strategy to keep cross-binding parity.
+:::
+
+## Worked examples
+
+<Tabs groupId="examples">
+  <TabItem value="classic" label="Classic 2D">  
+
+**Scenario:** Playing `READ` through the center on a 15×15 classic board.
+
+- Valid because the placements form a straight horizontal line, touch the center, and abut existing tiles.
+- Letter scores: `R=1, E=1, A=1, D=2` → subtotal `5`.
+- Word multiplier: center cell → `×2` → `10` total.
+
+```rust
+let mut engine = Engine::default();
+let mut state = engine.new_game(GameConfig::classic())?;
+let placements = placements!(
+    (7, 7) => "R",
+    (8, 7) => "E",
+    (9, 7) => "A",
+    (10, 7) => "D",
+);
+let validated = engine.rules().validate(&state, &placements)?;
+let score = engine.rules().score(&state, &validated);
+engine.rules().commit(&mut state, validated, &score)?;
+assert_eq!(score.total, 10);
+```
+
+See the <Link to="/docs/animated-move-breakdown">animated breakdown</Link> for a frame-by-frame highlight of
+this example.
+  </TabItem>
+  <TabItem value="stack" label="Stacking bingo">  
+
+**Scenario:** Upwords-style stack with `SumStack` scoring and a full-rack bonus.
+
+- Placement overlays tiles at `(7, 7)` up to height `3`; validation ensures `max_height` is not exceeded and
+  you are not placing the same symbol twice if `forbid_same` is true.
+- Letter subtotal includes the previous stack values because of `SumStack`.
+- Word bonus is applied once after stacking subtotal is computed.
+- Rack exhausted → default bingo bonus (+50) appended.
+
+```rust
+let mut rules = CrosswordRules::default();
+rules.stack_on = true;
+rules.stack_scoring = StackScoring::SumStack;
+let mut state = rules.new_game(GameConfig::stacking_demo())?;
+let placements = placements!(
+    (7, 7) => "N",
+    (7, 8) => "E",
+    (7, 9) => "T",
+);
+let validated = rules.validate(&state, &placements)?;
+let score = rules.score(&state, &validated);
+assert!(score.bingo_awarded);
+rules.commit(&mut state, validated, &score)?;
+```
+
+The resulting `ScoreBreakdown` includes `stack_contributions` entries for UI overlays.
+  </TabItem>
+  <TabItem value="graph" label="Hex graph">  
+
+**Scenario:** Hex configuration generated from a diamond mask with hex adjacency enabled.
+
+- Direction is derived from edge tags (`E`, `NE`, `SE`). The move is only legal if placements follow one of
+  these axes without switching direction mid-word.
+- Cross checks leverage the same adjacency metadata, so perpendicular words use the correct hex neighbors.
+
+```json
+{
+  "board_layout": {
+    "type": "graph",
+    "preset": "hex-diamond",
+    "width": 9,
+    "height": 9
+  },
+  "ruleset_id": "crossword_hex",
+  "dictionary_id": "en_test_small"
+}
+```
+
+The validator constructs a `ValidatedMove` whose `axis` field is `DirTag::East`, and the scoring phase lists
+hex-shaped cross words in its breakdown.
+  </TabItem>
+</Tabs>
+
+## Animations & UI hooks
+
+- The Playground consumes the `ScoreBreakdown` to drive callouts for **letter totals**, **word multipliers**,
+  and **cross-word subtotals**. Toggle “Show legal moves” to see the validator/generator pipeline in action.
+- The <Link to="/docs/animated-move-breakdown">Animated Move Breakdown</Link> page embeds a self-contained SVG
+  that reads the same data the engine exposes—perfect for docs and release notes.
+- Unity and Godot bindings use the same breakdown structure to flash tile bonuses and stack heights.
+
+## FAQ
+
+- **Can I bypass dictionary checks?** Yes. Call `set_free_word_mode(true)` (WASM/FFI) or set
+  `rules.free_word_mode = true` (Rust) to skip dictionary validation while still enforcing geometry rules.
+- **How are blanks scored?** The blank symbol is attached during validation; the scoring phase uses the
+  blank’s intrinsic value (often `0`) but still remembers the chosen letter for future cross checks.
+- **What about simultaneous words (e.g., hooks)?** Every affected coordinate is visited exactly once, so the
+  breakdown lists one entry per formed word. Cross words with zero length (no new tile touched) are skipped.
+- **Can plugins override scoring?** Yes. A plugin can mutate the `ScoreBreakdown` during `score_hooks` to add
+  custom bonuses or penalties, but should avoid removing core entries to keep bindings consistent.
+
+With these rules in place, your bindings and UI can surface precise scoring summaries while maintaining
+legality across every supported geometry.
