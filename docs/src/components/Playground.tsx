@@ -667,17 +667,22 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       boardLayout = {type: '3d', width, height, depth: layoutDepth};
     } else if (useDiag) {
       const nodes: {x: number; y: number}[] = [];
+      const coordToIndex = new Map<string, number>();
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-          if (isActive(x, y)) nodes.push({x, y});
+          if (!isActive(x, y)) continue;
+          const idx = nodes.push({x, y}) - 1;
+          coordToIndex.set(`${x},${y}`, idx);
         }
       }
-      const index = (x: number, y: number) => y * width + x;
       const edges: {a: number; b: number; dir: string}[] = [];
       const addEdge = (x1: number, y1: number, x2: number, y2: number, dir: string) => {
         if (x2 < 0 || x2 >= width || y2 < 0 || y2 >= height) return;
         if (!isActive(x1, y1) || !isActive(x2, y2)) return;
-        edges.push({a: index(x1, y1), b: index(x2, y2), dir});
+        const a = coordToIndex.get(`${x1},${y1}`);
+        const b = coordToIndex.get(`${x2},${y2}`);
+        if (a === undefined || b === undefined) return;
+        edges.push({a, b, dir});
       };
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -695,17 +700,22 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       boardLayout = {width, height, type: 'graph', nodes, edges};
     } else if (useHex) {
       const nodes: {x: number; y: number}[] = [];
+      const coordToIndex = new Map<string, number>();
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-          if (isActive(x, y)) nodes.push({x, y});
+          if (!isActive(x, y)) continue;
+          const idx = nodes.push({x, y}) - 1;
+          coordToIndex.set(`${x},${y}`, idx);
         }
       }
-      const index = (x: number, y: number) => y * width + x;
       const edges: {a: number; b: number; dir: string}[] = [];
       const addEdge = (x1: number, y1: number, x2: number, y2: number, dir: string) => {
         if (x2 < 0 || x2 >= width || y2 < 0 || y2 >= height) return;
         if (!isActive(x1, y1) || !isActive(x2, y2)) return;
-        edges.push({a: index(x1, y1), b: index(x2, y2), dir});
+        const a = coordToIndex.get(`${x1},${y1}`);
+        const b = coordToIndex.get(`${x2},${y2}`);
+        if (a === undefined || b === undefined) return;
+        edges.push({a, b, dir});
       };
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -724,17 +734,22 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       boardLayout = {width, height, type: 'graph', nodes, edges};
     } else if (shapeHasMask) {
       const nodes: {x: number; y: number}[] = [];
+      const coordToIndex = new Map<string, number>();
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-          if (isActive(x, y)) nodes.push({x, y});
+          if (!isActive(x, y)) continue;
+          const idx = nodes.push({x, y}) - 1;
+          coordToIndex.set(`${x},${y}`, idx);
         }
       }
-      const index = (x: number, y: number) => y * width + x;
       const edges: {a: number; b: number; dir: string}[] = [];
       const addEdge = (x1: number, y1: number, x2: number, y2: number, dir: string) => {
         if (x2 < 0 || x2 >= width || y2 < 0 || y2 >= height) return;
         if (!isActive(x1, y1) || !isActive(x2, y2)) return;
-        edges.push({a: index(x1, y1), b: index(x2, y2), dir});
+        const a = coordToIndex.get(`${x1},${y1}`);
+        const b = coordToIndex.get(`${x2},${y2}`);
+        if (a === undefined || b === undefined) return;
+        edges.push({a, b, dir});
       };
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -949,6 +964,19 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
         }
       } catch (err) {
         console.error('Initialise playground failed', err);
+        if (!useWorker) {
+          try {
+            const mod = wasmModuleRef.current;
+            if (mod && typeof mod.last_error === 'function') {
+              const last = mod.last_error();
+              if (last) {
+                console.error('WASM last_error:', last);
+              }
+            }
+          } catch (inner) {
+            console.error('Failed to read WASM last_error', inner);
+          }
+        }
         if (!cancelled) {
           setDictError('Initialisation failed. Check console for details.');
           setDictReady(false);
@@ -964,7 +992,6 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
 
     return () => {
       cancelled = true;
-      terminateWorker();
     };
   }, [
     cfg,
@@ -981,6 +1008,12 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     ensureWasmModule,
     terminateWorker,
   ]);
+
+  useEffect(() => {
+    return () => {
+      terminateWorker();
+    };
+  }, [terminateWorker]);
 
   const applySnapshot = useCallback((boardJson: BoardJson, snapshotJson: string) => {
     setBoard(boardJson);
@@ -1462,6 +1495,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
         <label>Shape:
           <select
             value={draftSettings.shape}
+            data-testid="board-shape-select"
             onChange={e => setDraftSettings(prev => ({...prev, shape: e.target.value as BoardShape}))}
           >
             <option value="rect">Full grid</option>
@@ -1614,6 +1648,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           <input
             type="checkbox"
             checked={useHex}
+            data-testid="toggle-hex-adjacency"
             onChange={e => {
               setUseHex(e.target.checked);
               if (e.target.checked) {
@@ -1874,6 +1909,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
                   data-testid="playground-board-cell"
                   data-x={x}
                   data-y={globalY}
+                  data-active={activeCell ? '1' : '0'}
                   onDragOver={e => {
                     if (!activeCell) return;
                     e.preventDefault();

@@ -1,4 +1,22 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
+
+async function waitForPlaygroundReady(page: Page) {
+  const loader = page.locator('text=Loading WASM…');
+  await loader.waitFor({ state: 'attached', timeout: 2000 }).catch(() => {});
+  await loader.waitFor({ state: 'detached', timeout: 60000 }).catch(() => {});
+
+  await page.waitForSelector('[data-testid="playground-board-cell"]', { state: 'attached', timeout: 60000 });
+
+  const dictLoading = page.locator('[data-testid="dictionary-loading"]').first();
+  if ((await dictLoading.count()) > 0) {
+    await dictLoading.waitFor({ state: 'detached', timeout: 60000 }).catch(() => {});
+  }
+}
+
+async function openPlayground(page: Page) {
+  await page.goto('/docs/playground');
+  await waitForPlaygroundReady(page);
+}
 
 test('homepage loads', async ({ page }) => {
   await page.goto('/');
@@ -91,6 +109,66 @@ test('playground legal moves are unique', async ({ page }) => {
   const moves = await page.$$eval('[data-testid^="legal-move-"]', nodes => nodes.map(n => n.textContent?.trim() || ''));
   const unique = new Set(moves);
   expect(unique.size).toBe(moves.length);
+});
+
+test('playground switches to diamond mask without errors', async ({ page }) => {
+  test.setTimeout(120000);
+  const errors: string[] = [];
+  page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()); });
+  page.on('pageerror', err => errors.push(err.message));
+
+  await openPlayground(page);
+
+  await page.getByTestId('board-shape-select').selectOption('diamond');
+  await page.getByRole('button', { name: 'Apply configuration' }).click();
+  await waitForPlaygroundReady(page);
+
+  const inactiveCells = await page.$$eval(
+    '[data-testid="playground-board-cell"][data-active="0"]',
+    nodes => nodes.length,
+  );
+  const activeCells = await page.$$eval(
+    '[data-testid="playground-board-cell"][data-active="1"]',
+    nodes => nodes.length,
+  );
+
+  expect(activeCells).toBeGreaterThan(0);
+  expect(inactiveCells).toBeGreaterThan(0);
+
+  const significantErrors = errors.filter(msg => !msg.includes('404'));
+  expect(significantErrors).toHaveLength(0);
+  await expect(page.locator('text=edge index out of range')).toHaveCount(0);
+  await expect(page.locator('text=Initialise playground failed')).toHaveCount(0);
+});
+
+test('playground toggles hex adjacency graph without errors', async ({ page }) => {
+  test.setTimeout(120000);
+  const errors: string[] = [];
+  page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()); });
+  page.on('pageerror', err => errors.push(err.message));
+
+  await openPlayground(page);
+  await page.getByTestId('toggle-hex-adjacency').check();
+  await page.getByRole('button', { name: 'Apply configuration' }).click();
+  await waitForPlaygroundReady(page);
+
+  await expect(page.locator('text=Hex adjacency uses staggered rows')).toBeVisible();
+
+  const activeCells = await page.$$eval(
+    '[data-testid="playground-board-cell"][data-active="1"]',
+    nodes => nodes.length,
+  );
+  const inactiveCells = await page.$$eval(
+    '[data-testid="playground-board-cell"][data-active="0"]',
+    nodes => nodes.length,
+  );
+  expect(activeCells).toBeGreaterThan(0);
+  expect(inactiveCells).toBeGreaterThan(0);
+
+  const significantErrors = errors.filter(msg => !msg.includes('404'));
+  expect(significantErrors).toHaveLength(0);
+  await expect(page.locator('text=edge index out of range')).toHaveCount(0);
+  await expect(page.locator('text=Initialise playground failed')).toHaveCount(0);
 });
 
 test('playground toggles 3D layers without errors', async ({ page }) => {

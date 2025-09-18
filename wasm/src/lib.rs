@@ -1,9 +1,15 @@
+use console_error_panic_hook as panic_hook;
 use engine::{self, AiConfig, AiDifficulty, BoardGeometry, Rules};
 use js_sys::Reflect;
 use serde::Deserialize;
 use serde_json::json;
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen(start)]
+pub fn start() {
+    panic_hook::set_once();
+}
 
 #[wasm_bindgen]
 pub struct JsGame {
@@ -395,18 +401,21 @@ fn snapshot_json(game: &JsGame) -> String {
     for y in 0..h {
         let mut row: Vec<Vec<serde_json::Value>> = Vec::new();
         for x in 0..w {
-            let id = game
+            let stack = if let Some(id) = game
                 .state
                 .board
                 .geom
                 .to_cell_id(engine::Coord2D { x, y })
-                .unwrap();
-            let cell = &game.state.board.cells[id.0 as usize];
-            let stack: Vec<serde_json::Value> = cell
-                .stack
-                .iter()
-                .map(|t| json!({"kind_id": t.kind_id, "mark": t.mark }))
-                .collect();
+            {
+                let cell = &game.state.board.cells[id.0 as usize];
+                cell
+                    .stack
+                    .iter()
+                    .map(|t| json!({"kind_id": t.kind_id, "mark": t.mark }))
+                    .collect()
+            } else {
+                Vec::new()
+            };
             row.push(stack);
         }
         rows.push(row);

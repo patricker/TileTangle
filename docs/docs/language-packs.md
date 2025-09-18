@@ -6,6 +6,9 @@ description: Configure normalization, reading direction, and custom tokenization
 TileTangle treats language behaviour as data. The same engine can validate English Scrabble, Hebrew
 crosswords, emoji anagrams, or half-width Japanese tiles—no code changes required.
 
+> **Tip:** Build dictionaries with the Rust API when you need advanced normalization or custom
+> tokenizers, then reuse the compiled artifacts (FST, DAWG, GADDAG) from Python, WASM, Unity, or Godot.
+
 ## Normalization & case-folding
 
 `DictionaryOptions` controls how input words are normalized before being stored. NFC is the default,
@@ -18,7 +21,8 @@ let opts = DictionaryOptions {
     norm: NormalizationMode::NFKC,
     case_fold: false,
     tokenizer: TokenizerRef::default(),
-    ..Default::default()
+    min_len: None,
+    max_len: None,
 };
 let dict = FstDictionary::from_words_opts(words, opts);
 ```
@@ -29,7 +33,7 @@ With this configuration a tile placed as `"ﾊﾟ"` will match the dictionary en
 
 Set `CrosswordRules::reading_dir` to `ReadingDirection::RTL` for scripts like Hebrew or Arabic. The
 validation and scoring pipeline now reads horizontal words right-to-left while continuing to render
-on a standard grid.
+on a standard grid. WASM/Unity/Godot expose `set_reading_direction(rtl)` for the same behaviour.
 
 ```rust
 let mut rules = CrosswordRules { free_word_mode: false, ..Default::default() };
@@ -47,6 +51,7 @@ dictionary via `TokenizerRef`:
 
 ```rust
 use std::sync::Arc;
+use unicode_segmentation::UnicodeSegmentation;
 use tiletangle_engine::{Tokenizer, TokenizerRef, DictionaryOptions, DawgDictionary};
 
 struct QuTokenizer;
@@ -67,10 +72,16 @@ impl Tokenizer for QuTokenizer {
 }
 
 let tokenizer = TokenizerRef::new(Arc::new(QuTokenizer));
-let opts = DictionaryOptions { tokenizer, ..Default::default() };
+let opts = DictionaryOptions {
+    tokenizer,
+    ..DictionaryOptions::default()
+};
 let dawgd = DawgDictionary::from_words_opts(vec!["squid".into()], opts);
 assert!(dawgd.has_prefix("squ"));
-```
+
+WASM bindings automatically use the default grapheme tokenizer. To reuse a custom tokenizer there,
+construct the dictionary in Rust (as above) and load the serialized bytes via
+`set_dictionary_from_fst_bytes`.
 
 The same tokenizer automatically flows into `GaddagDictionary` and the move generator, ensuring
 prefix walks and cross-checks stay in sync.
