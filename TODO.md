@@ -836,6 +836,16 @@ edges = [{a=0,b=1,dir="E"}, {a=0,b=2,dir="SE"}, {a=1,b=2,dir="SW"}]
 
 ---
 
+## Bindings Alignment TODO
+
+* Add a published feature matrix showing which capabilities (graph layouts, 3D, stacking, dictionary controls, undo/redo, AI, snapshots) exist per binding (WASM, C ABI/Unity, PyO3, Godot).
+* Expand each binding’s API to parity: expose stacking, dictionary selection, graph/3D layouts, undo/redo, and snapshots through C ABI, PyO3, and Godot wrappers.
+* Create shared JSON fixtures under `test_data/` and drive them through every binding (WASM tests, PyO3 pytest, C ABI harness, Godot headless test). Compare outputs to common snapshots.
+* Wire automated CI jobs: `wasm-pack test`, `pytest` for PyO3, `cargo test -p tiletangle-ffi` (C), `godot --headless --run-tests`, and a P/Invoke smoke test for Unity/C#.
+* Schedule nightly binding smoke tests that build each artifact (WASM bundle, Python wheel, C library, Godot GDExtension) and run the cross-binding fixture suite.
+
+---
+
 ## Documentation Pages Checklist (running list)
 
 * [ ] Getting Started (Rust / Python / Web / Unity / Godot).

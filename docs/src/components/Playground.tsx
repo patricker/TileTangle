@@ -1,4 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useColorMode} from '@docusaurus/theme-common';
 import {classicTilesets} from './demoUtils';
 
 const fallbackDictionaryWords = [
@@ -83,6 +84,47 @@ const parseTileScores = (text: string, fallback: Record<string, number>) => {
   return {map, error: null};
 };
 
+const buildShapeMask = (width: number, height: number, shape: BoardShape): Set<string> => {
+  const mask = new Set<string>();
+  if (width <= 0 || height <= 0) {
+    return mask;
+  }
+  const midX = Math.floor((width - 1) / 2);
+  const midY = Math.floor((height - 1) / 2);
+  const diamondRadius = Math.floor(Math.min(width, height) / 2);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const key = `${x},${y}`;
+      if (shape === 'rect') {
+        mask.add(key);
+        continue;
+      }
+      if (shape === 'diamond') {
+        const dist = Math.abs(x - midX) + Math.abs(y - midY);
+        if (dist <= diamondRadius) {
+          mask.add(key);
+        }
+        continue;
+      }
+      if (shape === 'cross') {
+        if (x === midX || y === midY) {
+          mask.add(key);
+        }
+        continue;
+      }
+    }
+  }
+  // Safety: if mask ended up empty (e.g. huge radius trimming), fall back to full rect
+  if (mask.size === 0) {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        mask.add(`${x},${y}`);
+      }
+    }
+  }
+  return mask;
+};
+
 type BoardJson = {width: number; height: number; rows: string[][]};
 type Placement = {x: number; y: number; kind_id: string; mark?: string | null};
 type GeneratedMove = {
@@ -151,6 +193,8 @@ type BagSummary = {
   total: number;
 };
 
+type BoardShape = 'rect' | 'diamond' | 'cross';
+
 type SetupState = {
   width: number;
   height: number;
@@ -158,6 +202,7 @@ type SetupState = {
   rackSize: number;
   tileCountsText: string;
   tileScoresText: string;
+  shape: BoardShape;
 };
 
 function ControlSection({title, children}: ControlSectionProps): JSX.Element {
@@ -174,8 +219,55 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const initialLayout = (initialConfig?.board_layout ?? {}) as Record<string, any>;
   const initialWidth = typeof initialLayout.width === 'number' && initialLayout.width > 0 ? initialLayout.width : 9;
   const initialHeight = typeof initialLayout.height === 'number' && initialLayout.height > 0 ? initialLayout.height : 9;
-  const initialDepth = typeof initialLayout.depth === 'number' && initialLayout.depth > 0 ? initialLayout.depth : (initial?.depth ?? 3);
+  const initialDepth = typeof initialLayout.depth === 'number' && initialLayout.depth > 0 ? initialLayout.depth : (initial?.depth ?? 1);
   const initialRackSize = initialConfig?.rack_size ?? 7;
+
+  const {colorMode} = useColorMode();
+
+  const palette = useMemo(() => {
+    if (colorMode === 'dark') {
+      return {
+        panelBg: 'rgba(26, 32, 44, 0.85)',
+        panelBorder: 'rgba(148, 163, 184, 0.35)',
+        playerActiveBg: 'rgba(56, 189, 248, 0.25)',
+        playerBg: 'rgba(30, 41, 59, 0.35)',
+        boardCellBg: 'rgba(15, 23, 42, 0.9)',
+        boardCellBorder: 'rgba(148, 163, 184, 0.35)',
+        boardCellHighlight: 'rgba(56, 189, 248, 0.35)',
+        rackTileBg: 'rgba(30, 41, 59, 0.85)',
+        rackTileBorder: 'rgba(148, 163, 184, 0.4)',
+        rackTileHighlight: 'rgba(56, 189, 248, 0.35)',
+        warningBg: 'rgba(234, 179, 8, 0.12)',
+        warningBorder: 'rgba(250, 204, 21, 0.45)',
+        errorBg: 'rgba(248, 113, 113, 0.12)',
+        errorBorder: 'rgba(248, 113, 113, 0.55)',
+        infoBg: 'rgba(59, 130, 246, 0.18)',
+        infoBorder: 'rgba(96, 165, 250, 0.5)',
+        accentBorder: 'rgba(59, 130, 246, 0.65)',
+        textSubtle: 'rgba(226, 232, 240, 0.75)',
+      } as const;
+    }
+    return {
+      panelBg: '#f9fafb',
+      panelBorder: 'var(--ifm-color-emphasis-200)',
+      playerActiveBg: '#e0f2fe',
+      playerBg: '#f9fafb',
+      boardCellBg: '#ffffff',
+      boardCellBorder: '#d1d5db',
+      boardCellHighlight: '#e0f2fe',
+      rackTileBg: '#f9fafb',
+      rackTileBorder: '#d1d5db',
+      rackTileHighlight: '#bae6fd',
+      warningBg: '#fef3c7',
+      warningBorder: '#facc15',
+      errorBg: '#fee2e2',
+      errorBorder: '#f87171',
+      infoBg: '#dbeafe',
+      infoBorder: '#60a5fa',
+      accentBorder: '#38bdf8',
+      textSubtle: 'rgba(15, 23, 42, 0.65)',
+    } as const;
+  }, [colorMode]);
 
   const classic = useMemo(() => classicTilesets(), []);
   const defaultTileKinds = useMemo(() => classic.tile_kinds, [classic]);
@@ -218,6 +310,64 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const [z, setZ] = useState(0);
   const rackOverrideRef = useRef<string[] | undefined>(initial?.rack);
   const workerRef = useRef<Worker | null>(null);
+  const workerRequestId = useRef(0);
+  const wasmModuleRef = useRef<any | null>(null);
+  const wasmModulePromiseRef = useRef<Promise<any> | null>(null);
+
+  const ensureWasmModule = useCallback(async () => {
+    if (wasmModuleRef.current) {
+      return wasmModuleRef.current;
+    }
+    if (!wasmModulePromiseRef.current) {
+      wasmModulePromiseRef.current = (async () => {
+        const mod = await import('/wasm/engine/pkg/tiletangle_wasm.js');
+        await mod.default();
+        wasmModuleRef.current = mod;
+        return mod;
+      })();
+    }
+    return wasmModulePromiseRef.current;
+  }, []);
+
+  const terminateWorker = useCallback(() => {
+    if (workerRef.current) {
+      workerRef.current.terminate();
+      workerRef.current = null;
+    }
+  }, []);
+
+  const ensureWorker = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+    if (!workerRef.current) {
+      workerRef.current = new Worker('/wasm/engine/worker.js', {type: 'module'});
+    }
+    return workerRef.current;
+  }, []);
+
+  const callWorker = useCallback((action: string, payload?: any): Promise<any> => {
+    const worker = workerRef.current;
+    if (!worker) {
+      return Promise.reject(new Error('Worker not ready'));
+    }
+    return new Promise((resolve, reject) => {
+      const id = `req_${Date.now()}_${(++workerRequestId.current).toString(36)}`;
+      const listener = (event: MessageEvent) => {
+        const message = event.data as any;
+        if (message?.id === id) {
+          worker.removeEventListener('message', listener);
+          if (message.ok) {
+            resolve(message);
+          } else {
+            reject(new Error(message.error ?? 'Worker error'));
+          }
+        }
+      };
+      worker.addEventListener('message', listener);
+      worker.postMessage({id, action, payload});
+    });
+  }, []);
 
   const [appliedSettings, setAppliedSettings] = useState<SetupState>({
     width: initialWidth,
@@ -226,6 +376,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     rackSize: initialRackSize,
     tileCountsText: initialTileCountsText,
     tileScoresText: initialTileScoresText,
+    shape: 'rect',
   });
   const [draftSettings, setDraftSettings] = useState<SetupState>(appliedSettings);
   const [tileCountsError, setTileCountsError] = useState<string | null>(null);
@@ -383,6 +534,19 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     [tileMetaMap],
   );
 
+  const activeMask = useMemo(() => {
+    if (use3D) return null;
+    return buildShapeMask(appliedSettings.width, appliedSettings.height, appliedSettings.shape);
+  }, [use3D, appliedSettings.width, appliedSettings.height, appliedSettings.shape]);
+
+  const isCellActive = useCallback(
+    (x: number, y: number) => {
+      if (!activeMask) return true;
+      return activeMask.has(`${x},${y}`);
+    },
+    [activeMask],
+  );
+
   const [ready, setReady] = useState(false);
   const [board, setBoard] = useState<BoardJson | null>(null);
   const [game, setGame] = useState<any>(null);
@@ -438,6 +602,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const [anagramIndex, setAnagramIndex] = useState<Map<string, string> | null>(null);
 
   const effectiveDepth = use3D ? appliedSettings.depth : 1;
+  const graphAdjacencyActive = useHex || useDiag || (!use3D && appliedSettings.shape !== 'rect');
 
   useEffect(() => {
     setZ(prev => Math.min(prev, Math.max(0, effectiveDepth - 1)));
@@ -489,6 +654,15 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     const height = clamp(appliedSettings.height, 2, 30);
     const layoutDepth = clamp(appliedSettings.depth, 1, 12);
 
+    const shapeMask = buildShapeMask(width, height, appliedSettings.shape);
+    const shapeHasMask = appliedSettings.shape !== 'rect';
+    const isActive = (x: number, y: number) => {
+      if (shapeHasMask && !shapeMask.has(`${x},${y}`)) {
+        return false;
+      }
+      return true;
+    };
+
     let boardLayout: Record<string, unknown>;
     if (use3D) {
       boardLayout = {type: '3d', width, height, depth: layoutDepth};
@@ -496,17 +670,19 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       const nodes: {x: number; y: number}[] = [];
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-          nodes.push({x, y});
+          if (isActive(x, y)) nodes.push({x, y});
         }
       }
       const index = (x: number, y: number) => y * width + x;
       const edges: {a: number; b: number; dir: string}[] = [];
       const addEdge = (x1: number, y1: number, x2: number, y2: number, dir: string) => {
         if (x2 < 0 || x2 >= width || y2 < 0 || y2 >= height) return;
+        if (!isActive(x1, y1) || !isActive(x2, y2)) return;
         edges.push({a: index(x1, y1), b: index(x2, y2), dir});
       };
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
+          if (!isActive(x, y)) continue;
           addEdge(x, y, x + 1, y, 'E');
           addEdge(x, y, x - 1, y, 'W');
           addEdge(x, y, x, y - 1, 'N');
@@ -522,21 +698,52 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       const nodes: {x: number; y: number}[] = [];
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-          nodes.push({x, y});
+          if (isActive(x, y)) nodes.push({x, y});
         }
       }
       const index = (x: number, y: number) => y * width + x;
       const edges: {a: number; b: number; dir: string}[] = [];
       const addEdge = (x1: number, y1: number, x2: number, y2: number, dir: string) => {
         if (x2 < 0 || x2 >= width || y2 < 0 || y2 >= height) return;
+        if (!isActive(x1, y1) || !isActive(x2, y2)) return;
         edges.push({a: index(x1, y1), b: index(x2, y2), dir});
       };
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
+          if (!isActive(x, y)) continue;
           const even = y % 2 === 0;
+          const eastShift = even ? 0 : 1;
+          const westShift = even ? -1 : 0;
           addEdge(x, y, x + 1, y, 'E');
-          addEdge(x, y, x + (even ? 0 : 1), y - 1, 'NE');
-          addEdge(x, y, x + (even ? 0 : 1), y + 1, 'SE');
+          addEdge(x, y, x - 1, y, 'W');
+          addEdge(x, y, x + eastShift, y - 1, 'NE');
+          addEdge(x, y, x + westShift, y - 1, 'NW');
+          addEdge(x, y, x + eastShift, y + 1, 'SE');
+          addEdge(x, y, x + westShift, y + 1, 'SW');
+        }
+      }
+      boardLayout = {width, height, type: 'graph', nodes, edges};
+    } else if (shapeHasMask) {
+      const nodes: {x: number; y: number}[] = [];
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (isActive(x, y)) nodes.push({x, y});
+        }
+      }
+      const index = (x: number, y: number) => y * width + x;
+      const edges: {a: number; b: number; dir: string}[] = [];
+      const addEdge = (x1: number, y1: number, x2: number, y2: number, dir: string) => {
+        if (x2 < 0 || x2 >= width || y2 < 0 || y2 >= height) return;
+        if (!isActive(x1, y1) || !isActive(x2, y2)) return;
+        edges.push({a: index(x1, y1), b: index(x2, y2), dir});
+      };
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (!isActive(x, y)) continue;
+          addEdge(x, y, x + 1, y, 'E');
+          addEdge(x, y, x - 1, y, 'W');
+          addEdge(x, y, x, y - 1, 'N');
+          addEdge(x, y, x, y + 1, 'S');
         }
       }
       boardLayout = {width, height, type: 'graph', nodes, edges};
@@ -564,6 +771,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     appliedSettings.height,
     appliedSettings.depth,
     appliedSettings.rackSize,
+    appliedSettings.shape,
     appliedTileCounts,
     dynamicTileKinds,
     use3D,
@@ -641,34 +849,11 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       setDictReady(!useDict);
       setDictError(null);
 
-      const resetWorker = () => {
-        if (workerRef.current) {
-          workerRef.current.terminate();
-          workerRef.current = null;
-        }
-      };
-
       try {
         if (useWorker) {
-          resetWorker();
-          const worker = new Worker('/wasm/engine/worker.js', {type: 'module'});
-          workerRef.current = worker;
-
-          const call = (action: string, payload?: any): Promise<any> => {
-            return new Promise((resolve, reject) => {
-              const id = Math.random().toString(36).slice(2);
-              const listener = (event: MessageEvent) => {
-                if ((event.data as any)?.id === id) {
-                  worker.removeEventListener('message', listener);
-                  const message = event.data as any;
-                  message.ok ? resolve(message) : reject(new Error(message.error));
-                }
-              };
-              worker.addEventListener('message', listener);
-              worker.postMessage({id, action, payload});
-            });
-          };
-
+          const worker = ensureWorker();
+          if (!worker) return;
+          const call = callWorker;
           const cfg2 = {...cfg, free_word_mode: !useDict};
           await call('new_game', {config: cfg2, players: 2});
           if (cancelled) return;
@@ -719,9 +904,8 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           setGame({call});
           setReady(true);
         } else {
-          resetWorker();
-          const mod = await import('/wasm/engine/pkg/tiletangle_wasm.js');
-          await mod.default();
+          terminateWorker();
+          const mod = await ensureWasmModule();
           const cfg2 = {...cfg, free_word_mode: !useDict};
           const g = mod.new_game(JSON.stringify(cfg2), 2);
           mod.set_reading_direction(g, rtl);
@@ -781,12 +965,23 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
 
     return () => {
       cancelled = true;
-      if (workerRef.current) {
-        workerRef.current.terminate();
-        workerRef.current = null;
-      }
+      terminateWorker();
     };
-  }, [cfg, useWorker, useDict, rtl, stackOn, stackScoring, forbidSame, dictEngine, dictMessagesVersion]);
+  }, [
+    cfg,
+    useWorker,
+    useDict,
+    rtl,
+    stackOn,
+    stackScoring,
+    forbidSame,
+    dictEngine,
+    dictMessagesVersion,
+    ensureWorker,
+    callWorker,
+    ensureWasmModule,
+    terminateWorker,
+  ]);
 
   const applySnapshot = useCallback((boardJson: BoardJson, snapshotJson: string) => {
     setBoard(boardJson);
@@ -868,6 +1063,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       rackSize,
       tileCountsText: formatTileCounts(countsParsed.map),
       tileScoresText: formatTileScores(scoresParsed.map),
+      shape: draftSettings.shape,
     });
     setDictMessagesVersion(v => v + 1);
   }, [draftSettings, defaultTileCounts, defaultTileScores]);
@@ -890,6 +1086,13 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     if (!game) return;
     if (use3D) {
       setInfoMessage('Automatic move generation is not yet available for 3D boards. Switch to 2D to inspect suggestions.');
+      setLegalMoves([]);
+      setActiveMoveIndex(null);
+      setShowMoves(true);
+      return;
+    }
+    if (graphAdjacencyActive) {
+      setInfoMessage('Automatic move suggestions are not yet available for custom adjacency boards. Place tiles manually or switch back to the classic grid.');
       setLegalMoves([]);
       setActiveMoveIndex(null);
       setShowMoves(true);
@@ -920,7 +1123,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     } finally {
       setLoadingMoves(false);
     }
-  }, [game, useWorker, use3D, appliedSettings.rackSize]);
+  }, [game, useWorker, use3D, appliedSettings.rackSize, graphAdjacencyActive]);
 
   const commitMove = useCallback(async () => {
     if (!game || pending.length === 0) return;
@@ -980,6 +1183,11 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   }, [game, useWorker, updateFromGame]);
 
   const requestCpuHint = useCallback(async () => {
+    if (graphAdjacencyActive || use3D) {
+      setCpuError('CPU assistant is not yet available for custom adjacency boards.');
+      setCpuSuggestion(null);
+      return;
+    }
     if (!game || cpuDifficulty === 'off' || !dictReady) {
       setCpuSuggestion(null);
       return;
@@ -1025,7 +1233,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     } finally {
       setCpuThinking(false);
     }
-  }, [game, useWorker, cpuDifficulty, dictReady]);
+  }, [game, useWorker, cpuDifficulty, dictReady, graphAdjacencyActive, use3D]);
 
   const playCpuSuggestion = useCallback(async () => {
     if (!cpuSuggestion) return;
@@ -1140,6 +1348,9 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       if (!board) return prev;
       const layerHeight = use3D ? Math.floor(board.height / Math.max(1, effectiveDepth)) : board.height;
       const globalY = use3D ? y + z * layerHeight : y;
+      if (!use3D && !isCellActive(x, globalY)) {
+        return prev;
+      }
       if (!stackOn && (board.rows[globalY]?.[x] || '').length > 0) return prev;
       const available = rackCountByKind.get(kindId) ?? 0;
       const used = prev.filter(p => p.kind_id === kindId).length;
@@ -1196,13 +1407,27 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     <div style={{display: 'flex', flexDirection: 'column', gap: 16}}>
       {(errorMessage || dictError || cpuError) && (
         <div style={{display: 'flex', flexDirection: 'column', gap: 6}}>
-          {errorMessage && <div style={{background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 4, padding: 8}}>{errorMessage}</div>}
-          {dictError && <div style={{background: '#fef3c7', border: '1px solid #facc15', borderRadius: 4, padding: 8}}>{dictError}</div>}
-          {cpuError && <div style={{background: '#fef3c7', border: '1px solid #facc15', borderRadius: 4, padding: 8}}>{cpuError}</div>}
+          {errorMessage && (
+            <div style={{background: palette.errorBg, border: `1px solid ${palette.errorBorder}`, borderRadius: 4, padding: 8}}>
+              {errorMessage}
+            </div>
+          )}
+          {dictError && (
+            <div style={{background: palette.warningBg, border: `1px solid ${palette.warningBorder}`, borderRadius: 4, padding: 8}}>
+              {dictError}
+            </div>
+          )}
+          {cpuError && (
+            <div style={{background: palette.warningBg, border: `1px solid ${palette.warningBorder}`, borderRadius: 4, padding: 8}}>
+              {cpuError}
+            </div>
+          )}
         </div>
       )}
       {infoMessage && (
-        <div style={{background: '#dbeafe', border: '1px solid #60a5fa', borderRadius: 4, padding: 8}}>{infoMessage}</div>
+        <div style={{background: palette.infoBg, border: `1px solid ${palette.infoBorder}`, borderRadius: 4, padding: 8}}>
+          {infoMessage}
+        </div>
       )}
 
       <ControlSection title="Game Setup">
@@ -1226,13 +1451,14 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
             style={{width: 70}}
           />
         </label>
-        <label>Depth:
+        <label>Layers (3D depth):
           <input
             type="number"
             min={1}
             max={12}
             value={draftSettings.depth}
             onChange={e => setDraftSettings(prev => ({...prev, depth: Number(e.target.value)}))}
+            title="Number of board layers used when 3D mode is enabled"
             style={{width: 70}}
           />
         </label>
@@ -1246,140 +1472,119 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
             style={{width: 70}}
           />
         </label>
-        <div style={{display: 'flex', flexDirection: 'column', gap: 8, flex: '1 1 100%'}}>
-          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8}}>
-            <span style={{fontSize: 12, fontWeight: 600}}>Tiles</span>
-            <div style={{display: 'flex', gap: 8}}>
+        <label>Shape:
+          <select
+            value={draftSettings.shape}
+            onChange={e => setDraftSettings(prev => ({...prev, shape: e.target.value as BoardShape}))}
+          >
+            <option value="rect">Full grid</option>
+            <option value="diamond">Diamond</option>
+            <option value="cross">Cross</option>
+          </select>
+        </label>
+        <details style={{fontSize: 12}}>
+          <summary style={{cursor: 'pointer', fontWeight: 600}}>Tile pool editor</summary>
+          <div style={{marginTop: 8, display: 'flex', flexDirection: 'column', gap: 12}}>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8}}>
+              <span style={{fontSize: 12, color: palette.textSubtle}}>Adjust tile counts and scores.</span>
               <button type="button" onClick={handleResetTiles} style={{fontSize: 12}}>Reset to defaults</button>
             </div>
-          </div>
-          <div style={{overflowX: 'auto'}}>
-            <table style={{width: '100%', borderCollapse: 'collapse', minWidth: 320, fontSize: 13}}>
-              <thead>
-                <tr>
-                  <th style={{textAlign: 'left', padding: '4px 6px', borderBottom: '1px solid var(--ifm-color-emphasis-200)'}}>Tile</th>
-                  <th style={{textAlign: 'left', padding: '4px 6px', borderBottom: '1px solid var(--ifm-color-emphasis-200)'}}>Count</th>
-                  <th style={{textAlign: 'left', padding: '4px 6px', borderBottom: '1px solid var(--ifm-color-emphasis-200)'}}>Score</th>
-                  <th style={{padding: '4px 6px', borderBottom: '1px solid var(--ifm-color-emphasis-200)'}}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {draftTileRows.map(row => (
-                  <tr key={row.id}>
-                    <td style={{padding: '4px 6px'}}>{row.id}</td>
-                    <td style={{padding: '4px 6px', width: 90}}>
+            <div style={{overflowX: 'auto'}}>
+              <table style={{width: '100%', borderCollapse: 'collapse', minWidth: 320, fontSize: 13}}>
+                <thead>
+                  <tr>
+                    <th style={{textAlign: 'left', padding: '4px 6px', borderBottom: `1px solid ${palette.panelBorder}`}}>Tile</th>
+                    <th style={{textAlign: 'left', padding: '4px 6px', borderBottom: `1px solid ${palette.panelBorder}`}}>Count</th>
+                    <th style={{textAlign: 'left', padding: '4px 6px', borderBottom: `1px solid ${palette.panelBorder}`}}>Score</th>
+                    <th style={{padding: '4px 6px', borderBottom: `1px solid ${palette.panelBorder}`}}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {draftTileRows.map(row => (
+                    <tr key={row.id}>
+                      <td style={{padding: '4px 6px'}}>{row.id}</td>
+                      <td style={{padding: '4px 6px', width: 90}}>
+                        <input
+                          type="number"
+                          min={0}
+                          value={row.count ?? 0}
+                          onChange={e => updateTileEntry(row.id, {count: Number(e.target.value)})}
+                          style={{width: '100%'}}
+                        />
+                      </td>
+                      <td style={{padding: '4px 6px', width: 90}}>
+                        <input
+                          type="number"
+                          value={row.score ?? 0}
+                          onChange={e => updateTileEntry(row.id, {score: Number(e.target.value)})}
+                          style={{width: '100%'}}
+                        />
+                      </td>
+                      <td style={{padding: '4px 6px', textAlign: 'right'}}>
+                        <button
+                          type="button"
+                          onClick={() => removeTile(row.id)}
+                          disabled={draftTileRows.length <= 1}
+                          style={{fontSize: 12}}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td style={{padding: '4px 6px'}}>
                       <input
-                        type="number"
-                        min={0}
-                        value={row.count ?? 0}
-                        onChange={e => updateTileEntry(row.id, {count: Number(e.target.value)})}
+                        type="text"
+                        value={newTileId}
+                        onChange={e => setNewTileId(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
+                        placeholder="ID"
                         style={{width: '100%'}}
                       />
                     </td>
-                    <td style={{padding: '4px 6px', width: 90}}>
+                    <td style={{padding: '4px 6px'}}>
                       <input
                         type="number"
-                        value={row.score ?? 0}
-                        onChange={e => updateTileEntry(row.id, {score: Number(e.target.value)})}
+                        min={1}
+                        value={newTileCount}
+                        onChange={e => setNewTileCount(Number(e.target.value) || 1)}
+                        style={{width: '100%'}}
+                      />
+                    </td>
+                    <td style={{padding: '4px 6px'}}>
+                      <input
+                        type="number"
+                        value={newTileScore}
+                        onChange={e => setNewTileScore(Number(e.target.value) || 0)}
                         style={{width: '100%'}}
                       />
                     </td>
                     <td style={{padding: '4px 6px', textAlign: 'right'}}>
                       <button
                         type="button"
-                        onClick={() => removeTile(row.id)}
-                        disabled={draftTileRows.length <= 1}
+                        onClick={handleAddTile}
+                        disabled={newTileId.trim() === ''}
                         style={{fontSize: 12}}
                       >
-                        Remove
+                        Add
                       </button>
                     </td>
                   </tr>
-                ))}
-                <tr>
-                  <td style={{padding: '4px 6px'}}>
-                    <input
-                      type="text"
-                      value={newTileId}
-                      onChange={e => setNewTileId(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
-                      placeholder="ID"
-                      style={{width: '100%'}}
-                    />
-                  </td>
-                  <td style={{padding: '4px 6px'}}>
-                    <input
-                      type="number"
-                      min={1}
-                      value={newTileCount}
-                      onChange={e => setNewTileCount(Number(e.target.value) || 1)}
-                      style={{width: '100%'}}
-                    />
-                  </td>
-                  <td style={{padding: '4px 6px'}}>
-                    <input
-                      type="number"
-                      value={newTileScore}
-                      onChange={e => setNewTileScore(Number(e.target.value) || 0)}
-                      style={{width: '100%'}}
-                    />
-                  </td>
-                  <td style={{padding: '4px 6px', textAlign: 'right'}}>
-                    <button
-                      type="button"
-                      onClick={handleAddTile}
-                      disabled={newTileId.trim() === ''}
-                      style={{fontSize: 12}}
-                    >
-                      Add
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+            </div>
+            {(tileCountsError || tileScoresError) && (
+              <div style={{fontSize: 12, color: palette.errorBorder}}>
+                {[tileCountsError, tileScoresError]
+                  .filter(Boolean)
+                  .map((msg, idx) => (
+                    <div key={idx}>{msg}</div>
+                  ))}
+              </div>
+            )}
           </div>
-          {(tileCountsError || tileScoresError) && (
-            <div style={{fontSize: 12, color: '#b91c1c'}}>
-              {[tileCountsError, tileScoresError]
-                .filter(Boolean)
-                .map((msg, idx) => (
-                  <div key={idx}>{msg}</div>
-                ))}
-            </div>
-          )}
-          <details style={{fontSize: 12}}>
-            <summary style={{cursor: 'pointer'}}>Advanced: edit raw tile data</summary>
-            <div style={{display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 8}}>
-              <div style={{display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 240px'}}>
-                <span style={{fontSize: 12}}>Tile pool (format: `A:9`, separated by commas or new lines)</span>
-                <textarea
-                  value={draftSettings.tileCountsText}
-                  onChange={e => {
-                    const text = e.target.value;
-                    setDraftSettings(prev => ({...prev, tileCountsText: text}));
-                    const parsed = parseTileCounts(text, defaultTileCounts);
-                    setTileCountsError(parsed.error);
-                  }}
-                  rows={4}
-                  style={{width: '100%', fontFamily: 'monospace'}}
-                />
-              </div>
-              <div style={{display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 240px'}}>
-                <span style={{fontSize: 12}}>Tile scores (format: `A:1`, separated by commas or new lines)</span>
-                <textarea
-                  value={draftSettings.tileScoresText}
-                  onChange={e => {
-                    const text = e.target.value;
-                    setDraftSettings(prev => ({...prev, tileScoresText: text}));
-                    const parsed = parseTileScores(text, defaultTileScores);
-                    setTileScoresError(parsed.error);
-                  }}
-                  rows={4}
-                  style={{width: '100%', fontFamily: 'monospace'}}
-                />
-              </div>
-            </div>
-          </details>
-        </div>
+        </details>
+        <div style={{fontSize: 12, color: palette.textSubtle}}>Layers are only used when 3D mode is enabled.</div>
         <button onClick={handleApplySettings}>Apply configuration</button>
       </ControlSection>
 
@@ -1394,17 +1599,17 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
                 padding: 8,
                 minWidth: 120,
                 borderRadius: 6,
-                border: '1px solid var(--ifm-color-emphasis-200)',
-                background: player.index === activePlayer ? '#e0f2fe' : '#f9fafb',
+                border: `1px solid ${palette.panelBorder}`,
+                background: player.index === activePlayer ? palette.playerActiveBg : palette.playerBg,
               }}
             >
               <div style={{fontWeight: 600}}>Player {player.index + 1}</div>
               <div>{player.score} pts</div>
-              <div style={{fontSize: 12, opacity: 0.75}}>Rack: {player.rack.join(' ') || '—'}</div>
+              <div style={{fontSize: 12, color: palette.textSubtle}}>Rack: {player.rack.join(' ') || '—'}</div>
             </div>
           ))}
         </div>
-        <div style={{fontSize: 12, opacity: 0.75}}>
+        <div style={{fontSize: 12, color: palette.textSubtle}}>
           Bag: {bagSummary.total} tiles{bagSummary.total > 0 && bagPreview ? ` • ${bagPreview}` : ''}
         </div>
       </ControlSection>
@@ -1461,6 +1666,16 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           />{' '}
           3D (layers)
         </label>
+        {useHex && (
+          <div style={{fontSize: 12, color: palette.textSubtle}}>
+            Hex adjacency uses staggered rows with three axes (E, NE, SE).
+          </div>
+        )}
+        {useDiag && (
+          <div style={{fontSize: 12, color: palette.textSubtle}}>
+            Diagonal adjacency enables moves in all eight directions.
+          </div>
+        )}
         {use3D && (
           <>
             <span style={{fontSize: 12}}>Layer {z + 1} / {effectiveDepth}</span>
@@ -1571,7 +1786,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
               fetchMoves();
             }
           }}
-          disabled={!game || loadingMoves || (useDict && !dictReady)}
+          disabled={!game || loadingMoves || (useDict && !dictReady) || graphAdjacencyActive || use3D}
         >
           {showMoves ? 'Hide legal moves' : 'Show legal moves'}
         </button>
@@ -1584,7 +1799,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           <select
             value={cpuDifficulty}
             onChange={e => setCpuDifficulty(e.target.value as 'off' | 'easy' | 'medium' | 'hard')}
-            disabled={!dictReady || dictLoading}
+            disabled={!dictReady || dictLoading || graphAdjacencyActive || use3D}
           >
             <option value="off">Off</option>
             <option value="easy">Easy</option>
@@ -1592,29 +1807,55 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
             <option value="hard">Hard</option>
           </select>
         </label>
-        <button onClick={requestCpuHint} disabled={!game || cpuDifficulty === 'off' || cpuThinking || !dictReady}>
+        <button
+          onClick={requestCpuHint}
+          disabled={!game || cpuDifficulty === 'off' || cpuThinking || !dictReady || graphAdjacencyActive || use3D}
+        >
           CPU hint
         </button>
         <button
           data-testid="cpu-play-button"
           onClick={playCpuSuggestion}
-          disabled={!game || cpuSuggestion == null || cpuThinking}
+          disabled={!game || cpuSuggestion == null || cpuThinking || graphAdjacencyActive || use3D}
         >
           Play as CPU
         </button>
         {cpuThinking && <span style={{fontSize: 12}}>computing…</span>}
+        {(graphAdjacencyActive || use3D) && (
+          <div style={{fontSize: 12, color: palette.textSubtle}}>
+            CPU assistant is disabled for custom adjacency boards.
+          </div>
+        )}
         {cpuSuggestion && (
-          <div style={{marginTop: 8, fontSize: 12, padding: 8, border: '1px solid var(--ifm-color-emphasis-200)', borderRadius: 4}}>
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              padding: 8,
+              border: `1px solid ${palette.panelBorder}`,
+              borderRadius: 4,
+              background: colorMode === 'dark' ? 'rgba(30, 64, 175, 0.25)' : '#eff6ff',
+            }}
+          >
             <div style={{fontWeight: 600}}>CPU ({cpuSuggestion.difficulty}) suggests</div>
             <div><strong>{cpuSuggestion.word}</strong> — {cpuSuggestion.total} pts</div>
-            <div style={{opacity: 0.7}}>Raw {cpuSuggestion.score}, leave {cpuSuggestion.rackLeave}, equity {cpuSuggestion.boardEquity}</div>
+            <div style={{color: palette.textSubtle}}>Raw {cpuSuggestion.score}, leave {cpuSuggestion.rackLeave}, equity {cpuSuggestion.boardEquity}</div>
           </div>
         )}
         {!cpuSuggestion && lastCpu && (
-          <div style={{marginTop: 8, fontSize: 12, padding: 8, border: '1px solid var(--ifm-color-emphasis-200)', borderRadius: 4}}>
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              padding: 8,
+              border: `1px solid ${palette.panelBorder}`,
+              borderRadius: 4,
+              background: colorMode === 'dark' ? 'rgba(15, 118, 110, 0.2)' : '#ecfdf5',
+            }}
+          >
             <div style={{fontWeight: 600}}>Last CPU hint ({lastCpu.difficulty})</div>
             <div><strong>{lastCpu.word}</strong> — {lastCpu.total} pts</div>
-            <div style={{opacity: 0.7}}>Raw {lastCpu.score}, leave {lastCpu.rackLeave}, equity {lastCpu.boardEquity}</div>
+            <div style={{color: palette.textSubtle}}>Raw {lastCpu.score}, leave {lastCpu.rackLeave}, equity {lastCpu.boardEquity}</div>
           </div>
         )}
       </ControlSection>
@@ -1626,25 +1867,39 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
               const globalY = use3D ? y + z * layerHeight : y;
               const key = `${x}-${globalY}`;
               const highlighted = highlightCells.has(`${x},${globalY}`);
+              const activeCell = use3D || isCellActive(x, globalY);
+              const cellStyle: React.CSSProperties = {
+                width: 28,
+                height: 28,
+                border: `1px solid ${palette.boardCellBorder}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                position: 'relative',
+                background: highlighted
+                  ? palette.boardCellHighlight
+                  : activeCell
+                    ? palette.boardCellBg
+                    : 'rgba(148, 163, 184, 0.15)',
+                fontWeight: highlighted ? 600 : 400,
+                opacity: activeCell ? 1 : 0.5,
+                cursor: activeCell ? 'default' : 'not-allowed',
+              };
               return (
                 <div
                   key={key}
                   data-testid="playground-board-cell"
                   data-x={x}
                   data-y={globalY}
-                  onDragOver={e => e.preventDefault()}
-                  onDrop={e => onDropCell(x, y, e)}
-                  style={{
-                    width: 28,
-                    height: 28,
-                    border: '1px solid #ccc',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    position: 'relative',
-                    background: highlighted ? '#e0f2fe' : '#fff',
-                    fontWeight: highlighted ? 600 : 400,
+                  onDragOver={e => {
+                    if (!activeCell) return;
+                    e.preventDefault();
                   }}
+                  onDrop={e => {
+                    if (!activeCell) return;
+                    onDropCell(x, y, e);
+                  }}
+                  style={cellStyle}
                   onMouseEnter={() => {
                     if (!showMoves) return;
                     const idx = legalMoves.findIndex(mv => mv.placements.some(p => p.x === x && p.y === globalY));
@@ -1695,12 +1950,12 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
                 style={{
                   width: 32,
                   height: 32,
-                  border: '1px solid #aaa',
+                  border: `1px solid ${palette.rackTileBorder}`,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   position: 'relative',
-                  background: '#f9f9f9',
+                  background: palette.rackTileBg,
                   cursor: 'grab',
                   fontWeight: 600,
                 }}
@@ -1731,10 +1986,19 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
                 })()}
               </div>
             ))}
-            {availableRackTiles.length === 0 && <div style={{fontSize: 12, opacity: 0.7}}>Rack empty or all tiles placed</div>}
+            {availableRackTiles.length === 0 && <div style={{fontSize: 12, color: palette.textSubtle}}>Rack empty or all tiles placed</div>}
           </div>
           {cpuSuggestion && (
-            <div style={{marginTop: 12, fontSize: 12, padding: 8, border: '1px dashed var(--ifm-color-emphasis-200)', borderRadius: 4}}>
+            <div
+              style={{
+                marginTop: 12,
+                fontSize: 12,
+                padding: 8,
+                border: `1px dashed ${palette.panelBorder}`,
+                borderRadius: 4,
+                background: colorMode === 'dark' ? 'rgba(56, 189, 248, 0.1)' : '#f8fbff',
+              }}
+            >
               <div style={{fontWeight: 600, marginBottom: 4}}>CPU placements preview</div>
               <div>{cpuSuggestion.placements.map(p => `(${p.x},${p.y})`).join(', ') || '—'}</div>
             </div>
@@ -1750,7 +2014,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
               <div
                 key={`${mv.word}-${idx}`}
                 data-testid={`legal-move-${idx}`}
-                style={{marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--ifm-color-emphasis-200)'}}
+                style={{marginBottom: 8, paddingBottom: 8, borderBottom: `1px solid ${palette.panelBorder}`}}
               >
                 <div style={{fontWeight: 600}}>
                   #{idx + 1} {mv.word} <span style={{opacity: 0.7}}>({mv.total ?? mv.score} pts)</span>
@@ -1780,7 +2044,17 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           <button onClick={fetchEventLog} disabled={!game}>Show event log</button>
         </div>
         {eventLogText && (
-          <pre style={{maxHeight: 200, overflow: 'auto', background: '#f9fafb', padding: 8, border: '1px solid var(--ifm-color-emphasis-200)'}}>{eventLogText}</pre>
+          <pre
+            style={{
+              maxHeight: 200,
+              overflow: 'auto',
+              background: palette.panelBg,
+              padding: 8,
+              border: `1px solid ${palette.panelBorder}`,
+            }}
+          >
+            {eventLogText}
+          </pre>
         )}
       </div>
     </div>
