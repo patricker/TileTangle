@@ -173,6 +173,6 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Fuzz config loader (smoke)
-        run: cargo fuzz run fuzz_config_load -- -max_total_time=20 -verbosity=0
+        run: cargo +nightly fuzz run fuzz_config_load -- -max_total_time=20 -verbosity=0
       - name: Fuzz move draft (smoke)
-        run: cargo fuzz run fuzz_move_draft -- -max_total_time=20 -verbosity=0
+        run: cargo +nightly fuzz run fuzz_move_draft -- -max_total_time=20 -verbosity=0

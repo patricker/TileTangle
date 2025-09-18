@@ -14,6 +14,9 @@ var cpu_difficulty := "medium"
 var cpu_button : Button
 var cpu_diff_button : Button
 var cpu_busy := false
+var cpu_auto := false
+var cpu_auto_pending := false
+var score_summary_label : Label
 
 func _ready():
     # Top bar with toggles
@@ -40,9 +43,27 @@ func _ready():
     )
     bar.add_child(btn_hex)
 
-    # Score label
+    var cpu_toggle := CheckButton.new()
+    cpu_toggle.text = "CPU Opponent"
+    cpu_toggle.button_pressed = cpu_auto
+    cpu_toggle.toggled.connect(func(pressed: bool):
+        cpu_auto = pressed
+        if not cpu_auto:
+            cpu_auto_pending = false
+        _maybe_queue_cpu_turn()
+    )
+    bar.add_child(cpu_toggle)
+
+    # Score labels
+    score_summary_label = Label.new()
+    score_summary_label.name = "ScoreSummary"
+    score_summary_label.position = Vector2(0, 44)
+    score_summary_label.text = "Scores unavailable"
+    add_child(score_summary_label)
+
     var score_label := Label.new()
     score_label.name = "ScoreLabel"
+    score_label.position = Vector2(0, 64)
     score_label.text = ""
     add_child(score_label)
 
@@ -184,6 +205,9 @@ func _refresh_board():
     elif last_main.size() > 0 || last_cross.size() > 0:
         _apply_highlight_vectors(last_main, last_cross)
 
+    var to_move := _update_score_summary()
+    _maybe_queue_cpu_turn_with_to_move(to_move)
+
 func _apply_highlights(preview):
     if preview == null:
         return
@@ -217,6 +241,63 @@ func _apply_highlight_vectors(main_arr, cross_arr):
             if i>=0 and i<grid.get_child_count():
                 var node := grid.get_child(i)
                 if node is Button: node.modulate = Color(0.95, 1.0, 0.8)
+
+func _update_score_summary() -> int:
+    var json := eng.get_scores_json()
+    if json == "":
+        if score_summary_label:
+            score_summary_label.text = "Scores unavailable"
+        return 0
+    var parsed := JSON.parse_string(json)
+    if parsed == null:
+        if score_summary_label:
+            score_summary_label.text = "Scores unavailable"
+        return 0
+    var players := parsed.get("players", [])
+    var to_move := int(parsed.get("to_move", 0))
+    var you := 0
+    var cpu := 0
+    for i in range(players.size()):
+        var entry = players[i]
+        var score := 0
+        if typeof(entry) == TYPE_DICTIONARY and entry.has("score"):
+            score = int(entry["score"])
+        if i == 0:
+            you = score
+        elif i == 1:
+            cpu = score
+    var turn_text := to_move == 0 ? "Your turn" : "CPU thinking"
+    if score_summary_label:
+        score_summary_label.text = "You: %d | CPU: %d - %s" % [you, cpu, turn_text]
+    return to_move
+
+func _maybe_queue_cpu_turn_with_to_move(to_move: int) -> void:
+    if not cpu_auto or cpu_busy:
+        return
+    if staged.size() > 0:
+        return
+    if to_move != 1:
+        return
+    if cpu_auto_pending:
+        return
+    cpu_auto_pending = true
+    call_deferred("_auto_cpu_move")
+
+func _maybe_queue_cpu_turn(to_move := -1) -> void:
+    var target := to_move
+    if target == -1:
+        target = _update_score_summary()
+    else:
+        _update_score_summary()
+    _maybe_queue_cpu_turn_with_to_move(target)
+
+func _auto_cpu_move() -> void:
+    cpu_auto_pending = false
+    if not cpu_auto or cpu_busy:
+        return
+    if staged.size() > 0:
+        return
+    _play_cpu_move()
 
 func _preview_json():
     if staged.is_empty():
@@ -336,6 +417,7 @@ func _cycle_cpu_difficulty():
 func _play_cpu_move():
     if cpu_busy:
         return
+    cpu_auto_pending = false
     cpu_busy = true
     if cpu_button:
         cpu_button.disabled = true

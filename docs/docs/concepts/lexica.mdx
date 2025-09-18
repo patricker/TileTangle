@@ -6,9 +6,48 @@ import Playground from '@site/src/components/Playground';
 
 # Lexica
 
-Lexica power both validation and AI evaluation. Switch between dictionary engines and enable the anagram index to compare lookup costs.
+Lexica power both validation and AI evaluation. Switch between dictionary engines and enable the
+anagram index to compare lookup costs.
 
 <Playground initial={{ useDict: true, dictEngine: 'set', useAnagram: true }} />
+
+## Engines & trade-offs
+
+| Engine | Use case | Notes |
+| --- | --- | --- |
+| `set` | Small demos, rapid prototyping | Loads line-by-line text, O(1) membership, higher memory. |
+| `fst` | Production English-sized lexica | Compact finite-state acceptance with fast prefix tests. |
+| `dawg` | Classic Scrabble move generation | Minimal edges, perfect for cross-checks. |
+| `gaddag` | Power-player move generation & AI | Stores every split permutation; fastest anchors but larger files. |
+
+You can hot-swap engines at runtime through the bindings (`set_dictionary_from_text_engine` or
+`set_dictionary_from_fst_bytes`) and fall back to `set_free_word_mode(true)` when a dictionary fails to
+load.
+
+## Loading dictionaries
+
+```ts title="WASM"
+import init, { new_game, set_dictionary_from_text_engine } from '@tiletangle/engine-wasm';
+
+await init();
+const game = new_game(JSON.stringify(cfg), 2);
+await set_dictionary_from_text_engine(game, wordlist, 'fst', true);
+```
+
+```python title="Python"
+game.set_dictionary_from_words(open('twl06.txt').read().split(), case_fold=True)
+```
+
+For binary FST blobs, stream the bytes from storage and feed them into the bindings. The engine tracks the
+dictionary id (`dictionary_id`) alongside the current instance so persistence snapshots and cross-binding
+tests can confirm parity.
+
+## Lexica in AI & scoring
+
+Hints and CPU moves rely on the same lexicon, so swapping engines changes both legality checks and AI
+evaluation. Pair lighter engines (`set`, `fst`) with real-time workers, or opt for `gaddag` when searching
+deep game trees. The Playground’s anagram index is a lightweight example of using lexica for UX, not just
+validation.
 
 ## Dive deeper
 

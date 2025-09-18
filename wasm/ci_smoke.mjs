@@ -1,13 +1,16 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const pkg = path.join(__dirname, 'pkg-node', 'tiletangle_wasm.js');
-const mod = await import('file://' + pkg);
-await mod.default();
+const pkgDir = path.join(__dirname, 'pkg');
+const modPath = pathToFileURL(path.join(pkgDir, 'tiletangle_wasm.js')).href;
+const mod = await import(modPath);
+const wasmBytes = await fs.readFile(path.join(pkgDir, 'tiletangle_wasm_bg.wasm'));
+await mod.default({ module_or_path: wasmBytes });
 
 const cfg = {
   tileset: { tile_kinds: [{ id: 'A', symbol: 'A', score: 1 }] },
@@ -25,4 +28,3 @@ const board = JSON.parse(mod.get_board(game));
 assert.equal(board.width, 3);
 assert.equal(board.height, 2);
 console.log('WASM smoke test passed');
-

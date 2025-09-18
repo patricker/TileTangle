@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -27,12 +28,17 @@ namespace TileTangle.Examples
         private HorizontalLayoutGroup rackBar;
         private readonly List<Button> rackButtons = new();
         private string? selectedKindId;
-        private Text scoreLabel;
+        private Text statusLabel;
+        private string scoreSummaryLine = "Scores unavailable";
+        private string statusDetail = string.Empty;
         private readonly System.Collections.Generic.List<(int x, int y, string kindId)> staged = new();
         private System.Collections.Generic.List<Vector2Int> hlMain = new();
         private System.Collections.Generic.List<System.Collections.Generic.List<Vector2Int>> hlCross = new();
         private Button cpuButton;
         private Button cpuDifficultyButton;
+        private Toggle cpuAutoToggle;
+        private bool cpuAutoEnabled;
+        private Coroutine cpuAutoRoutine;
         private bool cpuBusy;
         private string cpuDifficulty = "medium";
 
@@ -42,6 +48,8 @@ namespace TileTangle.Examples
             BuildOrRebuildEngine();
             BuildGrid();
             RefreshBoard();
+            RefreshRack();
+            SyncScoresAndMaybeTriggerCpu();
         }
 
         void OnDestroy()
@@ -115,8 +123,8 @@ namespace TileTangle.Examples
             t.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
             t.alignment = TextAnchor.MiddleLeft;
             t.color = Color.white;
-            t.text = "";
-            scoreLabel = t;
+            statusLabel = t;
+            RenderStatus();
 
             SpawnCells();
 
@@ -144,6 +152,9 @@ namespace TileTangle.Examples
 
             cpuButton = CreateButton(bar.transform, "CPU Move (Medium)");
             cpuButton.onClick.AddListener(CpuMove);
+
+            cpuAutoToggle = CreateToggle(bar.transform, "CPU Opponent", cpuAutoEnabled);
+            cpuAutoToggle.onValueChanged.AddListener(SetCpuAuto);
         }
 
         private void RebuildGrid()
@@ -155,6 +166,7 @@ namespace TileTangle.Examples
             RefreshRack();
             // Preview initial staging (none)
             UpdatePreviewOverlay();
+            SyncScoresAndMaybeTriggerCpu();
         }
 
         private void SpawnCells()
@@ -181,6 +193,7 @@ namespace TileTangle.Examples
             else UpdateScoreOverlay(res);
             RefreshBoard();
             RefreshRack();
+            SyncScoresAndMaybeTriggerCpu();
         }
 
         private void RefreshBoard()
@@ -275,11 +288,14 @@ namespace TileTangle.Examples
                 var cross = doc.RootElement.GetProperty("cross_words");
                 var crossSum = 0;
                 foreach (var cw in cross.EnumerateArray()) crossSum += cw[1].GetInt32();
-                scoreLabel.text = $"Last: {mainWord} total={total} (main={mainScore} +cross={crossSum})";
+                statusDetail = $"Last: {mainWord} total={total} (main={mainScore} +cross={crossSum})";
+                RenderStatus();
             }
             catch (Exception e)
             {
                 Debug.LogError(e);
+                statusDetail = "";
+                RenderStatus();
             }
         }
 
@@ -336,8 +352,113 @@ namespace TileTangle.Examples
             }
         }
 
+        private void RenderStatus()
+        {
+            if (statusLabel == null) return;
+            if (string.IsNullOrEmpty(scoreSummaryLine))
+            {
+                statusLabel.text = statusDetail;
+            }
+            else if (string.IsNullOrEmpty(statusDetail))
+            {
+                statusLabel.text = scoreSummaryLine;
+            }
+            else
+            {
+                statusLabel.text = $"{scoreSummaryLine}\n{statusDetail}";
+            }
+        }
+
+        private int UpdateScoreSummary()
+        {
+            var json = engine.GetScoresJson();
+            if (string.IsNullOrEmpty(json))
+            {
+                scoreSummaryLine = "Scores unavailable";
+                RenderStatus();
+                return 0;
+            }
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                int you = 0;
+                int cpu = 0;
+                int idx = 0;
+                foreach (var player in doc.RootElement.GetProperty("players").EnumerateArray())
+                {
+                    int score = 0;
+                    if (player.TryGetProperty("score", out var scoreEl) && scoreEl.ValueKind == JsonValueKind.Number)
+                    {
+                        score = scoreEl.GetInt32();
+                    }
+                    if (idx == 0) you = score;
+                    else if (idx == 1) cpu = score;
+                    idx++;
+                }
+                int toMove = 0;
+                if (doc.RootElement.TryGetProperty("to_move", out var toMoveEl) && toMoveEl.ValueKind == JsonValueKind.Number)
+                {
+                    toMove = toMoveEl.GetInt32();
+                }
+                var turnLabel = toMove == 0 ? "Your turn" : "CPU thinking";
+                scoreSummaryLine = $"You: {you} | CPU: {cpu} - {turnLabel}";
+                RenderStatus();
+                return toMove;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"Failed to parse score JSON: {e.Message}");
+                scoreSummaryLine = "Scores unavailable";
+                RenderStatus();
+                return 0;
+            }
+        }
+
+        private void SyncScoresAndMaybeTriggerCpu()
+        {
+            var toMove = UpdateScoreSummary();
+            MaybeTriggerCpuTurnInternal(toMove);
+        }
+
+        private void MaybeTriggerCpuTurnInternal(int toMove)
+        {
+            if (!cpuAutoEnabled || cpuBusy) return;
+            if (staged.Count > 0) return;
+            if (toMove != 1) return;
+            if (cpuAutoRoutine != null)
+            {
+                StopCoroutine(cpuAutoRoutine);
+            }
+            cpuAutoRoutine = StartCoroutine(CpuAutoRoutine());
+        }
+
+        private IEnumerator CpuAutoRoutine()
+        {
+            yield return null;
+            cpuAutoRoutine = null;
+            if (!cpuAutoEnabled || cpuBusy) yield break;
+            if (staged.Count > 0) yield break;
+            CpuMove();
+        }
+
+        private void SetCpuAuto(bool on)
+        {
+            cpuAutoEnabled = on;
+            if (!on && cpuAutoRoutine != null)
+            {
+                StopCoroutine(cpuAutoRoutine);
+                cpuAutoRoutine = null;
+            }
+            SyncScoresAndMaybeTriggerCpu();
+        }
+
         private void CpuMove()
         {
+            if (cpuAutoRoutine != null)
+            {
+                StopCoroutine(cpuAutoRoutine);
+                cpuAutoRoutine = null;
+            }
             if (cpuBusy)
             {
                 Debug.LogWarning("CPU move already in progress");
@@ -350,11 +471,14 @@ namespace TileTangle.Examples
                 if (string.IsNullOrEmpty(best))
                 {
                     Debug.LogWarning($"best_move error: {Engine.LastError()}");
+                    statusDetail = "CPU move failed";
+                    RenderStatus();
                     return;
                 }
                 if (best == "null")
                 {
-                    scoreLabel.text = "CPU: no legal move";
+                    statusDetail = "CPU: no legal move";
+                    RenderStatus();
                     return;
                 }
                 using var doc = JsonDocument.Parse(best);
@@ -377,6 +501,8 @@ namespace TileTangle.Examples
                 if (placements.Count == 0)
                 {
                     Debug.LogWarning("CPU move returned no placements");
+                    statusDetail = "CPU move had no placements";
+                    RenderStatus();
                     return;
                 }
                 var placementsJson = JsonSerializer.Serialize(placements);
@@ -389,6 +515,8 @@ namespace TileTangle.Examples
                 if (res == null)
                 {
                     Debug.LogError($"play_move error: {Engine.LastError()}");
+                    statusDetail = "CPU move failed";
+                    RenderStatus();
                 }
                 else
                 {
@@ -401,10 +529,13 @@ namespace TileTangle.Examples
             catch (Exception e)
             {
                 Debug.LogError($"CPU move failed: {e}");
+                statusDetail = "CPU move failed";
+                RenderStatus();
             }
             finally
             {
                 cpuBusy = false;
+                SyncScoresAndMaybeTriggerCpu();
             }
         }
 
@@ -627,6 +758,7 @@ namespace TileTangle.Examples
             hlMain.Clear(); hlCross.Clear();
             RefreshBoard();
             RefreshRack();
+            SyncScoresAndMaybeTriggerCpu();
         }
 
         private void ClearStaged()
@@ -634,6 +766,7 @@ namespace TileTangle.Examples
             staged.Clear();
             hlMain.Clear(); hlCross.Clear();
             RefreshBoard();
+            UpdatePreviewOverlay();
         }
 
         private void UpdatePreviewOverlay()
@@ -641,6 +774,8 @@ namespace TileTangle.Examples
             if (staged.Count == 0)
             {
                 hlMain.Clear(); hlCross.Clear();
+                statusDetail = string.Empty;
+                RenderStatus();
                 return;
             }
             var placements = staged.ConvertAll(p => new { x = p.x, y = p.y, kind_id = p.kindId });
@@ -656,7 +791,8 @@ namespace TileTangle.Examples
                 var mainScore = doc.RootElement.GetProperty("main_score").GetInt32();
                 var cross = doc.RootElement.GetProperty("cross_words");
                 var crossSum = 0; foreach (var cw in cross.EnumerateArray()) crossSum += cw[1].GetInt32();
-                scoreLabel.text = valid ? $"Preview: {mainWord} total={total} (main={mainScore} +cross={crossSum})" : "Preview: invalid";
+                statusDetail = valid ? $"Preview: {mainWord} total={total} (main={mainScore} +cross={crossSum})" : "Preview: invalid";
+                RenderStatus();
                 hlMain = new System.Collections.Generic.List<Vector2Int>();
                 hlCross = new System.Collections.Generic.List<System.Collections.Generic.List<Vector2Int>>();
                 foreach (var c in doc.RootElement.GetProperty("main_cells").EnumerateArray())
@@ -670,7 +806,11 @@ namespace TileTangle.Examples
                     hlCross.Add(list);
                 }
             }
-            catch { }
+            catch
+            {
+                statusDetail = string.Empty;
+                RenderStatus();
+            }
         }
     }
 }

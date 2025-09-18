@@ -6,9 +6,47 @@ import Playground from '@site/src/components/Playground';
 
 # Tiles
 
-Tiles can be classic one-letter pieces, emoji graphemes, or multi-character stacks. Try stacking on existing tiles to see how the engine maintains per-cell history.
+Tiles can be classic one-letter pieces, emoji graphemes, or multi-character stacks. Try stacking on
+existing tiles to see how the engine maintains per-cell history.
 
 <Playground initial={{ stackOn: true, stackScoring: 'sum', forbidSame: false }} />
+
+## Tile kinds & pools
+
+Each entry under `tileset.tile_kinds` defines a reusable piece. A tile kind carries an `id` (stable key
+for racks and bags), the rendered `symbol`, a `score`, and optional flags such as `is_blank` or
+`aliases` (alternate glyphs that map back to the same id).
+
+```json title="Tile kinds excerpt"
+{
+  "tileset": {
+    "tile_kinds": [
+      {"id": "A", "symbol": "A", "score": 1},
+      {"id": "Q", "symbol": "Q", "score": 10},
+      {"id": "BLANK", "symbol": "?", "score": 0, "is_blank": true}
+    ]
+  },
+  "tile_counts": {"A": 9, "Q": 1, "BLANK": 2}
+}
+```
+
+The `tile_counts` map controls how many copies land in the bag. Any tiles omitted from the counts are
+treated as zero, which is a common technique for short demo racks.
+
+## Stacks and scoring options
+
+Enable stacking in the rules to allow multiple tiles per cell. Classic Upwords behaviour (height limit,
+top-only scoring, forbidding identical overlays) is handled by
+`set_stacking(enabled, max_height, forbid_same_symbol_overlay, sum_stack_scoring)` in the bindings. The
+engine keeps full per-cell history, so undo/redo and persistence continue to work with tall stacks.
+
+## Emoji, multi-character tiles, and blanks
+
+Symbols are stored as Unicode grapheme clusters, which means tiles can hold emoji, accented syllables,
+or digraphs such as "TH". Blanks track a runtime `mark` so you can capture the chosen letter for
+scoring, and the WASM / Python / C-ABI bindings expose helper APIs for reassigning or previewing blank
+marks. When mixing emoji and ASCII, enable `language_packs` for locale-specific normalization and
+case-folding behaviour.
 
 ## Dive deeper
 

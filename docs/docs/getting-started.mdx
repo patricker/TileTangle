@@ -1,0 +1,151 @@
+---
+title: Getting Started
+sidebar_position: 1
+description: Fastest path to installing TileTangle for Rust, Python, WebAssembly, Unity, and Godot projects.
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+Jump straight into the engine with per-surface quick starts. Each tab installs the binding, spins up a
+"hello board" example, and links to the deeper docs when you are ready to explore advanced knobs.
+
+<Tabs
+  groupId="surface"
+  defaultValue="rust"
+  values={[
+    {label: 'Rust', value: 'rust'},
+    {label: 'Python', value: 'python'},
+    {label: 'Web', value: 'web'},
+    {label: 'Unity', value: 'unity'},
+    {label: 'Godot', value: 'godot'},
+  ]}
+>
+  <TabItem value="rust">
+
+1. **Install.**
+   ```bash
+   cargo add tiletangle-engine@0.2.0
+   ```
+2. **Bootstrap a game.**
+   ```rust title="src/main.rs"
+   use tiletangle_engine::{GameConfig, GameState};
+
+   fn main() -> anyhow::Result<()> {
+     let cfg: GameConfig = serde_json::from_str(include_str!("../test_data/configs/classic.json"))?;
+     let mut state = GameState::new(&cfg, 2)?;
+     for (idx, player) in state.players.iter().enumerate() {
+       println!("Player {idx} rack: {:?}", player.rack.tiles);
+     }
+     println!("Board is {}×{}", state.board.geom.width, state.board.geom.height);
+     Ok(())
+   }
+   ```
+3. **Run it.**
+   ```bash
+   cargo run
+   ```
+4. **Next steps.** Read through the [architecture overview](architecture-overview) and the
+   [move generation deep dive](move-generation) for production builds.
+
+  </TabItem>
+  <TabItem value="python">
+
+1. **Install.**
+   ```bash
+   pip install tiletangle==0.2.0
+   ```
+2. **Spawn a state.**
+   ```python title="hello.py"
+   import json
+   from tiletangle import Game
+
+   cfg = {
+       "tileset": {"tile_kinds": [{"id": "A", "symbol": "A", "score": 1}]},
+       "rack_size": 7,
+       "board_layout": {"width": 5, "height": 5},
+       "ruleset_id": "cross",
+       "dictionary_id": "en",
+       "rng_seed": 42,
+       "tile_counts": {"A": 20},
+       "free_word_mode": True,
+   }
+
+   game = Game(json.dumps(cfg), players=2)
+   board = json.loads(game.get_board_json())
+   print("Board size:", board["width"], "x", board["height"])
+  ```
+3. **Run it.**
+   ```bash
+   python hello.py
+   ```
+4. **Next steps.** Jump to the [Python binding reference](python) or try the
+   [top moves demo](python-demo) for an end-to-end CLI helper.
+
+  </TabItem>
+  <TabItem value="web">
+
+1. **Install.**
+   ```bash
+   npm install @tiletangle/engine-wasm@0.2.0
+   ```
+2. **Load the module.**
+   ```ts title="src/main.ts"
+   import init, { new_game, get_board } from '@tiletangle/engine-wasm';
+
+   const cfg = await fetch('/configs/classic.json').then(r => r.json());
+   await init();
+   const game = new_game(JSON.stringify(cfg), 2);
+   const board = JSON.parse(get_board(game));
+   console.log(board.rows);
+   ```
+3. **Bundle/dev server.**
+   ```bash
+   npm run dev
+   ```
+4. **Next steps.** Explore the [Web/WASM API reference](web-wasm-api) and the interactive
+   [Playground guide](playground) for UI patterns.
+
+  </TabItem>
+  <TabItem value="unity">
+
+1. **Install.** Point Unity's package manager at the repo tag:
+   ```json title="Packages/manifest.json"
+   {
+     "dependencies": {
+       "com.tiletangle.engine": "https://example.com/TileTangle.git?path=bindings/unity#0.2.0"
+     }
+   }
+   ```
+2. **Open the sample.** Import the `BoardDemo` sample from the package and press **Play** to see
+   drag-and-drop placement, CPU hints, and non-rect adjacency presets.
+3. **Wire your scene.** Attach `TileTangle.Engine` to a behaviour and call `NewGame(...)`,
+   `PreviewMoveJson(...)`, and `PlayMove(...)` from your UI logic.
+4. **Next steps.** Follow the [Unity integration guide](unity-integration) for lifecycle
+   management, async worker threads, and touch controls.
+
+  </TabItem>
+  <TabItem value="godot">
+
+1. **Install.** Copy the addon into your project and enable it:
+   ```text
+   res://addons/tiletangle/
+   ```
+2. **Open the example scene.** Load `addons/tiletangle/examples/project.godot` and run `Main.tscn`
+   to exercise staged placements, CPU auto-play, and score overlays.
+3. **Script your board.** Instantiate `WordEngine` in GDScript and call `new_game()`, `preview_move()`,
+   and `play_move()` from your UI handlers.
+4. **Next steps.** Dive into the [Godot integration docs](godot-integration) for export tips and
+   headless smoke tests.
+
+  </TabItem>
+</Tabs>
+
+## Need a hosted sandbox?
+
+The [Playground](playground) runs entirely in-browser, exposing live move generation, adjacency
+switches, and CPU hints. Use it to validate dictionary builds before embedding them into any of the
+bindings above.
+
+For packaging automation across all surfaces, run `./tools/package_release.py` to reproduce the
+release-ready artifacts under `dist/`.

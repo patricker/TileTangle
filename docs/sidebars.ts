@@ -65,6 +65,7 @@ const sidebars: SidebarsConfig = {
       label: 'Reference',
       items: [
         'architecture-overview',
+        'getting-started',
         'install',
         {
           type: 'category',

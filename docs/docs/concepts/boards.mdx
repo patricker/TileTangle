@@ -6,9 +6,71 @@ import Playground from '@site/src/components/Playground';
 
 # Boards
 
-Board geometry decides how tiles connect. TileTangle can render classic 15×15 grids, sparse graphs, or layered 3D stacks. Use the playground to toggle the layout modes and observe how the adjacency controls change.
+Board geometry decides how tiles connect. TileTangle can render classic 15×15 grids, sparse graphs, or
+layered 3D stacks. Use the playground to toggle the layout modes and observe how the adjacency controls
+change.
 
 <Playground initial={{ useHex: true }} />
+
+## Rectangular layouts
+
+The simplest layout is a `RectBoardLayout` with a `width` × `height`. Rect boards support bonus grids,
+anchor discovery, and cross-checks out of the box. A JSON excerpt:
+
+```json
+"board_layout": {
+  "type": "rect",
+  "width": 15,
+  "height": 15,
+  "bonuses": {"(7,7)": {"word_mul": 2}}
+}
+```
+
+Rect boards can later accept a graph overlay to remove cells or add custom edges without rebuilding the
+whole state.
+
+## Graph overlays (holes, hex, custom adjacencies)
+
+Setting `type: "graph"` replaces the implicit north/east/south/west adjacency with an explicit node and
+edge list. Nodes are stored in render order (x/y coordinates drive the UI) while edges carry optional
+`dir` tags that the engine and UI use to label lines.
+
+```json
+"board_layout": {
+  "type": "graph",
+  "width": 9,
+  "height": 9,
+  "nodes": [{"x": 4, "y": 0}, {"x": 5, "y": 0}, {"x": 4, "y": 1}],
+  "edges": [
+    {"a": 0, "b": 1, "dir": "E"},
+    {"a": 0, "b": 2, "dir": "SE"}
+  ]
+}
+```
+
+This variant covers hex grids, triangular boards, and arbitrary graphs (e.g., puzzles carved into
+regions). All move generation, adjacency validation, and CPU search routines operate on the same graph
+abstraction, so custom geometry retains full solver support.
+
+## 3D layers
+
+For towers or cube variants, use `type: "3d"` with an additional `depth` field. The engine flattens the
+layers internally (each cell knows its `z` index) and the Playground exposes a slice selector for
+visualization.
+
+```json
+"board_layout": {
+  "type": "3d",
+  "width": 5,
+  "height": 5,
+  "depth": 3,
+  "bonuses": {"(2,2,1)": {"letter_mul": 3}}
+}
+```
+
+Rules and dictionaries remain unchanged—3D boards reuse the same validation hooks, scoring multipliers,
+and AI search heuristics. You can still apply graph overlays on top of 3D slices for tunnels or missing
+cells.
 
 ## Dive deeper
 

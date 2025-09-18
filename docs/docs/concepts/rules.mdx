@@ -6,9 +6,42 @@ import Playground from '@site/src/components/Playground';
 
 # Rules
 
-Rules define what counts as a legal move: connectivity, anchors, cross-checks, stack constraints, and scoring bonuses. Experiment with the rule toggles and scoring controls, then dive into the detailed guides for customizing validations and plugins.
+Rules define what counts as a legal move: connectivity, anchors, cross-checks, stack constraints, and
+scoring bonuses. Experiment with the rule toggles and scoring controls, then dive into the detailed
+guides for customizing validations and plugins.
 
 <Playground initial={{ useDict: true, forbidSame: true, stackOn: false }} />
+
+## Move pipeline at a glance
+
+1. **Draft** — A player proposes placements (`MoveDraft`) via UI or binding helpers.
+2. **Validate** — The active `Rules` implementation enforces connectivity, dictionary checks,
+   stack constraints, and custom plugin hooks.
+3. **Score** — Once validated, the pipeline computes base word scores, cross scores, bingo bonuses, and
+   stack multipliers.
+4. **Commit** — The move is applied, events are logged, racks refill, and the turn advances.
+
+The default `CrosswordRules` mirrors Scrabble-style connectivity, but you can override any step by
+implementing the `RulePlugin` trait or by toggling the provided features (`free_word_mode`, diagonal
+edges, stacking policies, etc.).
+
+## Configuration surface
+
+- `ruleset_id` selects a preset (currently `cross` for classic crossword play). Upcoming presets will
+  cover stacking and relaxed adjacency variants.
+- The Playground and bindings expose `set_free_word_mode` to bypass dictionaries during prototyping.
+- `set_stacking` flips stacking on/off and tunes the max height and scoring model.
+- Rule plugins can veto or post-process moves, making it easy to inject house rules (swap tiles, bonus
+  cards, wild marks) without patching the core engine.
+
+```rust title="Registering a custom plugin"
+game_rules.add_plugin(Box::new(HeptagonBonus::default()));
+game_rules.add_plugin(Box::new(WordLengthCap::new(10)));
+```
+
+Plugins run in order, and each one receives the draft, validation context, and scoring metadata so they
+can safely augment or reject the move. Combined with graph geometry and custom lexica, almost any word
+game variant can be expressed without forking the engine.
 
 ## Dive deeper
 

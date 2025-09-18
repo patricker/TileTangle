@@ -619,7 +619,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 ### Demo
 
 * [x] Docs: play vs CPU (easy/medium).
-* [ ] Unity/Godot: CPU opponent toggle.
+* [x] Unity/Godot: CPU opponent toggle.
 
 ### Exit Criteria
 
@@ -850,8 +850,8 @@ edges = [{a=0,b=1,dir="E"}, {a=0,b=2,dir="SE"}, {a=1,b=2,dir="SW"}]
 
 ## Documentation Pages Checklist (running list)
 
-* [ ] Getting Started (Rust / Python / Web / Unity / Godot).
-* [ ] Concepts: Tiles, Boards (2D/3D/graph), Rules, Dictionaries.
+* [x] Getting Started (Rust / Python / Web / Unity / Godot).
+* [x] Concepts: Tiles, Boards (2D/3D/graph), Rules, Dictionaries.
 * [ ] Unicode & Emoji: graphemes, normalization, RTL.
 * [ ] Move Validation & Scoring (animated examples).
 * [ ] Dictionary Engines: Set, DAWG, GADDAG.
