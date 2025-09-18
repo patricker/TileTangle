@@ -757,17 +757,17 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 
 ### Implementation
 
-* [ ] Docusaurus structure:
+* [x] Docusaurus structure:
 
   * **Concepts:** Boards, Tiles, Rules, Lexica, Move Gen, AI.
   * **How-tos:** Create variant; add emoji language; enable 3D; write plugin.
   * **Reference:** Rust API (rustdoc), C ABI, Python, WASM, Unity, Godot.
   * **Playgrounds:** Each major concept has a small interactive.
-* [ ] Add “Cookbook” snippets per binding.
+* [x] Add “Cookbook” snippets per binding.
 
 ### Tests
 
-* [ ] Link checker; code snippet tests (doctests for Rust; CI runs Python snippets).
+* [x] Link checker; code snippet tests (doctests for Rust; CI runs Python snippets).
 
 ### Exit Criteria
 

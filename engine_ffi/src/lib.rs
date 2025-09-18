@@ -2,6 +2,7 @@ use engine::{self, AiConfig, AiDifficulty, BoardGeometry, Rules};
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::convert::TryFrom;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_uint};
 
@@ -140,12 +141,30 @@ pub extern "C" fn tt_new_game(config_json: *const c_char, players: c_uint) -> *m
             })
             .collect(),
     };
+    let width = cfg.board_layout.width;
+    let layer_height = cfg.board_layout.height;
+    if width == 0 || layer_height == 0 {
+        set_error("board dimensions must be positive");
+        return std::ptr::null_mut();
+    }
+    let depth = cfg.board_layout.depth.unwrap_or(1);
+    if depth == 0 {
+        set_error("board depth must be positive");
+        return std::ptr::null_mut();
+    }
+    let total_height = match layer_height.checked_mul(depth) {
+        Some(v) => v,
+        None => {
+            set_error("board height * depth overflow");
+            return std::ptr::null_mut();
+        }
+    };
     let eng_cfg = engine::GameConfig {
         tileset,
         rack_size: cfg.rack_size,
         board_layout: engine::RectBoardLayout {
-            width: cfg.board_layout.width,
-            height: cfg.board_layout.height,
+            width,
+            height: total_height,
         },
         ruleset_id: cfg.ruleset_id,
         dictionary_id: cfg.dictionary_id,
@@ -161,11 +180,27 @@ pub extern "C" fn tt_new_game(config_json: *const c_char, players: c_uint) -> *m
     };
     // Optional graph overlay or 3D
     if cfg.board_layout.r#type.as_deref() == Some("3d") {
-        let w = cfg.board_layout.width as i32;
-        let h = cfg.board_layout.height as i32;
-        let d = cfg.board_layout.depth.unwrap_or(1) as i32;
-        // Adjust geometry height to flattened 2D height (h * d) if needed
-        // Note: We assume engine GameConfig height already matches this in WASM/loader callers; here we can proceed with overlay only.
+        let w = match i32::try_from(width) {
+            Ok(v) => v,
+            Err(_) => {
+                set_error("board width too large for 3D");
+                return std::ptr::null_mut();
+            }
+        };
+        let h = match i32::try_from(layer_height) {
+            Ok(v) => v,
+            Err(_) => {
+                set_error("board height too large for 3D");
+                return std::ptr::null_mut();
+            }
+        };
+        let d = match i32::try_from(depth) {
+            Ok(v) => v,
+            Err(_) => {
+                set_error("board depth too large for 3D");
+                return std::ptr::null_mut();
+            }
+        };
         let mut nodes: Vec<engine::Coord2D> = Vec::new();
         for z in 0..d {
             for y in 0..h {

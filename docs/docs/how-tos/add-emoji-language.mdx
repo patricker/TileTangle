@@ -1,0 +1,29 @@
+---
+title: Add an Emoji Language Pack
+---
+
+
+# Add an Emoji Language Pack
+
+Emoji alphabets behave like any other lexicon—just remember that characters are grapheme clusters, not single bytes.
+
+1. **Normalize input.** Split source words with the `unicode-segmentation` crate (Rust) or `grapheme-splitter` (JS) so surrogate pairs stay intact.
+2. **Author tile kinds.** Assign IDs that reflect the emoji name and point `symbol` to the rendered glyph.
+3. **Ship dictionaries.** Use the set engine for tiny curated lists; switch to DAWG or FST once you exceed a few thousand entries.
+4. **Expose bindings.** Python, WASM, Unity, and Godot all accept UTF-8 strings end-to-end—no extra encoding layer is required.
+
+```rust title="emoji_tiles.rs"
+let tileset = Tileset {
+  tile_kinds: vec![
+    TileKind { id: "SUN".into(), symbol: "🌞".into(), score: 5, is_blank: false, aliases: vec![] },
+    TileKind { id: "MOON".into(), symbol: "🌙".into(), score: 4, is_blank: false, aliases: vec![] },
+    TileKind { id: "STAR".into(), symbol: "⭐".into(), score: 3, is_blank: false, aliases: vec![] },
+  ],
+};
+```
+
+## Related guidance
+
+- [Emoji & graphemes](/docs/emoji-and-graphemes)
+- [Language packs](/docs/language-packs)
+- [Lexicon integration](/docs/lexicon-integration)

@@ -1,6 +1,7 @@
 use engine::{BoardGeometry, Rules};
 use godot::prelude::*;
 use serde::Deserialize;
+use std::convert::TryFrom;
 
 #[derive(GodotClass)]
 #[class(base=RefCounted)]
@@ -114,12 +115,30 @@ impl WordEngine {
                 })
                 .collect(),
         };
+        let width = parsed.board_layout.width;
+        let layer_height = parsed.board_layout.height;
+        if width == 0 || layer_height == 0 {
+            godot_error!("board dimensions must be positive");
+            return false;
+        }
+        let depth = parsed.board_layout.depth.unwrap_or(1);
+        if depth == 0 {
+            godot_error!("board depth must be positive");
+            return false;
+        }
+        let total_height = match layer_height.checked_mul(depth) {
+            Some(v) => v,
+            None => {
+                godot_error!("board height * depth overflow");
+                return false;
+            }
+        };
         let cfg = engine::GameConfig {
             tileset,
             rack_size: parsed.rack_size,
             board_layout: engine::RectBoardLayout {
-                width: parsed.board_layout.width,
-                height: parsed.board_layout.height,
+                width,
+                height: total_height,
             },
             ruleset_id: parsed.ruleset_id,
             dictionary_id: parsed.dictionary_id,
@@ -130,9 +149,27 @@ impl WordEngine {
             Ok(mut state) => {
                 // Optional graph or 3D overlay
                 if parsed.board_layout.r#type.as_deref() == Some("3d") {
-                    let w = parsed.board_layout.width as i32;
-                    let h = parsed.board_layout.height as i32;
-                    let d = parsed.board_layout.depth.unwrap_or(1) as i32;
+                    let w = match i32::try_from(width) {
+                        Ok(v) => v,
+                        Err(_) => {
+                            godot_error!("board width too large for 3D");
+                            return false;
+                        }
+                    };
+                    let h = match i32::try_from(layer_height) {
+                        Ok(v) => v,
+                        Err(_) => {
+                            godot_error!("board height too large for 3D");
+                            return false;
+                        }
+                    };
+                    let d = match i32::try_from(depth) {
+                        Ok(v) => v,
+                        Err(_) => {
+                            godot_error!("board depth too large for 3D");
+                            return false;
+                        }
+                    };
                     let mut nodes: Vec<engine::Coord2D> = Vec::new();
                     for z in 0..d {
                         for y in 0..h {

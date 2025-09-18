@@ -1,0 +1,35 @@
+---
+title: Write a Rule Plug-in
+---
+
+
+# Write a Rule Plug-in
+
+Rule plug-ins let you extend validation and scoring without forking the engine.
+
+1. **Define a validator.** Implement `RulePlugin` in Rust and register it under a ruleset ID.
+2. **Expose knobs.** Serialize parameters (JSON or TOML) so configs can toggle the behavior.
+3. **Wire into bindings.** Export the new hook through FFI so Python/WASM/Unity/Godot can opt-in.
+4. **Test it.** Build fixture moves and cover failure cases in both unit tests and end-to-end demos.
+
+```rust title="no_short_words.rs"
+use engine::rules::{PluginContext, RuleFailure, RulePlugin};
+
+#[derive(Default)]
+pub struct NoShortWords;
+
+impl RulePlugin for NoShortWords {
+    fn validate(&self, ctx: &PluginContext) -> Result<(), RuleFailure> {
+        if ctx.main_word.len() < 4 {
+            return Err(RuleFailure::reject("Words must be at least four letters"));
+        }
+        Ok(())
+    }
+}
+```
+
+## Related guidance
+
+- [Rule plug-ins](/docs/rule-plugins)
+- [Scoring and validation](/docs/scoring-and-validation)
+- [Persistence and replays](/docs/persistence-and-replays)

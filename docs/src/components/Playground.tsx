@@ -1,11 +1,64 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {classicTilesets} from './demoUtils';
 
-type BoardJson = { width: number; height: number; rows: string[][] };
-type Placement = { x: number; y: number; kind_id: string; mark?: string | null };
+const fallbackDictionaryWords = [
+  'AA', 'AB', 'AD', 'AE', 'AGO', 'ALE', 'ARK', 'ART', 'BAD', 'BAG', 'BAL', 'BAR',
+  'BAT', 'BEE', 'BOG', 'CAB', 'CAD', 'CAN', 'CAR', 'CAT', 'COD', 'COG', 'COT',
+  'DOG', 'DOT', 'EAR', 'EEL', 'ELF', 'ERA', 'FAN', 'FAR', 'FAST', 'FEED', 'FILE',
+  'FINE', 'FIR', 'FOG', 'FOOT', 'GAME', 'GATE', 'GO', 'HAT', 'HERO', 'ICE', 'INK',
+  'JAR', 'JIG', 'KID', 'KIN', 'LAP', 'LID', 'MAP', 'NAP', 'OAR', 'OAT', 'PAD',
+  'PAN', 'PINE', 'PLAY', 'QUIZ', 'READ', 'READS', 'ROAD', 'ROPE', 'RUN', 'SAGE',
+  'SAND', 'SEA', 'STACK', 'STACKS', 'STONE', 'SUN', 'TAR', 'TIDE', 'TREE', 'TREES',
+  'USE', 'VAST', 'WARP', 'WAVE', 'WORD', 'WORDS', 'WORK', 'YARD', 'ZEN'
+];
+const fallbackDictionaryText = fallbackDictionaryWords.join('\n');
+
+const clamp = (value: number, min: number, max: number): number => {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(Math.max(value, min), max);
+};
+
+const formatTileCounts = (counts: Record<string, number>): string => {
+  return Object.entries(counts)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([id, count]) => `${id}:${count}`)
+    .join('\n');
+};
+
+const parseTileCounts = (text: string, fallback: Record<string, number>) => {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return {map: fallback, error: 'Tile pool cannot be empty.'};
+  }
+  const map: Record<string, number> = {};
+  const tokens = trimmed.split(/[,\n]+/);
+  for (const token of tokens) {
+    const entry = token.trim();
+    if (!entry) continue;
+    const match = entry.match(/^([A-Za-z_]+)\s*[:=]\s*(\d+)$/);
+    if (!match) {
+      return {map: fallback, error: `Invalid tile entry: “${entry}”`};
+    }
+    const id = match[1].toUpperCase();
+    const count = Number.parseInt(match[2], 10);
+    if (!Number.isFinite(count) || count < 0) {
+      return {map: fallback, error: `Invalid count for ${id}`};
+    }
+    map[id] = count;
+  }
+  if (Object.keys(map).length === 0) {
+    return {map: fallback, error: 'Tile pool must include at least one tile.'};
+  }
+  return {map, error: null};
+};
+
+type BoardJson = {width: number; height: number; rows: string[][]};
+type Placement = {x: number; y: number; kind_id: string; mark?: string | null};
 type GeneratedMove = {
   word: string;
   score: number;
-  placements: { x: number; y: number; kind_id: string; mark?: string | null }[];
+  total?: number;
+  placements: Placement[];
 };
 
 type AiSuggestion = {
@@ -20,7 +73,7 @@ type AiSuggestion = {
 };
 
 type PlaygroundInitialConfig = {
-  tileset?: { tile_kinds: { id: string; symbol: string; score: number; is_blank?: boolean; aliases?: string[] }[] };
+  tileset?: {tile_kinds: {id: string; symbol: string; score: number; is_blank?: boolean; aliases?: string[]}[]};
   tile_counts?: Record<string, number>;
   rack_size?: number;
   board_layout?: Record<string, unknown>;
@@ -51,11 +104,55 @@ type PlaygroundProps = {
   initial?: PlaygroundInitial;
 };
 
-export default function Playground({initial}: PlaygroundProps = {}): JSX.Element {
-  const configOverrideRef = useRef<PlaygroundInitialConfig | undefined>(initial?.config);
-  const rackOverrideRef = useRef<string[] | undefined>(initial?.rack);
+type ControlSectionProps = {
+  title: string;
+  children: React.ReactNode;
+};
 
-  const [ready, setReady] = useState(false);
+type PlayerSummary = {
+  index: number;
+  score: number;
+  rack: string[];
+};
+
+type BagSummary = {
+  counts: Record<string, number>;
+  total: number;
+};
+
+type SetupState = {
+  width: number;
+  height: number;
+  depth: number;
+  rackSize: number;
+  tileCountsText: string;
+};
+
+function ControlSection({title, children}: ControlSectionProps): JSX.Element {
+  return (
+    <div style={{display: 'flex', flexDirection: 'column', gap: 4}}>
+      <div style={{fontWeight: 600, fontSize: 13}}>{title}</div>
+      <div style={{display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center'}}>{children}</div>
+    </div>
+  );
+}
+
+export default function Playground({initial}: PlaygroundProps = {}): JSX.Element {
+  const initialConfig = initial?.config;
+  const initialLayout = (initialConfig?.board_layout ?? {}) as Record<string, any>;
+  const initialWidth = typeof initialLayout.width === 'number' && initialLayout.width > 0 ? initialLayout.width : 9;
+  const initialHeight = typeof initialLayout.height === 'number' && initialLayout.height > 0 ? initialLayout.height : 9;
+  const initialDepth = typeof initialLayout.depth === 'number' && initialLayout.depth > 0 ? initialLayout.depth : (initial?.depth ?? 3);
+  const initialRackSize = initialConfig?.rack_size ?? 7;
+
+  const classic = useMemo(() => classicTilesets(), []);
+  const defaultTileKinds = useMemo(() => classic.tile_kinds, [classic]);
+  const defaultTileCounts = useMemo(() => classic.tile_counts, [classic]);
+  const initialTileCountsText = useMemo(
+    () => formatTileCounts(initialConfig?.tile_counts ?? defaultTileCounts),
+    [initialConfig?.tile_counts, defaultTileCounts],
+  );
+
   const [useWorker, setUseWorker] = useState(initial?.useWorker ?? false);
   const [useDict, setUseDict] = useState(initial?.useDict ?? true);
   const [dictEngine, setDictEngine] = useState<'fst' | 'set' | 'dawg' | 'gaddag'>(initial?.dictEngine ?? 'fst');
@@ -65,432 +162,589 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const [use3D, setUse3D] = useState(initial?.use3D ?? false);
   const [rtl, setRtl] = useState(initial?.rtl ?? false);
   const [stackOn, setStackOn] = useState(initial?.stackOn ?? false);
-  const [stackScoring, setStackScoring] = useState<'top'|'sum'>(initial?.stackScoring ?? 'top');
+  const [stackScoring, setStackScoring] = useState<'top' | 'sum'>(initial?.stackScoring ?? 'top');
   const [forbidSame, setForbidSame] = useState(initial?.forbidSame ?? true);
-  const [depth, setDepth] = useState(initial?.depth ?? 3);
   const [z, setZ] = useState(0);
-  const [game, setGame] = useState<any>(null);
+  const rackOverrideRef = useRef<string[] | undefined>(initial?.rack);
+  const workerRef = useRef<Worker | null>(null);
+
+  const [appliedSettings, setAppliedSettings] = useState<SetupState>({
+    width: initialWidth,
+    height: initialHeight,
+    depth: initialDepth,
+    rackSize: initialRackSize,
+    tileCountsText: initialTileCountsText,
+  });
+  const [draftSettings, setDraftSettings] = useState<SetupState>(appliedSettings);
+  const [tileCountsError, setTileCountsError] = useState<string | null>(null);
+
+  const appliedTileCountsResult = useMemo(
+    () => parseTileCounts(appliedSettings.tileCountsText, defaultTileCounts),
+    [appliedSettings.tileCountsText, defaultTileCounts],
+  );
+  const appliedTileCounts = appliedTileCountsResult.map;
+
+  const dynamicTileKinds = useMemo(() => {
+    const byId = new Map(defaultTileKinds.map(kind => [kind.id, kind]));
+    const kinds = [...defaultTileKinds];
+    for (const id of Object.keys(appliedTileCounts)) {
+      if (!byId.has(id)) {
+        kinds.push({id, symbol: id, score: 1, is_blank: false, aliases: []});
+      }
+    }
+    return kinds;
+  }, [defaultTileKinds, appliedTileCounts]);
+
+  const [ready, setReady] = useState(false);
   const [board, setBoard] = useState<BoardJson | null>(null);
+  const [game, setGame] = useState<any>(null);
   const [pending, setPending] = useState<Placement[]>([]);
   const [showMoves, setShowMoves] = useState(false);
   const [legalMoves, setLegalMoves] = useState<GeneratedMove[]>([]);
   const [activeMoveIndex, setActiveMoveIndex] = useState<number | null>(null);
   const [loadingMoves, setLoadingMoves] = useState(false);
   const [rack, setRack] = useState<string[]>(rackOverrideRef.current ?? []);
+  const [players, setPlayers] = useState<PlayerSummary[]>([]);
+  const [activePlayer, setActivePlayer] = useState(0);
+  const [turnNumber, setTurnNumber] = useState(0);
+  const [bagSummary, setBagSummary] = useState<BagSummary>({counts: {}, total: 0});
   const [cpuDifficulty, setCpuDifficulty] = useState<'off' | 'easy' | 'medium' | 'hard'>(initial?.cpuDifficulty ?? 'off');
   const [cpuThinking, setCpuThinking] = useState(false);
   const [cpuSuggestion, setCpuSuggestion] = useState<AiSuggestion | null>(null);
   const [lastCpu, setLastCpu] = useState<AiSuggestion | null>(null);
+  const [cpuError, setCpuError] = useState<string | null>(null);
+  const [dictReady, setDictReady] = useState(!useDict);
+  const [dictError, setDictError] = useState<string | null>(null);
+  const [dictLoading, setDictLoading] = useState(false);
   const [snapshotText, setSnapshotText] = useState('');
   const [eventLogText, setEventLogText] = useState('');
-  const workerRef = useRef<Worker | null>(null);
-
-  const defaultTileset = useMemo(() => ({
-    tile_kinds: [
-      { id: 'A', symbol: 'A', score: 1 },
-      { id: 'B', symbol: 'B', score: 3 },
-    ],
-  }), []);
-
-  const defaultTileCounts = useMemo(() => ({ A: 30, B: 12 }), []);
-
-  const cfg = useMemo(() => {
-    const override = configOverrideRef.current;
-    const baseWidth = typeof override?.board_layout === 'object' && override?.board_layout !== null && 'width' in (override.board_layout as any)
-      ? Number((override.board_layout as any).width)
-      : 9;
-    const baseHeight = typeof override?.board_layout === 'object' && override?.board_layout !== null && 'height' in (override.board_layout as any)
-      ? Number((override.board_layout as any).height)
-      : 9;
-
-    const width = Number.isFinite(baseWidth) && baseWidth > 0 ? baseWidth : 9;
-    const height = Number.isFinite(baseHeight) && baseHeight > 0 ? baseHeight : 9;
-
-    let boardLayout: Record<string, unknown>;
-    if (override?.board_layout) {
-      boardLayout = override.board_layout;
-    } else if (use3D) {
-      boardLayout = { type: '3d', width, height, depth };
-    } else if (useDiag) {
-      const nodes: {x:number;y:number}[] = [];
-      for (let y=0;y<height;y++) for (let x=0;x<width;x++) nodes.push({x,y});
-      const index = (x:number,y:number) => y*width + x;
-      const edges: {a:number;b:number;dir:string}[] = [];
-      const tryEdge = (x1:number,y1:number,x2:number,y2:number,dir:string) => {
-        if (x2<0||x2>=width||y2<0||y2>=height) return;
-        edges.push({ a:index(x1,y1), b:index(x2,y2), dir });
-      };
-      for (let y=0;y<height;y++) {
-        for (let x=0;x<width;x++) {
-          tryEdge(x,y,x+1,y,'E');
-          tryEdge(x,y,x-1,y,'W');
-          tryEdge(x,y,x,y-1,'N');
-          tryEdge(x,y,x,y+1,'S');
-          tryEdge(x,y,x+1,y-1,'NE');
-          tryEdge(x,y,x-1,y-1,'NW');
-          tryEdge(x,y,x+1,y+1,'SE');
-          tryEdge(x,y,x-1,y+1,'SW');
-        }
-      }
-      boardLayout = { width, height, type: 'graph', nodes, edges };
-    } else if (useHex) {
-      const nodes: {x:number;y:number}[] = [];
-      for (let y=0;y<height;y++) for (let x=0;x<width;x++) nodes.push({x,y});
-      const index = (x:number,y:number) => y*width + x;
-      const edges: {a:number;b:number;dir:string}[] = [];
-      const tryEdge = (x1:number,y1:number,x2:number,y2:number,dir:string) => {
-        if (x2<0||x2>=width||y2<0||y2>=height) return;
-        edges.push({ a:index(x1,y1), b:index(x2,y2), dir });
-      };
-      for (let y=0;y<height;y++) {
-        for (let x=0;x<width;x++) {
-          const even = (y % 2) === 0;
-          tryEdge(x,y,x+1,y,'E');
-          tryEdge(x,y, x + (even ? 0 : 1), y-1, 'NE');
-          tryEdge(x,y, x + (even ? 0 : 1), y+1, 'SE');
-        }
-      }
-      boardLayout = { width, height, type: 'graph', nodes, edges };
-    } else {
-      boardLayout = { width, height };
-    }
-
-    return {
-      tileset: override?.tileset ?? defaultTileset,
-      rack_size: override?.rack_size ?? 7,
-      board_layout: boardLayout,
-      ruleset_id: override?.ruleset_id ?? 'cross',
-      dictionary_id: override?.dictionary_id ?? 'en',
-      rng_seed: override?.rng_seed ?? 1,
-      tile_counts: override?.tile_counts ?? defaultTileCounts,
-      free_word_mode: !useDict,
-    } as any;
-  }, [useDict, useHex, useDiag, use3D, depth, defaultTileset, defaultTileCounts]);
-
-  // Optional: build a tiny anagram index from the demo dictionary
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [anagramIndex, setAnagramIndex] = useState<Map<string, string> | null>(null);
+
+  const effectiveDepth = use3D ? appliedSettings.depth : 1;
+
+  useEffect(() => {
+    setZ(prev => Math.min(prev, Math.max(0, effectiveDepth - 1)));
+  }, [effectiveDepth]);
+
+  useEffect(() => {
+    if (!use3D) {
+      setInfoMessage(null);
+    }
+  }, [use3D]);
+
   useEffect(() => {
     let cancelled = false;
-    async function loadIndex() {
-      if (!useAnagram || !useDict) { setAnagramIndex(null); return; }
+
+    async function buildIndex() {
+      if (!useAnagram || !useDict) {
+        setAnagramIndex(null);
+        return;
+      }
       try {
-        // Prefer text to avoid bundling large FST parsing on the client
         const resp = await fetch('/dictionaries/TWL06.txt');
-        if (!resp.ok) { setAnagramIndex(null); return; }
-        const txt = await resp.text();
-        // Build a small index only for words length <= 7 (rack size)
-        const m = new Map<string, string>();
-        const maxLen = 7;
-        for (const raw of txt.split(/\r?\n/)) {
-          const w = raw.trim();
-          if (!w || w.startsWith('#')) continue;
-          if (w.length > maxLen) continue;
-          const sig = w.toUpperCase().split('').sort().join('');
-          if (!m.has(sig)) m.set(sig, w.toUpperCase());
+        if (!resp.ok) {
+          setAnagramIndex(null);
+          return;
         }
-        if (!cancelled) setAnagramIndex(m);
+        const txt = await resp.text();
+        const maxLen = appliedSettings.rackSize;
+        const map = new Map<string, string>();
+        for (const raw of txt.split(/\r?\n/)) {
+          const word = raw.trim();
+          if (!word || word.startsWith('#') || word.length > maxLen) continue;
+          const sig = word.toUpperCase().split('').sort().join('');
+          if (!map.has(sig)) map.set(sig, word.toUpperCase());
+        }
+        if (!cancelled) setAnagramIndex(map);
       } catch {
         if (!cancelled) setAnagramIndex(null);
       }
     }
-    loadIndex();
-    return () => { cancelled = true; };
-  }, [useAnagram, useDict]);
+
+    buildIndex();
+    return () => {
+      cancelled = true;
+    };
+  }, [useAnagram, useDict, appliedSettings.rackSize]);
+
+  const cfg = useMemo(() => {
+    const width = clamp(appliedSettings.width, 2, 30);
+    const height = clamp(appliedSettings.height, 2, 30);
+    const layoutDepth = clamp(appliedSettings.depth, 1, 12);
+
+    let boardLayout: Record<string, unknown>;
+    if (use3D) {
+      boardLayout = {type: '3d', width, height, depth: layoutDepth};
+    } else if (useDiag) {
+      const nodes: {x: number; y: number}[] = [];
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          nodes.push({x, y});
+        }
+      }
+      const index = (x: number, y: number) => y * width + x;
+      const edges: {a: number; b: number; dir: string}[] = [];
+      const addEdge = (x1: number, y1: number, x2: number, y2: number, dir: string) => {
+        if (x2 < 0 || x2 >= width || y2 < 0 || y2 >= height) return;
+        edges.push({a: index(x1, y1), b: index(x2, y2), dir});
+      };
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          addEdge(x, y, x + 1, y, 'E');
+          addEdge(x, y, x - 1, y, 'W');
+          addEdge(x, y, x, y - 1, 'N');
+          addEdge(x, y, x, y + 1, 'S');
+          addEdge(x, y, x + 1, y - 1, 'NE');
+          addEdge(x, y, x - 1, y - 1, 'NW');
+          addEdge(x, y, x + 1, y + 1, 'SE');
+          addEdge(x, y, x - 1, y + 1, 'SW');
+        }
+      }
+      boardLayout = {width, height, type: 'graph', nodes, edges};
+    } else if (useHex) {
+      const nodes: {x: number; y: number}[] = [];
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          nodes.push({x, y});
+        }
+      }
+      const index = (x: number, y: number) => y * width + x;
+      const edges: {a: number; b: number; dir: string}[] = [];
+      const addEdge = (x1: number, y1: number, x2: number, y2: number, dir: string) => {
+        if (x2 < 0 || x2 >= width || y2 < 0 || y2 >= height) return;
+        edges.push({a: index(x1, y1), b: index(x2, y2), dir});
+      };
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const even = y % 2 === 0;
+          addEdge(x, y, x + 1, y, 'E');
+          addEdge(x, y, x + (even ? 0 : 1), y - 1, 'NE');
+          addEdge(x, y, x + (even ? 0 : 1), y + 1, 'SE');
+        }
+      }
+      boardLayout = {width, height, type: 'graph', nodes, edges};
+    } else {
+      boardLayout = {width, height};
+    }
+
+    const tileCountsRecord: Record<string, number> = {};
+    for (const [id, count] of Object.entries(appliedTileCounts)) {
+      tileCountsRecord[id] = count;
+    }
+
+    return {
+      tileset: {tile_kinds: dynamicTileKinds},
+      rack_size: clamp(appliedSettings.rackSize, 1, 14),
+      board_layout: boardLayout,
+      ruleset_id: initialConfig?.ruleset_id ?? 'cross',
+      dictionary_id: initialConfig?.dictionary_id ?? 'en',
+      rng_seed: initialConfig?.rng_seed ?? 1,
+      tile_counts: tileCountsRecord,
+      free_word_mode: !useDict,
+    } as any;
+  }, [
+    appliedSettings.width,
+    appliedSettings.height,
+    appliedSettings.depth,
+    appliedSettings.rackSize,
+    appliedTileCounts,
+    dynamicTileKinds,
+    use3D,
+    useDiag,
+    useHex,
+    useDict,
+    initialConfig?.ruleset_id,
+    initialConfig?.dictionary_id,
+    initialConfig?.rng_seed,
+  ]);
+
+  const [dictMessagesVersion, setDictMessagesVersion] = useState(0);
 
   useEffect(() => {
-    (async () => {
-      if (useWorker) {
-        const w = new Worker('/wasm/engine/worker.js', { type: 'module' });
-        workerRef.current = w;
-        function call(action: string, payload?: any): Promise<any> {
-          return new Promise((resolve, reject) => {
-            const id = Math.random().toString(36).slice(2);
-            const onMsg = (e: MessageEvent) => {
-              if ((e.data as any)?.id === id) {
-                w.removeEventListener('message', onMsg);
-                (e.data as any).ok ? resolve(e.data) : reject(new Error((e.data as any).error));
-              }
-            };
-            w.addEventListener('message', onMsg);
-            w.postMessage({ id, action, payload });
-          });
+    let cancelled = false;
+
+    const loadDictionaryText = async (apply: (text: string) => Promise<void> | void): Promise<boolean> => {
+      try {
+        const resp = await fetch('/dictionaries/demo.txt');
+        if (resp.ok) {
+          const txt = await resp.text();
+          await apply(txt);
+          return true;
         }
-        const cfg2 = { ...cfg, free_word_mode: !useDict } as any;
-        await call('new_game', { config: cfg2, players: 2 });
-        await call('set_reading_direction', { rtl });
-        await call('set_stacking', { enabled: stackOn, max_height: 7, forbid_same: forbidSame, scoring: stackScoring });
-        await call('set_free_word_mode', { on: !useDict });
-        if (useDict) {
-          try {
-            if (dictEngine === 'fst') {
-              const resp = await fetch('/dictionaries/TWL06.fst');
-              if (resp.ok) {
-                const buf = new Uint8Array(await resp.arrayBuffer());
-                await call('set_dictionary_from_fst_bytes', { bytes: buf, case_fold: true });
-              } else {
-                const txtResp = await fetch('/dictionaries/TWL06.txt');
-                if (txtResp.ok) {
-                  const txt = await txtResp.text();
-                  await call('set_dictionary_from_text', { text: txt, case_fold: true });
-                }
-              }
-            } else {
-              const txtResp = await fetch('/dictionaries/TWL06.txt');
-              if (txtResp.ok) {
-                const txt = await txtResp.text();
-                await call('set_dictionary_engine', { text: txt, engine: dictEngine, case_fold: true });
-              }
-            }
-          } catch (e) {
-            console.error('Failed to load dictionary', e);
-          }
-        }
-        const overrideRack = rackOverrideRef.current;
-        if (overrideRack && overrideRack.length) {
-          await call('set_rack', { tiles: overrideRack });
-        }
-        const { board: b } = await call('get_board');
-        const { rack: r } = await call('get_rack');
-        setGame({ call });
-        setBoard(JSON.parse(b as string) as BoardJson);
-        setRack(JSON.parse(r as string).map((t: any) => t.kind_id));
-        setLastCpu(null);
-        setReady(true);
-      } else {
-        const mod = await import('/wasm/engine/pkg/tiletangle_wasm.js');
-        await mod.default();
-        const cfg2 = { ...cfg, free_word_mode: !useDict } as any;
-        const g = mod.new_game(JSON.stringify(cfg2), 2);
-        mod.set_reading_direction(g, rtl);
-        mod.set_stacking(g, stackOn, 7, forbidSame, stackScoring === 'sum');
-        if (useDict) {
-          try {
-            if (dictEngine === 'fst') {
-              const resp = await fetch('/dictionaries/TWL06.fst');
-              if (resp.ok) {
-                const buf = new Uint8Array(await resp.arrayBuffer());
-                mod.set_dictionary_from_fst_bytes(g, buf, true);
-              } else {
-                const txtResp = await fetch('/dictionaries/TWL06.txt');
-                if (txtResp.ok) {
-                  const txt = await txtResp.text();
-                  mod.set_dictionary_from_text(g, txt, true);
-                }
-              }
-            } else {
-              const txtResp = await fetch('/dictionaries/TWL06.txt');
-              if (txtResp.ok) {
-                const txt = await txtResp.text();
-                mod.set_dictionary_from_text_engine(g, txt, dictEngine, true);
-              }
-            }
-          } catch (e) { console.error('Failed to load dictionary', e); }
-        }
-        const overrideRack = rackOverrideRef.current;
-        if (overrideRack && overrideRack.length) {
-          mod.set_rack(g, JSON.stringify(overrideRack));
-        }
-        setGame({ mod, g });
-        setBoard(JSON.parse(mod.get_board(g)) as BoardJson);
-        setRack(
-          (JSON.parse(mod.get_rack(g)) as { kind_id: string }[]).map((t) => t.kind_id),
-        );
-        setLastCpu(null);
-        setReady(true);
+      } catch (err) {
+        console.warn('Demo dictionary fetch failed', err);
       }
-    })();
+      try {
+        await apply(fallbackDictionaryText);
+        return true;
+      } catch (err) {
+        console.warn('Fallback dictionary load failed', err);
+      }
+      return false;
+    };
+
+    const initialise = async () => {
+      setReady(false);
+      setPending([]);
+      setShowMoves(false);
+      setLegalMoves([]);
+      setActiveMoveIndex(null);
+      setPlayers([]);
+      setBagSummary({counts: {}, total: 0});
+      setCpuError(null);
+      setErrorMessage(null);
+      setInfoMessage(null);
+      setDictLoading(useDict);
+      setDictReady(!useDict);
+      setDictError(null);
+
+      const resetWorker = () => {
+        if (workerRef.current) {
+          workerRef.current.terminate();
+          workerRef.current = null;
+        }
+      };
+
+      try {
+        if (useWorker) {
+          resetWorker();
+          const worker = new Worker('/wasm/engine/worker.js', {type: 'module'});
+          workerRef.current = worker;
+
+          const call = (action: string, payload?: any): Promise<any> => {
+            return new Promise((resolve, reject) => {
+              const id = Math.random().toString(36).slice(2);
+              const listener = (event: MessageEvent) => {
+                if ((event.data as any)?.id === id) {
+                  worker.removeEventListener('message', listener);
+                  const message = event.data as any;
+                  message.ok ? resolve(message) : reject(new Error(message.error));
+                }
+              };
+              worker.addEventListener('message', listener);
+              worker.postMessage({id, action, payload});
+            });
+          };
+
+          const cfg2 = {...cfg, free_word_mode: !useDict};
+          await call('new_game', {config: cfg2, players: 2});
+          if (cancelled) return;
+          await call('set_reading_direction', {rtl});
+          await call('set_stacking', {
+            enabled: stackOn,
+            max_height: 7,
+            forbid_same: forbidSame,
+            scoring: stackScoring,
+          });
+          await call('set_free_word_mode', {on: !useDict});
+
+          let dictionaryLoaded = !useDict;
+          if (useDict) {
+            dictionaryLoaded = await loadDictionaryText(async text => {
+              if (dictEngine === 'set') {
+                await call('set_dictionary_from_text', {text, case_fold: true});
+              } else if (dictEngine === 'fst') {
+                await call('set_dictionary_engine', {text, engine: 'set', case_fold: true});
+              } else {
+                await call('set_dictionary_engine', {text, engine: dictEngine, case_fold: true});
+              }
+            });
+          }
+
+          if (!dictionaryLoaded) {
+            await call('set_free_word_mode', {on: true});
+            if (!cancelled) {
+              setDictReady(false);
+              setDictError('Dictionary failed to load. Free-word mode enabled.');
+              if (useDict) setUseDict(false);
+            }
+          } else if (!cancelled) {
+            setDictReady(true);
+            setDictError(null);
+          }
+
+          if (rackOverrideRef.current?.length) {
+            await call('set_rack', {tiles: rackOverrideRef.current});
+          }
+
+          const [{board: boardStr}, snapshotResp] = await Promise.all([
+            call('get_board'),
+            call('snapshot_json'),
+          ]);
+          if (cancelled) return;
+          applySnapshot(JSON.parse(boardStr as string) as BoardJson, snapshotResp.snapshot as string);
+          setGame({call});
+          setReady(true);
+        } else {
+          resetWorker();
+          const mod = await import('/wasm/engine/pkg/tiletangle_wasm.js');
+          await mod.default();
+          const cfg2 = {...cfg, free_word_mode: !useDict};
+          const g = mod.new_game(JSON.stringify(cfg2), 2);
+          mod.set_reading_direction(g, rtl);
+          mod.set_stacking(g, stackOn, 7, forbidSame, stackScoring === 'sum');
+          mod.set_free_word_mode(g, !useDict);
+
+          let dictionaryLoaded = !useDict;
+          if (useDict) {
+            dictionaryLoaded = await loadDictionaryText(async text => {
+              if (dictEngine === 'set') {
+                mod.set_dictionary_from_text(g, text, true);
+              } else if (dictEngine === 'fst') {
+                mod.set_dictionary_from_text_engine(g, text, 'set', true);
+              } else {
+                mod.set_dictionary_from_text_engine(g, text, dictEngine, true);
+              }
+            });
+          }
+
+          if (!dictionaryLoaded) {
+            mod.set_free_word_mode(g, true);
+            if (!cancelled) {
+              setDictReady(false);
+              setDictError('Dictionary failed to load. Free-word mode enabled.');
+              if (useDict) setUseDict(false);
+            }
+          } else if (!cancelled) {
+            setDictReady(true);
+            setDictError(null);
+          }
+
+          if (rackOverrideRef.current?.length) {
+            mod.set_rack(g, JSON.stringify(rackOverrideRef.current));
+          }
+
+          const boardStr = mod.get_board(g);
+          const snapshotStr = mod.snapshot_state_json(g);
+          if (cancelled) return;
+          applySnapshot(JSON.parse(boardStr) as BoardJson, snapshotStr);
+          setGame({mod, g});
+          setReady(true);
+        }
+      } catch (err) {
+        console.error('Initialise playground failed', err);
+        if (!cancelled) {
+          setDictError('Initialisation failed. Check console for details.');
+          setDictReady(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setDictLoading(false);
+        }
+      }
+    };
+
+    initialise();
+
     return () => {
+      cancelled = true;
       if (workerRef.current) {
         workerRef.current.terminate();
         workerRef.current = null;
       }
     };
-  }, [useWorker, useDict, cfg, rtl, stackOn, stackScoring, forbidSame, dictEngine]);
+  }, [cfg, useWorker, useDict, rtl, stackOn, stackScoring, forbidSame, dictEngine, dictMessagesVersion]);
 
-  const clearMoves = useCallback(() => {
-    setShowMoves(false);
-    setLegalMoves([]);
-    setActiveMoveIndex(null);
-  }, []);
-
-  const refreshRack = useCallback(async () => {
-    if (!game) {
-      setRack([]);
-      return;
-    }
+  const applySnapshot = useCallback((boardJson: BoardJson, snapshotJson: string) => {
+    setBoard(boardJson);
     try {
-      if (useWorker) {
-        const resp = await game.call('get_rack');
-        const arr = JSON.parse(resp.rack as string) as { kind_id: string }[];
-        setRack(arr.map(t => t.kind_id));
-      } else {
-        const arr = JSON.parse(game.mod.get_rack(game.g)) as { kind_id: string }[];
-        setRack(arr.map(t => t.kind_id));
-      }
-    } catch (err) {
-      console.error('get_rack failed', err);
-    }
-  }, [game, useWorker]);
+      const state = JSON.parse(snapshotJson);
+      const toMove: number = typeof state.to_move === 'number' ? state.to_move : 0;
+      const playersRaw: any[] = Array.isArray(state.players) ? state.players : [];
+      const summaries: PlayerSummary[] = playersRaw.map((p, idx) => ({
+        index: idx,
+        score: typeof p.score === 'number' ? p.score : 0,
+        rack: Array.isArray(p.rack?.tiles) ? p.rack.tiles.map((t: any) => t.kind_id ?? '?') : [],
+      }));
+      const safeActive = summaries.length > 0 ? toMove % summaries.length : 0;
+      setPlayers(summaries);
+      setActivePlayer(safeActive);
+      setTurnNumber(typeof state.turn_num === 'number' ? state.turn_num : 0);
+      setRack(summaries[safeActive]?.rack ?? []);
 
-  const syncBoard = useCallback(async () => {
-    if (!game) return;
-    try {
-      if (useWorker) {
-        const { board: b } = await game.call('get_board');
-        setBoard(JSON.parse(b as string) as BoardJson);
-      } else {
-        setBoard(JSON.parse(game.mod.get_board(game.g)) as BoardJson);
-      }
-      await refreshRack();
-      setPending([]);
-      clearMoves();
-      setCpuSuggestion(null);
-      setLastCpu(null);
-    } catch (err) {
-      console.error('sync board failed', err);
-    }
-  }, [game, useWorker, refreshRack, clearMoves]);
-
-  const commit = async () => {
-    if (!game || pending.length === 0) return;
-    try {
-      let placements = pending;
-      // If anagram mode is enabled and we have an index, try to reorder letters to form any dictionary word
-      if (useAnagram && useDict && anagramIndex && board) {
-        // Check if placements are on a straight line (row or column)
-        const allX = new Set(placements.map(p => p.x));
-        const allY = new Set(placements.map(p => p.y));
-        const isRow = allY.size === 1;
-        const isCol = allX.size === 1;
-        if (isRow || isCol) {
-          // Derive the current letters from pending or board (pending contains only kind_id)
-          const letters = placements.map(p => p.kind_id.toUpperCase());
-          const sig = letters.slice().sort().join('');
-          const word = anagramIndex.get(sig);
-          if (word) {
-            // Order the placements along the line and assign letters from the found word
-            const sorted = [...placements].sort((a,b) => (isRow ? a.x - b.x : a.y - b.y));
-            placements = sorted.map((p, i) => ({ ...p, kind_id: word[i] }));
+      const bagList: any[] = Array.isArray(state.bag?.counts) ? state.bag.counts : [];
+      const counts: Record<string, number> = {};
+      let total = 0;
+      for (const entry of bagList) {
+        if (Array.isArray(entry) && entry.length >= 2) {
+          const kind = entry[0];
+          const count = entry[1];
+          const id = kind?.id ?? kind?.symbol ?? '?';
+          if (typeof count === 'number') {
+            counts[id] = (counts[id] ?? 0) + count;
+            total += count;
           }
         }
       }
-      if (useWorker) {
-        await game.call('play_move', { placements });
-        const { board: b } = await game.call('get_board');
-        setBoard(JSON.parse(b as string) as BoardJson);
-      } else {
-        game.mod.play_move(game.g, JSON.stringify(placements));
-        setBoard(JSON.parse(game.mod.get_board(game.g)) as BoardJson);
-      }
-      await refreshRack();
-      setLastCpu(null);
-      setPending([]);
-      clearMoves();
-    } catch (e) { console.error(e); }
-  };
-
-  const onDropCell = (x: number, y: number, ev: React.DragEvent<HTMLDivElement>) => {
-    ev.preventDefault();
-    const kind_id = ev.dataTransfer.getData('text/plain');
-    if (!kind_id) return;
-    setPending(prev => {
-      if (prev.some(p => p.x === x && p.y === y)) return prev;
-      // Prevent placing over existing board tile
-      if (board) {
-        const h = use3D ? Math.floor(board.height / depth) : board.height;
-        const gy = use3D ? (y + z * h) : y;
-        if (!stackOn && (board.rows[gy][x] || '').length > 0) return prev;
-        return [...prev, { x, y: gy, kind_id }];
-      }
-      return prev;
-    });
-  };
-
-  const onDragStartTile = (k: string, ev: React.DragEvent<HTMLDivElement>) => {
-    ev.dataTransfer.setData('text/plain', k);
-  };
-
-  const cellDisplay = (x: number, y: number): string => {
-    const p = pending.find(pp => pp.x === x && pp.y === y);
-    if (p) return p.kind_id;
-    if (use3D && board) {
-      const h = Math.floor(board.height / depth);
-      const yy = y + z * h;
-      return (board.rows[yy][x] || '');
+      setBagSummary({counts, total});
+    } catch (err) {
+      console.error('Failed to parse snapshot', err);
     }
-    return (board?.rows[y][x] || '');
-  };
+  }, []);
 
-  const highlightCells = useMemo(() => {
-    if (activeMoveIndex === null) return new Set<string>();
-    const mv = legalMoves[activeMoveIndex];
-    if (!mv) return new Set<string>();
-    const set = new Set<string>();
-    mv.placements.forEach(p => set.add(`${p.x},${p.y}`));
-    return set;
-  }, [activeMoveIndex, legalMoves]);
+  const updateFromGame = useCallback(async () => {
+    if (!game) return;
+    try {
+      if (useWorker) {
+        const [{board: b}, snap] = await Promise.all([
+          game.call('get_board'),
+          game.call('snapshot_json'),
+        ]);
+        applySnapshot(JSON.parse(b as string) as BoardJson, snap.snapshot as string);
+      } else {
+        const boardStr = game.mod.get_board(game.g);
+        const snapshotStr = game.mod.snapshot_state_json(game.g);
+        applySnapshot(JSON.parse(boardStr) as BoardJson, snapshotStr);
+      }
+    } catch (err) {
+      console.error('sync board failed', err);
+    }
+  }, [game, useWorker, applySnapshot]);
+
+  const handleApplySettings = useCallback(() => {
+    const width = clamp(draftSettings.width, 2, 30);
+    const height = clamp(draftSettings.height, 2, 30);
+    const depth = clamp(draftSettings.depth, 1, 12);
+    const rackSize = clamp(draftSettings.rackSize, 1, 14);
+    const parsed = parseTileCounts(draftSettings.tileCountsText, defaultTileCounts);
+    if (parsed.error) {
+      setTileCountsError(parsed.error);
+      return;
+    }
+    setTileCountsError(null);
+    setAppliedSettings({
+      width,
+      height,
+      depth,
+      rackSize,
+      tileCountsText: formatTileCounts(parsed.map),
+    });
+    setDictMessagesVersion(v => v + 1);
+  }, [draftSettings, defaultTileCounts]);
+
+  const dedupeMoves = (moves: GeneratedMove[]): GeneratedMove[] => {
+    const map = new Map<string, GeneratedMove>();
+    for (const mv of moves) {
+      const placements = [...mv.placements]
+        .map(p => ({x: p.x, y: p.y, kind: p.kind_id ?? '', mark: p.mark ?? ''}))
+        .sort((a, b) => (a.y - b.y) || (a.x - b.x) || a.kind.localeCompare(b.kind) || a.mark.localeCompare(b.mark));
+      const key = JSON.stringify({word: mv.word ?? '', score: mv.score ?? 0, total: mv.total ?? mv.score ?? 0, placements});
+      if (!map.has(key)) {
+        map.set(key, mv);
+      }
+    }
+    return Array.from(map.values());
+  };
 
   const fetchMoves = useCallback(async () => {
     if (!game) return;
+    if (use3D) {
+      setInfoMessage('Automatic move generation is not yet available for 3D boards. Switch to 2D to inspect suggestions.');
+      setLegalMoves([]);
+      setActiveMoveIndex(null);
+      setShowMoves(true);
+      return;
+    }
+    setInfoMessage(null);
     setLoadingMoves(true);
     try {
       let moves: GeneratedMove[] = [];
-      const maxLen = 7;
+      const maxLen = appliedSettings.rackSize;
       if (useWorker) {
-        const resp = await game.call('generate_moves', { max_len: maxLen, limit: 20 });
+        const resp = await game.call('generate_moves', {max_len: maxLen, limit: 30});
         moves = JSON.parse(resp.moves as string) as GeneratedMove[];
       } else {
-        const json = game.mod.generate_moves(game.g, maxLen, 20);
+        const json = game.mod.generate_moves(game.g, maxLen, 30);
         moves = JSON.parse(json) as GeneratedMove[];
       }
-      setLegalMoves(moves);
-      setActiveMoveIndex(moves.length ? 0 : null);
+      const deduped = dedupeMoves(moves);
+      setLegalMoves(deduped);
+      setActiveMoveIndex(deduped.length ? 0 : null);
       setShowMoves(true);
     } catch (err) {
       console.error('generate_moves failed', err);
+      setErrorMessage(`Move generation failed: ${(err as Error).message ?? String(err)}`);
       setLegalMoves([]);
       setActiveMoveIndex(null);
       setShowMoves(true);
     } finally {
       setLoadingMoves(false);
     }
-  }, [game, useWorker, use3D, depth]);
+  }, [game, useWorker, use3D, appliedSettings.rackSize]);
+
+  const commitMove = useCallback(async () => {
+    if (!game || pending.length === 0) return;
+    try {
+      let placements = pending;
+      if (useAnagram && useDict && anagramIndex && board) {
+        const xs = new Set(placements.map(p => p.x));
+        const ys = new Set(placements.map(p => p.y));
+        const isRow = ys.size === 1;
+        const isCol = xs.size === 1;
+        if (isRow || isCol) {
+          const letters = placements.map(p => p.kind_id.toUpperCase());
+          const sig = letters.slice().sort().join('');
+          const word = anagramIndex.get(sig);
+          if (word) {
+            const sorted = [...placements].sort((a, b) => (isRow ? a.x - b.x : a.y - b.y));
+            placements = sorted.map((p, idx) => ({...p, kind_id: word[idx]}));
+          }
+        }
+      }
+
+      if (useWorker) {
+        await game.call('play_move', {placements});
+      } else {
+        game.mod.play_move(game.g, JSON.stringify(placements));
+      }
+      await updateFromGame();
+      setPending([]);
+      setCpuSuggestion(null);
+      setLastCpu(null);
+      setShowMoves(false);
+      setErrorMessage(null);
+    } catch (err) {
+      console.error(err);
+      setErrorMessage(`Move failed: ${(err as Error).message ?? String(err)}`);
+    }
+  }, [game, pending, useWorker, useAnagram, useDict, anagramIndex, board, updateFromGame]);
 
   const playGeneratedMove = useCallback(async (move: GeneratedMove) => {
     if (!game) return;
     try {
+      const placements = move.placements.map(p => ({x: p.x, y: p.y, kind_id: p.kind_id, mark: p.mark ?? null}));
       if (useWorker) {
-        await game.call('play_move', { placements: move.placements });
-        const { board: b } = await game.call('get_board');
-        setBoard(JSON.parse(b as string) as BoardJson);
+        await game.call('play_move', {placements});
       } else {
-        game.mod.play_move(game.g, JSON.stringify(move.placements));
-        setBoard(JSON.parse(game.mod.get_board(game.g)) as BoardJson);
+        game.mod.play_move(game.g, JSON.stringify(placements));
       }
-      await refreshRack();
+      await updateFromGame();
       setPending([]);
-      clearMoves();
+      setCpuSuggestion(null);
+      setShowMoves(false);
+      setErrorMessage(null);
     } catch (err) {
       console.error('play_generated_move failed', err);
+      setErrorMessage(`Auto-play failed: ${(err as Error).message ?? String(err)}`);
     }
-  }, [game, useWorker, refreshRack, clearMoves]);
+  }, [game, useWorker, updateFromGame]);
 
   const requestCpuHint = useCallback(async () => {
-    if (!game || cpuDifficulty === 'off') {
+    if (!game || cpuDifficulty === 'off' || !dictReady) {
       setCpuSuggestion(null);
       return;
     }
     setCpuThinking(true);
+    setCpuError(null);
     try {
       let bestJson: string;
       if (useWorker) {
-        const resp = await game.call('best_move', {
-          difficulty: cpuDifficulty,
-          seed: 42,
-        });
+        const resp = await game.call('best_move', {difficulty: cpuDifficulty, seed: BigInt(42)});
         bestJson = resp.best as string;
       } else {
-        bestJson = game.mod.best_move(game.g, cpuDifficulty, 42);
+        bestJson = game.mod.best_move(game.g, cpuDifficulty, BigInt(42));
       }
       const payload = JSON.parse(bestJson);
       const placements: Placement[] = (payload.placements || []).map((p: any) => ({
@@ -512,29 +766,30 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       setCpuSuggestion(suggestion);
       setLastCpu(suggestion);
     } catch (err) {
-      console.error('best_move failed', err);
+      console.warn('best_move failed', err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.toLowerCase().includes('no moves available')) {
+        setCpuError('CPU has no available moves for the current rack.');
+      } else {
+        setCpuError(`CPU hint failed: ${message}`);
+      }
       setCpuSuggestion(null);
     } finally {
       setCpuThinking(false);
     }
-  }, [game, useWorker, cpuDifficulty]);
+  }, [game, useWorker, cpuDifficulty, dictReady]);
 
   const playCpuSuggestion = useCallback(async () => {
     if (!cpuSuggestion) return;
     await playGeneratedMove({
       word: cpuSuggestion.word,
       score: cpuSuggestion.score,
+      total: cpuSuggestion.total,
       placements: cpuSuggestion.placements,
     });
     setLastCpu(cpuSuggestion);
     setCpuSuggestion(null);
   }, [cpuSuggestion, playGeneratedMove]);
-
-  useEffect(() => {
-    if (cpuDifficulty === 'off') {
-      setCpuSuggestion(null);
-    }
-  }, [cpuDifficulty]);
 
   const exportSnapshot = useCallback(async () => {
     if (!game) return;
@@ -548,6 +803,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       }
     } catch (err) {
       console.error('snapshot export failed', err);
+      setErrorMessage(`Snapshot export failed: ${(err as Error).message ?? String(err)}`);
     }
   }, [game, useWorker]);
 
@@ -555,22 +811,20 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     if (!game || !snapshotText.trim()) return;
     try {
       if (useWorker) {
-        await game.call('load_snapshot_json', { json: snapshotText });
-        const { board: b } = await game.call('get_board');
-        setBoard(JSON.parse(b as string) as BoardJson);
+        await game.call('load_snapshot_json', {json: snapshotText});
       } else {
         game.mod.load_state_json(game.g, snapshotText);
-        setBoard(JSON.parse(game.mod.get_board(game.g)) as BoardJson);
       }
-      await refreshRack();
+      await updateFromGame();
       setPending([]);
-      clearMoves();
       setCpuSuggestion(null);
       setLastCpu(null);
+      setShowMoves(false);
     } catch (err) {
       console.error('snapshot import failed', err);
+      setErrorMessage(`Snapshot import failed: ${(err as Error).message ?? String(err)}`);
     }
-  }, [game, snapshotText, useWorker, refreshRack, clearMoves]);
+  }, [game, snapshotText, useWorker, updateFromGame]);
 
   const fetchEventLog = useCallback(async () => {
     if (!game) return;
@@ -582,15 +836,15 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       } else {
         payload = game.mod.get_event_log(game.g);
       }
-      let formatted = payload;
       try {
-        formatted = JSON.stringify(JSON.parse(payload), null, 2);
+        const formatted = JSON.stringify(JSON.parse(payload), null, 2);
+        setEventLogText(formatted);
       } catch {
-        // leave as raw string
+        setEventLogText(payload);
       }
-      setEventLogText(formatted);
     } catch (err) {
       console.error('fetch event log failed', err);
+      setErrorMessage(`Fetching event log failed: ${(err as Error).message ?? String(err)}`);
     }
   }, [game, useWorker]);
 
@@ -602,11 +856,12 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       } else {
         game.mod.undo(game.g);
       }
-      await syncBoard();
+      await updateFromGame();
     } catch (err) {
       console.error('undo failed', err);
+      setErrorMessage(`Undo failed: ${(err as Error).message ?? String(err)}`);
     }
-  }, [game, useWorker, syncBoard]);
+  }, [game, useWorker, updateFromGame]);
 
   const redoMove = useCallback(async () => {
     if (!game) return;
@@ -616,65 +871,345 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       } else {
         game.mod.redo(game.g);
       }
-      await syncBoard();
+      await updateFromGame();
     } catch (err) {
       console.error('redo failed', err);
+      setErrorMessage(`Redo failed: ${(err as Error).message ?? String(err)}`);
     }
-  }, [game, useWorker, syncBoard]);
+  }, [game, useWorker, updateFromGame]);
 
-  if (!ready || !board) return <div>Loading WASM…</div>;
+  const handlePendingReset = useCallback(() => {
+    setPending([]);
+    setErrorMessage(null);
+  }, []);
+
+  const onDropCell = (x: number, y: number, ev: React.DragEvent<HTMLDivElement>) => {
+    ev.preventDefault();
+    const kindId = ev.dataTransfer.getData('text/plain');
+    if (!kindId) return;
+    setPending(prev => {
+      if (prev.some(p => p.x === x && p.y === y)) return prev;
+      if (!board) return prev;
+      const layerHeight = use3D ? Math.floor(board.height / Math.max(1, effectiveDepth)) : board.height;
+      const globalY = use3D ? y + z * layerHeight : y;
+      if (!stackOn && (board.rows[globalY]?.[x] || '').length > 0) return prev;
+      return [...prev, {x, y: globalY, kind_id: kindId}];
+    });
+  };
+
+  const onDragStartTile = (kindId: string, ev: React.DragEvent<HTMLDivElement>) => {
+    ev.dataTransfer.setData('text/plain', kindId);
+  };
+
+  const cellDisplay = (x: number, y: number): string => {
+    const placement = pending.find(p => p.x === x && p.y === (use3D ? y + z * Math.floor(board!.height / Math.max(1, effectiveDepth)) : y));
+    if (placement) return placement.kind_id;
+    if (use3D && board) {
+      const layerHeight = Math.floor(board.height / Math.max(1, effectiveDepth));
+      const idx = y + z * layerHeight;
+      return board.rows[idx]?.[x] ?? '';
+    }
+    return board?.rows[y]?.[x] ?? '';
+  };
+
+  const highlightCells = useMemo(() => {
+    if (activeMoveIndex === null) return new Set<string>();
+    const mv = legalMoves[activeMoveIndex];
+    if (!mv) return new Set<string>();
+    const set = new Set<string>();
+    for (const p of mv.placements) set.add(`${p.x},${p.y}`);
+    return set;
+  }, [activeMoveIndex, legalMoves]);
+
+  const bagPreview = useMemo(() => {
+    const entries = Object.entries(bagSummary.counts)
+      .filter(([, count]) => count > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([id, count]) => `${id}:${count}`);
+    return entries.join(', ');
+  }, [bagSummary]);
+
+  if (!ready || !board) {
+    return <div>Loading WASM…</div>;
+  }
+
+  const layerHeight = use3D ? Math.floor(board.height / Math.max(1, effectiveDepth)) : board.height;
 
   return (
-    <div>
-      <div style={{display:'flex', alignItems:'center', gap:12, marginBottom: 12}}>
-        <label><input type="checkbox" checked={useWorker} onChange={e => setUseWorker(e.target.checked)} /> Use Web Worker</label>
-        <label><input type="checkbox" checked={useHex} onChange={e => { setUseHex(e.target.checked); setUseDiag(false); setUse3D(false); }} /> Hex adjacency</label>
-        <label><input type="checkbox" checked={useDiag} onChange={e => { setUseDiag(e.target.checked); setUseHex(false); setUse3D(false); }} /> Diagonal adjacency</label>
-        <label><input type="checkbox" checked={use3D} onChange={e => { setUse3D(e.target.checked); setUseHex(false); }} /> 3D (layers)</label>
-        {use3D && <>
-          <label>Depth: <input type="number" min={1} max={9} value={depth} onChange={e => { const v = Math.max(1, Math.min(9, parseInt(e.target.value||'1'))); setDepth(v); setZ(0); }} style={{width:50}}/></label>
-          <label>Slice z: <input type="range" min={0} max={Math.max(0, depth-1)} value={z} onChange={e => setZ(parseInt(e.target.value))} /></label>
-        </>}
-        <label><input type="checkbox" checked={useDict} onChange={e => setUseDict(e.target.checked)} /> Dictionary checks (TWL06)</label>
-        <label>Engine:
-          <select value={dictEngine} onChange={e => setDictEngine(e.target.value as 'fst' | 'set' | 'dawg' | 'gaddag')} disabled={!useDict}>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 16}}>
+      {(errorMessage || dictError || cpuError) && (
+        <div style={{display: 'flex', flexDirection: 'column', gap: 6}}>
+          {errorMessage && <div style={{background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 4, padding: 8}}>{errorMessage}</div>}
+          {dictError && <div style={{background: '#fef3c7', border: '1px solid #facc15', borderRadius: 4, padding: 8}}>{dictError}</div>}
+          {cpuError && <div style={{background: '#fef3c7', border: '1px solid #facc15', borderRadius: 4, padding: 8}}>{cpuError}</div>}
+        </div>
+      )}
+      {infoMessage && (
+        <div style={{background: '#dbeafe', border: '1px solid #60a5fa', borderRadius: 4, padding: 8}}>{infoMessage}</div>
+      )}
+
+      <ControlSection title="Game Setup">
+        <label>Width:
+          <input
+            type="number"
+            min={2}
+            max={30}
+            value={draftSettings.width}
+            onChange={e => setDraftSettings(prev => ({...prev, width: Number(e.target.value)}))}
+            style={{width: 70}}
+          />
+        </label>
+        <label>Height:
+          <input
+            type="number"
+            min={2}
+            max={30}
+            value={draftSettings.height}
+            onChange={e => setDraftSettings(prev => ({...prev, height: Number(e.target.value)}))}
+            style={{width: 70}}
+          />
+        </label>
+        <label>Depth:
+          <input
+            type="number"
+            min={1}
+            max={12}
+            value={draftSettings.depth}
+            onChange={e => setDraftSettings(prev => ({...prev, depth: Number(e.target.value)}))}
+            style={{width: 70}}
+          />
+        </label>
+        <label>Rack size:
+          <input
+            type="number"
+            min={1}
+            max={14}
+            value={draftSettings.rackSize}
+            onChange={e => setDraftSettings(prev => ({...prev, rackSize: Number(e.target.value)}))}
+            style={{width: 70}}
+          />
+        </label>
+        <div style={{display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 240px'}}>
+          <span style={{fontSize: 12}}>Tile pool (format: `A:9`, separated by commas or new lines)</span>
+          <textarea
+            value={draftSettings.tileCountsText}
+            onChange={e => {
+              const text = e.target.value;
+              setDraftSettings(prev => ({...prev, tileCountsText: text}));
+              const parsed = parseTileCounts(text, defaultTileCounts);
+              setTileCountsError(parsed.error);
+            }}
+            rows={4}
+            style={{width: '100%', fontFamily: 'monospace'}}
+          />
+          {tileCountsError && <span style={{color: '#b91c1c', fontSize: 12}}>{tileCountsError}</span>}
+        </div>
+        <button onClick={handleApplySettings}>Apply configuration</button>
+      </ControlSection>
+
+      <ControlSection title="Turn & Scores">
+        <div style={{fontSize: 13}}>Turn {turnNumber + 1} • Player {activePlayer + 1}</div>
+        <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
+          {players.length === 0 && <div style={{fontSize: 12, opacity: 0.7}}>Loading players…</div>}
+          {players.map(player => (
+            <div
+              key={player.index}
+              style={{
+                padding: 8,
+                minWidth: 120,
+                borderRadius: 6,
+                border: '1px solid var(--ifm-color-emphasis-200)',
+                background: player.index === activePlayer ? '#e0f2fe' : '#f9fafb',
+              }}
+            >
+              <div style={{fontWeight: 600}}>Player {player.index + 1}</div>
+              <div>{player.score} pts</div>
+              <div style={{fontSize: 12, opacity: 0.75}}>Rack: {player.rack.join(' ') || '—'}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{fontSize: 12, opacity: 0.75}}>
+          Bag: {bagSummary.total} tiles{bagSummary.total > 0 && bagPreview ? ` • ${bagPreview}` : ''}
+        </div>
+      </ControlSection>
+
+      <ControlSection title="Runtime & Board Layout">
+        <label>
+          <input
+            type="checkbox"
+            checked={useWorker}
+            onChange={e => setUseWorker(e.target.checked)}
+          />{' '}
+          Use Web Worker
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={useHex}
+            onChange={e => {
+              setUseHex(e.target.checked);
+              if (e.target.checked) {
+                setUseDiag(false);
+                setUse3D(false);
+              }
+            }}
+          />{' '}
+          Hex adjacency
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={useDiag}
+            onChange={e => {
+              setUseDiag(e.target.checked);
+              if (e.target.checked) {
+                setUseHex(false);
+                setUse3D(false);
+              }
+            }}
+          />{' '}
+          Diagonal adjacency
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={use3D}
+            onChange={e => {
+              setUse3D(e.target.checked);
+              if (e.target.checked) {
+                setUseHex(false);
+              } else {
+                setInfoMessage(null);
+              }
+            }}
+          />{' '}
+          3D (layers)
+        </label>
+        {use3D && (
+          <>
+            <span style={{fontSize: 12}}>Layer {z + 1} / {effectiveDepth}</span>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(0, effectiveDepth - 1)}
+              value={Math.min(z, Math.max(0, effectiveDepth - 1))}
+              onChange={e => setZ(Number(e.target.value))}
+            />
+          </>
+        )}
+      </ControlSection>
+
+      <ControlSection title="Dictionary & Language">
+        <label>
+          <input
+            type="checkbox"
+            checked={useDict}
+            onChange={e => {
+              const next = e.target.checked;
+              setUseDict(next);
+              setDictReady(!next);
+              setDictError(null);
+              setDictMessagesVersion(v => v + 1);
+            }}
+            disabled={dictLoading}
+          />{' '}
+          Dictionary checks
+        </label>
+        <label>
+          Engine:{' '}
+          <select
+            value={dictEngine}
+            onChange={e => {
+              setDictEngine(e.target.value as 'fst' | 'set' | 'dawg' | 'gaddag');
+              setDictMessagesVersion(v => v + 1);
+            }}
+            disabled={!useDict || dictLoading}
+          >
             <option value="fst">FST</option>
             <option value="set">Set</option>
             <option value="dawg">DAWG</option>
             <option value="gaddag">GADDAG</option>
           </select>
         </label>
-        <label title="Reorder placed tiles to any valid anagram on commit (row/column only)"><input type="checkbox" checked={useAnagram} onChange={e => setUseAnagram(e.target.checked)} /> Anagram Mode</label>
-        <label><input type="checkbox" checked={rtl} onChange={e => setRtl(e.target.checked)} /> RTL reading</label>
-        <label><input type="checkbox" checked={stackOn} onChange={e => setStackOn(e.target.checked)} /> Stacking</label>
-        {stackOn && (<>
-          <label>Scoring: 
-            <select value={stackScoring} onChange={e => setStackScoring((e.target.value as any))}>
-              <option value="top">TopOnly</option>
-              <option value="sum">SumStack</option>
-            </select>
-          </label>
-          <label><input type="checkbox" checked={forbidSame} onChange={e => setForbidSame(e.target.checked)} /> Forbid same overlay</label>
-        </>)}
-        <button onClick={commit} disabled={pending.length === 0}>Commit Move ({pending.length})</button>
-        <button onClick={() => setPending([])} disabled={pending.length === 0}>Reset</button>
-        <button onClick={undoMove} disabled={!game} data-testid="playground-undo">Undo</button>
-        <button onClick={redoMove} disabled={!game} data-testid="playground-redo">Redo</button>
-        <button onClick={() => {
-          if (showMoves) {
-            clearMoves();
-          } else {
-            fetchMoves();
-          }
-        }} disabled={!game || loadingMoves}>
+        <label title="Reorder placed tiles to any valid anagram on commit (row/column only)">
+          <input
+            type="checkbox"
+            checked={useAnagram}
+            onChange={e => setUseAnagram(e.target.checked)}
+          />{' '}
+          Anagram mode
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={rtl}
+            onChange={e => setRtl(e.target.checked)}
+          />{' '}
+          RTL reading
+        </label>
+        {dictLoading && <span data-testid="dictionary-loading" style={{fontSize: 12}}>Loading dictionary…</span>}
+      </ControlSection>
+
+      <ControlSection title="Stacking Rules">
+        <label>
+          <input
+            type="checkbox"
+            checked={stackOn}
+            onChange={e => setStackOn(e.target.checked)}
+          />{' '}
+          Enable stacking
+        </label>
+        {stackOn && (
+          <>
+            <label>
+              Scoring:{' '}
+              <select value={stackScoring} onChange={e => setStackScoring(e.target.value as 'top' | 'sum')}>
+                <option value="top">Top only</option>
+                <option value="sum">Sum stack</option>
+              </select>
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={forbidSame}
+                onChange={e => setForbidSame(e.target.checked)}
+              />{' '}
+              Forbid same overlay
+            </label>
+          </>
+        )}
+      </ControlSection>
+
+      <ControlSection title="Move Controls">
+        <button onClick={commitMove} disabled={pending.length === 0}>Commit move ({pending.length})</button>
+        <button onClick={handlePendingReset} disabled={pending.length === 0}>Reset pending</button>
+        <button onClick={undoMove} disabled={!game}>Undo</button>
+        <button onClick={redoMove} disabled={!game}>Redo</button>
+        <button
+          onClick={() => {
+            if (showMoves) {
+              setShowMoves(false);
+              setLegalMoves([]);
+              setActiveMoveIndex(null);
+            } else {
+              fetchMoves();
+            }
+          }}
+          disabled={!game || loadingMoves || (useDict && !dictReady)}
+        >
           {showMoves ? 'Hide legal moves' : 'Show legal moves'}
         </button>
-        {loadingMoves && <span style={{fontSize:12}}> loading…</span>}
-        <label>CPU:
+        {loadingMoves && <span style={{fontSize: 12}}>loading…</span>}
+      </ControlSection>
+
+      <ControlSection title="AI Assistant">
+        <label>
+          CPU difficulty:{' '}
           <select
             value={cpuDifficulty}
             onChange={e => setCpuDifficulty(e.target.value as 'off' | 'easy' | 'medium' | 'hard')}
-            style={{marginLeft: 4}}
+            disabled={!dictReady || dictLoading}
           >
             <option value="off">Off</option>
             <option value="easy">Easy</option>
@@ -682,126 +1217,147 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
             <option value="hard">Hard</option>
           </select>
         </label>
-        <button
-          onClick={requestCpuHint}
-          disabled={!game || cpuDifficulty === 'off' || cpuThinking}
-        >
-          CPU Hint
+        <button onClick={requestCpuHint} disabled={!game || cpuDifficulty === 'off' || cpuThinking || !dictReady}>
+          CPU hint
         </button>
         <button
+          data-testid="cpu-play-button"
           onClick={playCpuSuggestion}
           disabled={!game || cpuSuggestion == null || cpuThinking}
         >
           Play as CPU
         </button>
-        {cpuThinking && <span style={{fontSize: 12}}> computing…</span>}
-        <button onClick={exportSnapshot} disabled={!game}>Save Snapshot</button>
-        <button
-          onClick={importSnapshot}
-          disabled={!game || snapshotText.trim() === ''}
-        >
-          Load Snapshot
-        </button>
-        <button onClick={fetchEventLog} disabled={!game}>Show Event Log</button>
-      </div>
-      <div style={{display:'flex', gap: 16, alignItems:'flex-start'}}>
+        {cpuThinking && <span style={{fontSize: 12}}>computing…</span>}
+        {cpuSuggestion && (
+          <div style={{marginTop: 8, fontSize: 12, padding: 8, border: '1px solid var(--ifm-color-emphasis-200)', borderRadius: 4}}>
+            <div style={{fontWeight: 600}}>CPU ({cpuSuggestion.difficulty}) suggests</div>
+            <div><strong>{cpuSuggestion.word}</strong> — {cpuSuggestion.total} pts</div>
+            <div style={{opacity: 0.7}}>Raw {cpuSuggestion.score}, leave {cpuSuggestion.rackLeave}, equity {cpuSuggestion.boardEquity}</div>
+          </div>
+        )}
+        {!cpuSuggestion && lastCpu && (
+          <div style={{marginTop: 8, fontSize: 12, padding: 8, border: '1px solid var(--ifm-color-emphasis-200)', borderRadius: 4}}>
+            <div style={{fontWeight: 600}}>Last CPU hint ({lastCpu.difficulty})</div>
+            <div><strong>{lastCpu.word}</strong> — {lastCpu.total} pts</div>
+            <div style={{opacity: 0.7}}>Raw {lastCpu.score}, leave {lastCpu.rackLeave}, equity {lastCpu.boardEquity}</div>
+          </div>
+        )}
+      </ControlSection>
+
+      <div style={{display: 'flex', gap: 16, alignItems: 'flex-start'}}>
         <div style={{display: 'grid', gridTemplateColumns: `repeat(${board.width}, 28px)`, gap: 4}}>
-          {Array.from({length: use3D ? Math.floor(board.height / depth) : board.height}).map((_, y) => (
-            Array.from({length: board.width}).map((__, x) => (
-              <div key={`${x}-${y}`}
-                   data-testid="playground-board-cell"
-                   data-x={x}
-                   data-y={use3D ? (y + z * Math.floor(board.height / depth)) : y}
-                   onDragOver={(e)=>e.preventDefault()}
-                   onDrop={(e)=>onDropCell(x, y, e)}
-                   style={{
-                     width: 28,
-                     height: 28,
-                     border: '1px solid #ccc',
-                     display:'flex',
-                     alignItems:'center',
-                     justifyContent:'center',
-                     background: highlightCells.has(`${x},${use3D ? (y + z * Math.floor(board.height / depth)) : y}`) ? '#e0f2fe' : '#fff'
-                   }}
-                   onMouseEnter={() => {
-                     if (!showMoves) return;
-                     const gy = use3D ? (y + z * Math.floor(board.height / depth)) : y;
-                     const idx = legalMoves.findIndex(mv => mv.placements.some(p => p.x === x && p.y === gy));
-                     if (idx >= 0) setActiveMoveIndex(idx);
-                   }}
-               >
-                {cellDisplay(x,y).slice(0,1)}
-              </div>
-            ))
+          {Array.from({length: layerHeight}).map((_, y) => (
+            Array.from({length: board.width}).map((__, x) => {
+              const globalY = use3D ? y + z * layerHeight : y;
+              const key = `${x}-${globalY}`;
+              const highlighted = highlightCells.has(`${x},${globalY}`);
+              return (
+                <div
+                  key={key}
+                  data-testid="playground-board-cell"
+                  data-x={x}
+                  data-y={globalY}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => onDropCell(x, y, e)}
+                  style={{
+                    width: 28,
+                    height: 28,
+                    border: '1px solid #ccc',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: highlighted ? '#e0f2fe' : '#fff',
+                    fontWeight: highlighted ? 600 : 400,
+                  }}
+                  onMouseEnter={() => {
+                    if (!showMoves) return;
+                    const idx = legalMoves.findIndex(mv => mv.placements.some(p => p.x === x && p.y === globalY));
+                    if (idx >= 0) setActiveMoveIndex(idx);
+                  }}
+                >
+                  {cellDisplay(x, y).slice(0, 1)}
+                </div>
+              );
+            })
           ))}
         </div>
         <div>
-          <div style={{marginBottom: 6, fontSize: 12, opacity: 0.7}}>Rack (drag onto board)</div>
-          <div style={{display:'flex', gap: 6}}>
-            {rack.map((k, i) => (
-              <div key={i}
-                   draggable
-                   data-testid="playground-rack-tile"
-                   data-kind={k}
-                   onDragStart={(e)=>onDragStartTile(k, e)}
-                   style={{width:28, height:28, border:'1px solid #aaa', display:'flex', alignItems:'center', justifyContent:'center', background:'#f9f9f9', cursor:'grab'}}>
+          <div style={{marginBottom: 6, fontSize: 12, opacity: 0.7}}>Active rack (Player {activePlayer + 1}) — drag onto board</div>
+          <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
+            {rack.map((k, idx) => (
+              <div
+                key={`${k}-${idx}`}
+                draggable
+                data-testid="playground-rack-tile"
+                data-kind={k}
+                onDragStart={e => onDragStartTile(k, e)}
+                style={{
+                  width: 32,
+                  height: 32,
+                  border: '1px solid #aaa',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: '#f9f9f9',
+                  cursor: 'grab',
+                  fontWeight: 600,
+                }}
+              >
                 {k}
               </div>
             ))}
+            {rack.length === 0 && <div style={{fontSize: 12, opacity: 0.7}}>Rack empty</div>}
           </div>
           {cpuSuggestion && (
-            <div style={{marginTop: 12, fontSize: 12, padding: 8, border: '1px solid var(--ifm-color-emphasis-200)', borderRadius: 4}}>
-              <div style={{fontWeight: 600, marginBottom: 4}}>CPU ({cpuSuggestion.difficulty}) suggests:</div>
-              <div><strong>{cpuSuggestion.word}</strong> — {cpuSuggestion.total} pts</div>
-              <div style={{opacity:0.7}}>Raw {cpuSuggestion.score}, leave {cpuSuggestion.rackLeave}, equity {cpuSuggestion.boardEquity}, endgame {cpuSuggestion.endgamePenalty}</div>
-            </div>
-          )}
-          {!cpuSuggestion && lastCpu && (
-            <div style={{marginTop: 12, fontSize: 12, padding: 8, border: '1px solid var(--ifm-color-emphasis-200)', borderRadius: 4}}>
-              <div style={{fontWeight: 600, marginBottom: 4}}>Last CPU hint ({lastCpu.difficulty}):</div>
-              <div><strong>{lastCpu.word}</strong> — {lastCpu.total} pts</div>
-              <div style={{opacity:0.7}}>Raw {lastCpu.score}, leave {lastCpu.rackLeave}, equity {lastCpu.boardEquity}, endgame {lastCpu.endgamePenalty}</div>
+            <div style={{marginTop: 12, fontSize: 12, padding: 8, border: '1px dashed var(--ifm-color-emphasis-200)', borderRadius: 4}}>
+              <div style={{fontWeight: 600, marginBottom: 4}}>CPU placements preview</div>
+              <div>{cpuSuggestion.placements.map(p => `(${p.x},${p.y})`).join(', ') || '—'}</div>
             </div>
           )}
         </div>
         {showMoves && (
-          <div style={{minWidth: 180, maxWidth: 220, fontSize: 13}}>
+          <div style={{minWidth: 200, maxWidth: 240, fontSize: 13}}>
             <div style={{fontWeight: 600, marginBottom: 8}}>Legal moves</div>
             {legalMoves.length === 0 && !loadingMoves && (
               <div style={{opacity: 0.7}}>No moves available for the current rack.</div>
             )}
             {legalMoves.map((mv, idx) => (
-              <div key={`${mv.word}-${idx}`} style={{marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--ifm-color-emphasis-200)'}}>
+              <div
+                key={`${mv.word}-${idx}`}
+                data-testid={`legal-move-${idx}`}
+                style={{marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--ifm-color-emphasis-200)'}}
+              >
                 <div style={{fontWeight: 600}}>
-                  #{idx + 1} {mv.word} <span style={{opacity:0.7}}>({mv.score} pts)</span>
+                  #{idx + 1} {mv.word} <span style={{opacity: 0.7}}>({mv.total ?? mv.score} pts)</span>
                 </div>
-                <div style={{marginTop: 4, display:'flex', gap: 6}}>
-                  <button onClick={() => setActiveMoveIndex(idx)} style={{fontSize:12}}>Highlight</button>
-                  <button onClick={() => playGeneratedMove(mv)} style={{fontSize:12}}>Play</button>
+                <div style={{marginTop: 4, display: 'flex', gap: 6}}>
+                  <button onClick={() => setActiveMoveIndex(idx)} style={{fontSize: 12}}>Highlight</button>
+                  <button onClick={() => playGeneratedMove(mv)} style={{fontSize: 12}}>Play</button>
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
-      <div style={{marginTop: 16}}>
-        <div style={{fontSize: 12, fontWeight: 600, marginBottom: 4}}>Snapshot JSON</div>
+
+      <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
+        <div style={{fontSize: 12, fontWeight: 600}}>Snapshot JSON</div>
         <textarea
           value={snapshotText}
           onChange={e => setSnapshotText(e.target.value)}
           rows={4}
           style={{width: '100%', fontFamily: 'monospace'}}
-          placeholder="Click Save Snapshot to capture the current game state"
+          placeholder="Click Save snapshot to capture the current game state"
         />
-      </div>
-      {eventLogText && (
-        <div style={{marginTop: 12}}>
-          <div style={{fontSize: 12, fontWeight: 600, marginBottom: 4}}>Event Log</div>
-          <pre style={{maxHeight: 180, overflow: 'auto', background: '#f9fafb', padding: 8, border: '1px solid var(--ifm-color-emphasis-200)'}}>
-            {eventLogText}
-          </pre>
+        <div style={{display: 'flex', gap: 8}}>
+          <button onClick={exportSnapshot} disabled={!game}>Save snapshot</button>
+          <button onClick={importSnapshot} disabled={!game || snapshotText.trim() === ''}>Load snapshot</button>
+          <button onClick={fetchEventLog} disabled={!game}>Show event log</button>
         </div>
-      )}
+        {eventLogText && (
+          <pre style={{maxHeight: 200, overflow: 'auto', background: '#f9fafb', padding: 8, border: '1px solid var(--ifm-color-emphasis-200)'}}>{eventLogText}</pre>
+        )}
+      </div>
     </div>
   );
 }

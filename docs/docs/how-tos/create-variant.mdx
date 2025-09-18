@@ -1,0 +1,39 @@
+---
+title: Create a New Variant
+---
+
+
+# Create a New Variant
+
+Designing a bespoke ruleset boils down to assembling a config object that describes the board, tiles, dictionary, and rule plug-ins. The easiest way to iterate is to tweak the WASM playground while exporting snapshots for regression tests.
+
+1. **Copy a config stub.** Start from the minimal JSON template in the Appendix or export via the playground's *Snapshot* tab.
+
+```json title="variant.json"
+{
+  "tileset": {
+    "tile_kinds": [
+      {"id":"A","symbol":"A","score":1,"count":10},
+      {"id":"SUN","symbol":"☀","score":5,"count":1}
+    ]
+  },
+  "rack_size": 7,
+  "board_layout": {"type":"rect","width":11,"height":11},
+  "ruleset_id": "crossword_classic",
+  "dictionary_id": "en_demo",
+  "rng_seed": 7
+}
+```
+
+2. **Fill in geometry.** Switch between rectangular, graph, or 3D layouts depending on the adjacency you want. Bonus tiles can be embedded inline or supplied as separate metadata.
+3. **Tune tiles and counts.** Add emoji, blanks, or stacked pieces, and remember to keep the bag balanced so racks refresh well.
+4. **Choose lexicon support.** Small wordlists can be inlined; larger ones should be shipped as external assets and referenced by ID.
+5. **Script special rules.** Register custom validators or scoring hooks through the rule plug-in system when classic crossword rules are not enough.
+6. **Lock determinism.** Use named seeds in configs and fixtures so tests reproduce the exact rack order.
+
+## Related guidance
+
+- [Core model](/docs/core-model)
+- [Custom geometry](/docs/custom-geometry)
+- [Scoring and validation](/docs/scoring-and-validation)
+- [Rule plug-ins](/docs/rule-plugins)

@@ -1,0 +1,30 @@
+---
+title: Enable 3D Boards
+---
+
+
+# Enable 3D Boards
+
+Layered boards let words bend through depth while reusing the same move validation stack.
+
+1. **Switch the geometry.** Set `board_layout` to `{ "type": "3d", "width": 11, "height": 11, "depth": 4 }`.
+2. **Handle rendering.** The Playground’s “Runtime & Board Layout” controls expose both the `Depth` input and `Slice z` slider; Unity and Godot demos already map layers to camera rigs.
+3. **Extend bonuses.** Bonus definitions accept a `z` coordinate so you can reserve multipliers for higher layers.
+4. **Test deterministically.** Include depth in serialized snapshots and run the Playwright regression to ensure all layers render.
+
+```json title="board.json"
+{
+  "board_layout": {
+    "type": "3d",
+    "width": 11,
+    "height": 11,
+    "depth": 4
+  }
+}
+```
+
+## Related guidance
+
+- [3D boards](/docs/3d-boards)
+- [Custom geometry](/docs/custom-geometry)
+- [Playground](/docs/playground)

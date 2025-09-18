@@ -200,12 +200,24 @@ pub fn new_game(config_json: &str, players: usize) -> Result<JsGame, JsValue> {
             })
             .collect(),
     };
+    let width = cfg.board_layout.width;
+    let layer_height = cfg.board_layout.height;
+    if width == 0 || layer_height == 0 {
+        return Err(to_js_err("board dimensions must be positive"));
+    }
+    let depth = cfg.board_layout.depth.unwrap_or(1);
+    if depth == 0 {
+        return Err(to_js_err("board depth must be positive"));
+    }
+    let total_height = layer_height
+        .checked_mul(depth)
+        .ok_or_else(|| to_js_err("board height * depth overflow"))?;
     let eng_cfg = engine::GameConfig {
         tileset,
         rack_size: cfg.rack_size,
         board_layout: engine::RectBoardLayout {
-            width: cfg.board_layout.width,
-            height: cfg.board_layout.height,
+            width,
+            height: total_height,
         },
         ruleset_id: cfg.ruleset_id,
         dictionary_id: cfg.dictionary_id,
@@ -214,9 +226,9 @@ pub fn new_game(config_json: &str, players: usize) -> Result<JsGame, JsValue> {
     };
     let mut state = engine::GameState::new(&eng_cfg, players).map_err(to_js_err)?;
     if cfg.board_layout.r#type.as_deref() == Some("3d") {
-        let w = cfg.board_layout.width as i32;
-        let h = cfg.board_layout.height as i32;
-        let d = cfg.board_layout.depth.unwrap_or(1) as i32;
+        let w = i32::try_from(width).map_err(|_| to_js_err("board width too large for 3D"))?;
+        let h = i32::try_from(layer_height).map_err(|_| to_js_err("board height too large for 3D"))?;
+        let d = i32::try_from(depth).map_err(|_| to_js_err("board depth too large for 3D"))?;
         let mut nodes: Vec<engine::Coord2D> = Vec::new();
         for z in 0..d {
             for y in 0..h {

@@ -1,0 +1,114 @@
+---
+title: Cookbook
+---
+
+# Cookbook
+
+Grab-and-go snippets for each binding. Each recipe bootstraps a game, plays a simple move, and prints the resulting score/board state.
+
+## Rust
+
+```rust
+use engine::{GameConfig, GameState, RectBoardLayout, Tileset, TileKind};
+use std::collections::HashMap;
+
+fn main() -> anyhow::Result<()> {
+    let tileset = Tileset {
+        tile_kinds: vec![TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] }],
+    };
+    let mut tile_counts = HashMap::new();
+    tile_counts.insert(String::from("A"), 30u32);
+    let cfg = GameConfig {
+        tileset,
+        rack_size: 7,
+        board_layout: RectBoardLayout { width: 7, height: 7 },
+        ruleset_id: "cross".into(),
+        dictionary_id: "en_demo".into(),
+        rng_seed: 1,
+        tile_counts,
+    };
+    let mut state = GameState::new(&cfg, 2)?;
+    let center = engine::rules::CrosswordRules::center_cell(&state.board.geom);
+    let coord = state.board.geom.from_cell_id(center).unwrap();
+    let placements = vec![engine::Placement { x: coord.x, y: coord.y, kind_id: "A".into(), mark: None }];
+    let scored = state.play_user_move(placements.clone())?;
+    println!("score: {}", scored.total);
+    println!("board: {}", serde_json::to_string_pretty(&state.board.to_json())?);
+    Ok(())
+}
+```
+
+## Python
+
+```python
+from tiletangle import Game
+import json
+
+config = {
+  "tileset": {"tile_kinds": [{"id": "A", "symbol": "A", "score": 1}]},
+  "rack_size": 7,
+  "board_layout": {"width": 7, "height": 7},
+  "ruleset_id": "cross",
+  "dictionary_id": "en_demo",
+  "rng_seed": 1,
+  "tile_counts": {"A": 30},
+  "free_word_mode": True,
+}
+
+game = Game(json.dumps(config), 2)
+placements = json.dumps([{"x": 3, "y": 3, "kind_id": "A"}])
+print("score", game.play_move(placements))
+print("board", game.get_board_json())
+```
+
+## Web (WASM)
+
+```js
+import init, { new_game, play_move, get_board } from '/wasm/engine/pkg/tiletangle_wasm.js';
+
+await init();
+const config = {
+  tileset: { tile_kinds: [{ id: 'A', symbol: 'A', score: 1 }] },
+  rack_size: 7,
+  board_layout: { width: 7, height: 7 },
+  ruleset_id: 'cross',
+  dictionary_id: 'en_demo',
+  rng_seed: 1,
+  tile_counts: { A: 30 },
+  free_word_mode: true,
+};
+const handle = new_game(JSON.stringify(config), 2);
+const scoreJson = play_move(handle, JSON.stringify([{ x: 3, y: 3, kind_id: 'A' }]));
+console.log('score', JSON.parse(scoreJson));
+console.log('board', JSON.parse(get_board(handle)));
+```
+
+## Unity (C#)
+
+```csharp
+using TileTangle;
+
+var engine = new Engine();
+engine.NewGame(configJson: "{\"tileset\":{\"tile_kinds\":[{\"id\":\"A\",\"symbol\":\"A\",\"score\":1}]},\"rack_size\":7,\"board_layout\":{\"width\":7,\"height\":7},\"ruleset_id\":\"cross\",\"dictionary_id\":\"en_demo\",\"rng_seed\":1,\"tile_counts\":{\"A\":30}}", players: 2);
+var score = engine.PlayMove("[{\"x\":3,\"y\":3,\"kind_id\":\"A\"}]");
+var board = engine.GetBoardJson();
+UnityEngine.Debug.Log($"score {score}");
+UnityEngine.Debug.Log($"board {board}");
+engine.Dispose();
+```
+
+## Godot (GDScript)
+
+```gdscript
+var engine := WordEngine.new()
+if not engine.new_game(CONFIG_JSON, 2):
+  push_error("Failed to create game")
+  return
+var placements := '[{"x":3,"y":3,"kind_id":"A"}]'
+var score_json := engine.play_move(placements)
+print("score", score_json)
+print("board", engine.get_board_json())
+engine.free()
+```
+
+Where `CONFIG_JSON` matches the JSON blob used in the other recipes.

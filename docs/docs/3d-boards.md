@@ -4,7 +4,7 @@ sidebar_position: 12
 
 # 3D Boards
 
-Phase 8 introduces 3D boards by layering 2D slices and connecting neighbors along the Z‑axis. The engine models this via a graph overlay, tagging edges with direction families (X, Y, Z). Validation and scoring operate along these tags.
+TileTangle supports multi-layer boards by flattening each slice into the base grid and connecting neighbours along the Z-axis with a graph overlay. Validation and scoring treat those tagged edges the same way as X/Y neighbours, so words can bend between layers.
 
 ## Config: 3×3×3 Toy Board
 
@@ -24,11 +24,10 @@ Phase 8 introduces 3D boards by layering 2D slices and connecting neighbors alon
 
 ## Playground
 
-- Toggle “3D (layers)” in the Playground and choose `Depth`. Use the `Slice z` slider to browse layers.
-- Drag tiles to place within the active slice; lines can span across Z if contiguous.
+- Toggle “3D (layers)” in the Playground controls and set the desired `Depth`.
+- Use the `Slice z` slider to browse layers and drag tiles within the active slice. Placements can span layers as long as they stay contiguous along X/Y/Z.
 
 ## Notes
 
 - 3D is implemented via the general graph layer; future work can add true 3D coordinate helpers.
 - Demos can render slice stacks (e.g., Godot 3D) using the same JSON API.
-

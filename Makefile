@@ -31,9 +31,9 @@ godot-build:
 
 .PHONY: wasm
 wasm:
-	rustup target add wasm32-unknown-unknown || true
-	cargo install wasm-pack --locked || true
-	cargo run -q -p dict-build -- assets/dictionaries/TWL06.txt docs/static/dictionaries/TWL06.fst --min-len 2 --case-fold true || true
+	rustup target add wasm32-unknown-unknown >/dev/null 2>&1 || true
+	which wasm-pack >/dev/null 2>&1 || cargo install wasm-pack --locked
+	cargo run -q -p dict-build -- assets/dictionaries/TWL06.txt docs/static/dictionaries/TWL06.fst --min-len 2 --case-fold
 	cd wasm && wasm-pack build --target web --out-dir pkg
 	mkdir -p docs/static/wasm/engine
 	rm -rf docs/static/wasm/engine/pkg && cp -r wasm/pkg docs/static/wasm/engine/
