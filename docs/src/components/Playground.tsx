@@ -52,6 +52,37 @@ const parseTileCounts = (text: string, fallback: Record<string, number>) => {
   return {map, error: null};
 };
 
+const formatTileScores = (scores: Record<string, number>): string => {
+  return Object.entries(scores)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([id, score]) => `${id}:${score}`)
+    .join('\n');
+};
+
+const parseTileScores = (text: string, fallback: Record<string, number>) => {
+  const map: Record<string, number> = {...fallback};
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return {map, error: 'Tile scores cannot be empty.'};
+  }
+  const tokens = trimmed.split(/[,\n]+/);
+  for (const token of tokens) {
+    const entry = token.trim();
+    if (!entry) continue;
+    const match = entry.match(/^([A-Za-z_]+)\s*[:=]\s*(-?\d+)$/);
+    if (!match) {
+      return {map, error: `Invalid score entry: “${entry}”`};
+    }
+    const id = match[1].toUpperCase();
+    const score = Number.parseInt(match[2], 10);
+    if (!Number.isFinite(score)) {
+      return {map, error: `Invalid score for ${id}`};
+    }
+    map[id] = score;
+  }
+  return {map, error: null};
+};
+
 type BoardJson = {width: number; height: number; rows: string[][]};
 type Placement = {x: number; y: number; kind_id: string; mark?: string | null};
 type GeneratedMove = {
@@ -126,6 +157,7 @@ type SetupState = {
   depth: number;
   rackSize: number;
   tileCountsText: string;
+  tileScoresText: string;
 };
 
 function ControlSection({title, children}: ControlSectionProps): JSX.Element {
@@ -148,9 +180,28 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const classic = useMemo(() => classicTilesets(), []);
   const defaultTileKinds = useMemo(() => classic.tile_kinds, [classic]);
   const defaultTileCounts = useMemo(() => classic.tile_counts, [classic]);
+  const defaultTileScores = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const kind of defaultTileKinds) {
+      map[kind.id] = kind.score;
+    }
+    const initialKinds = initialConfig?.tileset?.tile_kinds;
+    if (Array.isArray(initialKinds)) {
+      for (const kind of initialKinds) {
+        if (kind && typeof kind.id === 'string' && typeof kind.score === 'number') {
+          map[kind.id] = kind.score;
+        }
+      }
+    }
+    return map;
+  }, [defaultTileKinds, initialConfig?.tileset?.tile_kinds]);
   const initialTileCountsText = useMemo(
     () => formatTileCounts(initialConfig?.tile_counts ?? defaultTileCounts),
     [initialConfig?.tile_counts, defaultTileCounts],
+  );
+  const initialTileScoresText = useMemo(
+    () => formatTileScores(defaultTileScores),
+    [defaultTileScores],
   );
 
   const [useWorker, setUseWorker] = useState(initial?.useWorker ?? false);
@@ -174,26 +225,163 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     depth: initialDepth,
     rackSize: initialRackSize,
     tileCountsText: initialTileCountsText,
+    tileScoresText: initialTileScoresText,
   });
   const [draftSettings, setDraftSettings] = useState<SetupState>(appliedSettings);
   const [tileCountsError, setTileCountsError] = useState<string | null>(null);
+  const [tileScoresError, setTileScoresError] = useState<string | null>(null);
+  const [newTileId, setNewTileId] = useState('');
+  const [newTileCount, setNewTileCount] = useState(1);
+  const [newTileScore, setNewTileScore] = useState(1);
+
+  const draftCountsParsed = useMemo(
+    () => parseTileCounts(draftSettings.tileCountsText, defaultTileCounts),
+    [draftSettings.tileCountsText, defaultTileCounts],
+  );
+  const draftScoresParsed = useMemo(
+    () => parseTileScores(draftSettings.tileScoresText, defaultTileScores),
+    [draftSettings.tileScoresText, defaultTileScores],
+  );
+  const draftTileRows = useMemo(() => {
+    const ids = new Set<string>([
+      ...Object.keys(draftCountsParsed.map),
+      ...Object.keys(draftScoresParsed.map),
+    ]);
+    return Array.from(ids)
+      .sort((a, b) => a.localeCompare(b))
+      .map(id => ({
+        id,
+        count: draftCountsParsed.map[id] ?? 0,
+        score: draftScoresParsed.map[id] ?? 0,
+      }));
+  }, [draftCountsParsed, draftScoresParsed]);
+
+  const updateTileEntry = useCallback(
+    (id: string, updates: {count?: number; score?: number}) => {
+      const normalized = id.toUpperCase();
+      const counts = {...draftCountsParsed.map};
+      const scores = {...draftScoresParsed.map};
+
+      if (updates.count != null) {
+        const nextCount = Number.isFinite(updates.count) ? Math.max(0, Math.trunc(updates.count)) : 0;
+        if (nextCount <= 0) {
+          delete counts[normalized];
+          delete scores[normalized];
+        } else {
+          counts[normalized] = nextCount;
+        }
+      }
+
+      if (updates.score != null) {
+        const nextScore = Number.isFinite(updates.score) ? Math.trunc(updates.score) : 0;
+        scores[normalized] = nextScore;
+      }
+
+      if (Object.keys(counts).length === 0) {
+        setTileCountsError('Tile pool must include at least one tile.');
+        return;
+      }
+
+      const countsText = formatTileCounts(counts);
+      const scoresText = formatTileScores(scores);
+      setDraftSettings(prev => ({...prev, tileCountsText: countsText, tileScoresText: scoresText}));
+      const countsValidation = parseTileCounts(countsText, defaultTileCounts);
+      setTileCountsError(countsValidation.error);
+      const scoresValidation = parseTileScores(scoresText, defaultTileScores);
+      setTileScoresError(scoresValidation.error);
+    },
+    [draftCountsParsed, draftScoresParsed, defaultTileCounts, defaultTileScores],
+  );
+
+  const removeTile = useCallback(
+    (id: string) => {
+      const normalized = id.toUpperCase();
+      const counts = {...draftCountsParsed.map};
+      const scores = {...draftScoresParsed.map};
+      delete counts[normalized];
+      delete scores[normalized];
+      if (Object.keys(counts).length === 0) {
+        setTileCountsError('Tile pool must include at least one tile.');
+        return;
+      }
+      const countsText = formatTileCounts(counts);
+      const scoresText = formatTileScores(scores);
+      setDraftSettings(prev => ({...prev, tileCountsText: countsText, tileScoresText: scoresText}));
+      const countsValidation = parseTileCounts(countsText, defaultTileCounts);
+      setTileCountsError(countsValidation.error);
+      const scoresValidation = parseTileScores(scoresText, defaultTileScores);
+      setTileScoresError(scoresValidation.error);
+    },
+    [draftCountsParsed, draftScoresParsed, defaultTileCounts, defaultTileScores],
+  );
+
+  const handleAddTile = useCallback(() => {
+    const normalized = newTileId.trim().toUpperCase();
+    if (!normalized) return;
+    const safeCount = Number.isFinite(newTileCount) ? Math.max(1, Math.trunc(newTileCount)) : 1;
+    const safeScore = Number.isFinite(newTileScore) ? Math.trunc(newTileScore) : 0;
+    updateTileEntry(normalized, {count: safeCount, score: safeScore});
+    setNewTileId('');
+    setNewTileCount(1);
+    setNewTileScore(1);
+  }, [newTileCount, newTileId, newTileScore, updateTileEntry]);
+
+  const handleResetTiles = useCallback(() => {
+    setDraftSettings(prev => ({
+      ...prev,
+      tileCountsText: initialTileCountsText,
+      tileScoresText: initialTileScoresText,
+    }));
+    setTileCountsError(null);
+    setTileScoresError(null);
+    setNewTileId('');
+    setNewTileCount(1);
+    setNewTileScore(1);
+  }, [initialTileCountsText, initialTileScoresText]);
 
   const appliedTileCountsResult = useMemo(
     () => parseTileCounts(appliedSettings.tileCountsText, defaultTileCounts),
     [appliedSettings.tileCountsText, defaultTileCounts],
   );
   const appliedTileCounts = appliedTileCountsResult.map;
+  const appliedTileScoresResult = useMemo(
+    () => parseTileScores(appliedSettings.tileScoresText, defaultTileScores),
+    [appliedSettings.tileScoresText, defaultTileScores],
+  );
+  const appliedTileScores = appliedTileScoresResult.map;
 
   const dynamicTileKinds = useMemo(() => {
-    const byId = new Map(defaultTileKinds.map(kind => [kind.id, kind]));
-    const kinds = [...defaultTileKinds];
-    for (const id of Object.keys(appliedTileCounts)) {
-      if (!byId.has(id)) {
-        kinds.push({id, symbol: id, score: 1, is_blank: false, aliases: []});
-      }
-    }
+    const kinds = defaultTileKinds.map(kind => ({
+      ...kind,
+      score: appliedTileScores[kind.id] ?? kind.score ?? 0,
+    }));
+    const seen = new Set(kinds.map(k => k.id));
+    const ensureKind = (id: string) => {
+      if (seen.has(id)) return;
+      const score = appliedTileScores[id] ?? 1;
+      kinds.push({id, symbol: id, score, is_blank: false, aliases: []});
+      seen.add(id);
+    };
+    for (const id of Object.keys(appliedTileCounts)) ensureKind(id);
+    for (const id of Object.keys(appliedTileScores)) ensureKind(id);
     return kinds;
-  }, [defaultTileKinds, appliedTileCounts]);
+  }, [defaultTileKinds, appliedTileCounts, appliedTileScores]);
+
+  const tileMetaMap = useMemo(() => {
+    const map = new Map<string, {symbol: string; score: number}>();
+    for (const kind of dynamicTileKinds) {
+      const symbol = typeof kind.symbol === 'string' && kind.symbol.length > 0 ? kind.symbol : kind.id;
+      const score = typeof kind.score === 'number' ? kind.score : appliedTileScores[kind.id] ?? 0;
+      map.set(kind.id, {symbol, score});
+      map.set(kind.id.toUpperCase(), {symbol, score});
+    }
+    return map;
+  }, [dynamicTileKinds, appliedTileScores]);
+
+  const getTileMeta = useCallback(
+    (id: string) => tileMetaMap.get(id) ?? tileMetaMap.get(id.toUpperCase()),
+    [tileMetaMap],
+  );
 
   const [ready, setReady] = useState(false);
   const [board, setBoard] = useState<BoardJson | null>(null);
@@ -204,6 +392,33 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const [activeMoveIndex, setActiveMoveIndex] = useState<number | null>(null);
   const [loadingMoves, setLoadingMoves] = useState(false);
   const [rack, setRack] = useState<string[]>(rackOverrideRef.current ?? []);
+
+  const rackCountByKind = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const kind of rack) {
+      map.set(kind, (map.get(kind) ?? 0) + 1);
+    }
+    return map;
+  }, [rack]);
+
+  const availableRackTiles = useMemo(() => {
+    const remaining = new Map<string, number>();
+    for (const placement of pending) {
+      const key = placement.kind_id;
+      remaining.set(key, (remaining.get(key) ?? 0) + 1);
+    }
+    const arr: {id: string; index: number}[] = [];
+    rack.forEach((id, index) => {
+      const pendingCount = remaining.get(id) ?? 0;
+      if (pendingCount > 0) {
+        remaining.set(id, pendingCount - 1);
+      } else {
+        arr.push({id, index});
+      }
+    });
+    return arr;
+  }, [rack, pending]);
+
   const [players, setPlayers] = useState<PlayerSummary[]>([]);
   const [activePlayer, setActivePlayer] = useState(0);
   const [turnNumber, setTurnNumber] = useState(0);
@@ -365,19 +580,45 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   useEffect(() => {
     let cancelled = false;
 
-    const loadDictionaryText = async (apply: (text: string) => Promise<void> | void): Promise<boolean> => {
-      try {
-        const resp = await fetch('/dictionaries/demo.txt');
-        if (resp.ok) {
-          const txt = await resp.text();
-          await apply(txt);
-          return true;
+    const loadDictionary = async (handlers: {
+      applyText: (text: string) => Promise<void> | void;
+      applyFst?: (bytes: Uint8Array) => Promise<void> | void;
+      preferFst: boolean;
+    }): Promise<boolean> => {
+      const {applyText, applyFst, preferFst} = handlers;
+
+      if (preferFst && applyFst) {
+        try {
+          const resp = await fetch('/dictionaries/TWL06.fst');
+          if (resp.ok) {
+            const buf = new Uint8Array(await resp.arrayBuffer());
+            await applyFst(buf);
+            return true;
+          }
+          console.warn('TWL06.fst fetch returned status', resp.status);
+        } catch (err) {
+          console.warn('FST dictionary fetch failed', err);
         }
-      } catch (err) {
-        console.warn('Demo dictionary fetch failed', err);
       }
+
+      const textSources = ['/dictionaries/TWL06.txt', '/dictionaries/demo.txt'];
+      for (const url of textSources) {
+        try {
+          const resp = await fetch(url);
+          if (!resp.ok) {
+            console.warn(`Dictionary fetch from ${url} returned status`, resp.status);
+            continue;
+          }
+          const txt = await resp.text();
+          await applyText(txt);
+          return true;
+        } catch (err) {
+          console.warn(`Dictionary fetch failed from ${url}`, err);
+        }
+      }
+
       try {
-        await apply(fallbackDictionaryText);
+        await applyText(fallbackDictionaryText);
         return true;
       } catch (err) {
         console.warn('Fallback dictionary load failed', err);
@@ -442,14 +683,14 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
 
           let dictionaryLoaded = !useDict;
           if (useDict) {
-            dictionaryLoaded = await loadDictionaryText(async text => {
-              if (dictEngine === 'set') {
-                await call('set_dictionary_from_text', {text, case_fold: true});
-              } else if (dictEngine === 'fst') {
-                await call('set_dictionary_engine', {text, engine: 'set', case_fold: true});
-              } else {
+            dictionaryLoaded = await loadDictionary({
+              preferFst: dictEngine === 'fst',
+              applyFst: async bytes => {
+                await call('set_dictionary_from_fst_bytes', {bytes, case_fold: true});
+              },
+              applyText: async text => {
                 await call('set_dictionary_engine', {text, engine: dictEngine, case_fold: true});
-              }
+              },
             });
           }
 
@@ -489,14 +730,14 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
 
           let dictionaryLoaded = !useDict;
           if (useDict) {
-            dictionaryLoaded = await loadDictionaryText(async text => {
-              if (dictEngine === 'set') {
-                mod.set_dictionary_from_text(g, text, true);
-              } else if (dictEngine === 'fst') {
-                mod.set_dictionary_from_text_engine(g, text, 'set', true);
-              } else {
+            dictionaryLoaded = await loadDictionary({
+              preferFst: dictEngine === 'fst',
+              applyFst: async bytes => {
+                mod.set_dictionary_from_fst_bytes(g, bytes, true);
+              },
+              applyText: async text => {
                 mod.set_dictionary_from_text_engine(g, text, dictEngine, true);
-              }
+              },
             });
           }
 
@@ -608,21 +849,28 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     const height = clamp(draftSettings.height, 2, 30);
     const depth = clamp(draftSettings.depth, 1, 12);
     const rackSize = clamp(draftSettings.rackSize, 1, 14);
-    const parsed = parseTileCounts(draftSettings.tileCountsText, defaultTileCounts);
-    if (parsed.error) {
-      setTileCountsError(parsed.error);
+    const countsParsed = parseTileCounts(draftSettings.tileCountsText, defaultTileCounts);
+    if (countsParsed.error) {
+      setTileCountsError(countsParsed.error);
+      return;
+    }
+    const scoresParsed = parseTileScores(draftSettings.tileScoresText, defaultTileScores);
+    if (scoresParsed.error) {
+      setTileScoresError(scoresParsed.error);
       return;
     }
     setTileCountsError(null);
+    setTileScoresError(null);
     setAppliedSettings({
       width,
       height,
       depth,
       rackSize,
-      tileCountsText: formatTileCounts(parsed.map),
+      tileCountsText: formatTileCounts(countsParsed.map),
+      tileScoresText: formatTileScores(scoresParsed.map),
     });
     setDictMessagesVersion(v => v + 1);
-  }, [draftSettings, defaultTileCounts]);
+  }, [draftSettings, defaultTileCounts, defaultTileScores]);
 
   const dedupeMoves = (moves: GeneratedMove[]): GeneratedMove[] => {
     const map = new Map<string, GeneratedMove>();
@@ -893,6 +1141,14 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       const layerHeight = use3D ? Math.floor(board.height / Math.max(1, effectiveDepth)) : board.height;
       const globalY = use3D ? y + z * layerHeight : y;
       if (!stackOn && (board.rows[globalY]?.[x] || '').length > 0) return prev;
+      const available = rackCountByKind.get(kindId) ?? 0;
+      const used = prev.filter(p => p.kind_id === kindId).length;
+      if (used >= available && available > 0) {
+        return prev;
+      }
+      if (available === 0) {
+        return prev;
+      }
       return [...prev, {x, y: globalY, kind_id: kindId}];
     });
   };
@@ -990,20 +1246,139 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
             style={{width: 70}}
           />
         </label>
-        <div style={{display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 240px'}}>
-          <span style={{fontSize: 12}}>Tile pool (format: `A:9`, separated by commas or new lines)</span>
-          <textarea
-            value={draftSettings.tileCountsText}
-            onChange={e => {
-              const text = e.target.value;
-              setDraftSettings(prev => ({...prev, tileCountsText: text}));
-              const parsed = parseTileCounts(text, defaultTileCounts);
-              setTileCountsError(parsed.error);
-            }}
-            rows={4}
-            style={{width: '100%', fontFamily: 'monospace'}}
-          />
-          {tileCountsError && <span style={{color: '#b91c1c', fontSize: 12}}>{tileCountsError}</span>}
+        <div style={{display: 'flex', flexDirection: 'column', gap: 8, flex: '1 1 100%'}}>
+          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8}}>
+            <span style={{fontSize: 12, fontWeight: 600}}>Tiles</span>
+            <div style={{display: 'flex', gap: 8}}>
+              <button type="button" onClick={handleResetTiles} style={{fontSize: 12}}>Reset to defaults</button>
+            </div>
+          </div>
+          <div style={{overflowX: 'auto'}}>
+            <table style={{width: '100%', borderCollapse: 'collapse', minWidth: 320, fontSize: 13}}>
+              <thead>
+                <tr>
+                  <th style={{textAlign: 'left', padding: '4px 6px', borderBottom: '1px solid var(--ifm-color-emphasis-200)'}}>Tile</th>
+                  <th style={{textAlign: 'left', padding: '4px 6px', borderBottom: '1px solid var(--ifm-color-emphasis-200)'}}>Count</th>
+                  <th style={{textAlign: 'left', padding: '4px 6px', borderBottom: '1px solid var(--ifm-color-emphasis-200)'}}>Score</th>
+                  <th style={{padding: '4px 6px', borderBottom: '1px solid var(--ifm-color-emphasis-200)'}}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {draftTileRows.map(row => (
+                  <tr key={row.id}>
+                    <td style={{padding: '4px 6px'}}>{row.id}</td>
+                    <td style={{padding: '4px 6px', width: 90}}>
+                      <input
+                        type="number"
+                        min={0}
+                        value={row.count ?? 0}
+                        onChange={e => updateTileEntry(row.id, {count: Number(e.target.value)})}
+                        style={{width: '100%'}}
+                      />
+                    </td>
+                    <td style={{padding: '4px 6px', width: 90}}>
+                      <input
+                        type="number"
+                        value={row.score ?? 0}
+                        onChange={e => updateTileEntry(row.id, {score: Number(e.target.value)})}
+                        style={{width: '100%'}}
+                      />
+                    </td>
+                    <td style={{padding: '4px 6px', textAlign: 'right'}}>
+                      <button
+                        type="button"
+                        onClick={() => removeTile(row.id)}
+                        disabled={draftTileRows.length <= 1}
+                        style={{fontSize: 12}}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                <tr>
+                  <td style={{padding: '4px 6px'}}>
+                    <input
+                      type="text"
+                      value={newTileId}
+                      onChange={e => setNewTileId(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
+                      placeholder="ID"
+                      style={{width: '100%'}}
+                    />
+                  </td>
+                  <td style={{padding: '4px 6px'}}>
+                    <input
+                      type="number"
+                      min={1}
+                      value={newTileCount}
+                      onChange={e => setNewTileCount(Number(e.target.value) || 1)}
+                      style={{width: '100%'}}
+                    />
+                  </td>
+                  <td style={{padding: '4px 6px'}}>
+                    <input
+                      type="number"
+                      value={newTileScore}
+                      onChange={e => setNewTileScore(Number(e.target.value) || 0)}
+                      style={{width: '100%'}}
+                    />
+                  </td>
+                  <td style={{padding: '4px 6px', textAlign: 'right'}}>
+                    <button
+                      type="button"
+                      onClick={handleAddTile}
+                      disabled={newTileId.trim() === ''}
+                      style={{fontSize: 12}}
+                    >
+                      Add
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {(tileCountsError || tileScoresError) && (
+            <div style={{fontSize: 12, color: '#b91c1c'}}>
+              {[tileCountsError, tileScoresError]
+                .filter(Boolean)
+                .map((msg, idx) => (
+                  <div key={idx}>{msg}</div>
+                ))}
+            </div>
+          )}
+          <details style={{fontSize: 12}}>
+            <summary style={{cursor: 'pointer'}}>Advanced: edit raw tile data</summary>
+            <div style={{display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 8}}>
+              <div style={{display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 240px'}}>
+                <span style={{fontSize: 12}}>Tile pool (format: `A:9`, separated by commas or new lines)</span>
+                <textarea
+                  value={draftSettings.tileCountsText}
+                  onChange={e => {
+                    const text = e.target.value;
+                    setDraftSettings(prev => ({...prev, tileCountsText: text}));
+                    const parsed = parseTileCounts(text, defaultTileCounts);
+                    setTileCountsError(parsed.error);
+                  }}
+                  rows={4}
+                  style={{width: '100%', fontFamily: 'monospace'}}
+                />
+              </div>
+              <div style={{display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 240px'}}>
+                <span style={{fontSize: 12}}>Tile scores (format: `A:1`, separated by commas or new lines)</span>
+                <textarea
+                  value={draftSettings.tileScoresText}
+                  onChange={e => {
+                    const text = e.target.value;
+                    setDraftSettings(prev => ({...prev, tileScoresText: text}));
+                    const parsed = parseTileScores(text, defaultTileScores);
+                    setTileScoresError(parsed.error);
+                  }}
+                  rows={4}
+                  style={{width: '100%', fontFamily: 'monospace'}}
+                />
+              </div>
+            </div>
+          </details>
         </div>
         <button onClick={handleApplySettings}>Apply configuration</button>
       </ControlSection>
@@ -1266,6 +1641,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    position: 'relative',
                     background: highlighted ? '#e0f2fe' : '#fff',
                     fontWeight: highlighted ? 600 : 400,
                   }}
@@ -1275,7 +1651,32 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
                     if (idx >= 0) setActiveMoveIndex(idx);
                   }}
                 >
-                  {cellDisplay(x, y).slice(0, 1)}
+                  {(() => {
+                    const tileId = cellDisplay(x, y);
+                    if (!tileId) return null;
+                    const meta = getTileMeta(tileId);
+                    const symbol = meta?.symbol ?? tileId.slice(0, 1);
+                    const score = meta?.score;
+                    return (
+                      <>
+                        <span>{symbol.slice(0, 2)}</span>
+                        {typeof score === 'number' && !Number.isNaN(score) && (
+                          <span
+                            style={{
+                              position: 'absolute',
+                              bottom: 2,
+                              right: 3,
+                              fontSize: 10,
+                              fontWeight: 600,
+                              opacity: 0.75,
+                            }}
+                          >
+                            {score}
+                          </span>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               );
             })
@@ -1284,13 +1685,13 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
         <div>
           <div style={{marginBottom: 6, fontSize: 12, opacity: 0.7}}>Active rack (Player {activePlayer + 1}) — drag onto board</div>
           <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
-            {rack.map((k, idx) => (
+            {availableRackTiles.map(({id, index}) => (
               <div
-                key={`${k}-${idx}`}
+                key={`${id}-${index}`}
                 draggable
                 data-testid="playground-rack-tile"
-                data-kind={k}
-                onDragStart={e => onDragStartTile(k, e)}
+                data-kind={id}
+                onDragStart={e => onDragStartTile(id, e)}
                 style={{
                   width: 32,
                   height: 32,
@@ -1298,15 +1699,39 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  position: 'relative',
                   background: '#f9f9f9',
                   cursor: 'grab',
                   fontWeight: 600,
                 }}
               >
-                {k}
+                {(() => {
+                  const meta = getTileMeta(id);
+                  const symbol = meta?.symbol ?? id.slice(0, 2);
+                  const score = meta?.score;
+                  return (
+                    <>
+                      <span>{symbol.slice(0, 2)}</span>
+                      {typeof score === 'number' && !Number.isNaN(score) && (
+                        <span
+                          style={{
+                            position: 'absolute',
+                            bottom: 3,
+                            right: 4,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            opacity: 0.75,
+                          }}
+                        >
+                          {score}
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             ))}
-            {rack.length === 0 && <div style={{fontSize: 12, opacity: 0.7}}>Rack empty</div>}
+            {availableRackTiles.length === 0 && <div style={{fontSize: 12, opacity: 0.7}}>Rack empty or all tiles placed</div>}
           </div>
           {cpuSuggestion && (
             <div style={{marginTop: 12, fontSize: 12, padding: 8, border: '1px dashed var(--ifm-color-emphasis-200)', borderRadius: 4}}>

@@ -152,7 +152,7 @@ test('playground CPU hint plays a move', async ({ page }) => {
     if (hasError) return 'error';
     return null;
   }, {}, { timeout: 20000 });
-  const state = await stateHandle.jsonValue<string | null>();
+  const state = (await stateHandle.jsonValue()) as string | null;
 
   if (state === 'ready') {
     const before = await page.$$eval('[data-testid="playground-board-cell"]', nodes => nodes.filter(n => (n.textContent || '').trim().length > 0).length);

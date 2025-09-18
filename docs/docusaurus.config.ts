@@ -1,8 +1,30 @@
+import {execSync} from 'node:child_process';
+import path from 'node:path';
 import {themes as prismThemes} from 'prism-react-renderer';
-import type {Config} from '@docusaurus/types';
+import type {Config, Plugin} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
+
+const wasmBuildPlugin = (): Plugin<void> => ({
+  name: 'tiletangle-wasm-build',
+  async loadContent() {
+    if (process.env.NODE_ENV !== 'production') {
+      return;
+    }
+
+    if (process.env.TILETANGLE_SKIP_WASM_REBUILD === '1') {
+      console.log('[wasm-build] Skipping WASM rebuild (env opt-out).');
+      return;
+    }
+
+    console.log('[wasm-build] Rebuilding WASM artifacts before docs build...');
+    execSync('npm run wasm:build', {
+      cwd: path.resolve(__dirname),
+      stdio: 'inherit',
+    });
+  },
+});
 
 const config: Config = {
   title: 'TileTangle',
@@ -51,6 +73,7 @@ const config: Config = {
       } satisfies Preset.Options,
     ],
   ],
+  plugins: [wasmBuildPlugin],
 
   themeConfig: {
     // Replace with your project's social card
