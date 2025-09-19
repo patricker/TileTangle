@@ -15,6 +15,7 @@ export type PlaygroundPalette = {
   boardCellBg: string;
   boardCellBorder: string;
   boardCellHighlight: string;
+  boardHexBorder: string;
   rackTileBg: string;
   rackTileBorder: string;
   rackTileHighlight: string;
@@ -60,6 +61,7 @@ export function getPlaygroundPalette(colorMode: 'light' | 'dark'): PlaygroundPal
       boardCellBg: 'rgba(15, 23, 42, 0.92)',
       boardCellBorder: 'rgba(148, 163, 184, 0.35)',
       boardCellHighlight: 'rgba(125, 211, 252, 0.4)',
+      boardHexBorder: 'rgba(148, 221, 255, 0.6)',
       rackTileBg: 'rgba(30, 41, 59, 0.88)',
       rackTileBorder: 'rgba(148, 163, 184, 0.4)',
       rackTileHighlight: 'rgba(56, 189, 248, 0.38)',
@@ -103,6 +105,7 @@ export function getPlaygroundPalette(colorMode: 'light' | 'dark'): PlaygroundPal
     boardCellBg: '#ffffff',
     boardCellBorder: 'rgba(148, 163, 184, 0.38)',
     boardCellHighlight: 'rgba(59, 130, 246, 0.25)',
+    boardHexBorder: 'rgba(71, 85, 105, 0.5)',
     rackTileBg: '#f8fafc',
     rackTileBorder: 'rgba(148, 163, 184, 0.45)',
     rackTileHighlight: 'rgba(59, 130, 246, 0.22)',
@@ -164,5 +167,6 @@ export function buildThemeVars(palette: PlaygroundPalette): CSSProperties {
     '--tt-control-focus-shadow': palette.controlFocusShadow,
     '--tt-control-disabled-bg': palette.controlDisabledBg,
     '--tt-control-disabled-border': palette.controlDisabledBorder,
+    '--tt-hex-border': palette.boardHexBorder,
   } as CSSProperties;
 }

@@ -6,6 +6,7 @@ type BoardPalette = {
   boardCellBorder: string;
   boardCellHighlight: string;
   boardCellBg: string;
+  boardHexBorder?: string;
 };
 
 export const HEX_POLYGON = 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
@@ -229,6 +230,8 @@ function HexBoard({
       const left = x * horizontalStep + (globalRow % 2 !== 0 ? rowOffset : 0);
       const top = viewRow * verticalStep;
       const scoreOffset = Math.max(2, Math.round(hexWidth * 0.12));
+      const baseBorder = palette.boardHexBorder ?? palette.boardCellBorder;
+      const highlightBorder = palette.boardCellHighlight;
 
       const style: React.CSSProperties = {
         width: hexWidth,
@@ -237,15 +240,17 @@ function HexBoard({
         top,
         clipPath: HEX_POLYGON,
         background: highlighted ? palette.boardCellHighlight : palette.boardCellBg,
-        border: `1.5px solid ${highlighted ? palette.boardCellHighlight : palette.boardCellBorder}`,
+        border: `1.5px solid ${highlighted ? highlightBorder : baseBorder}`,
         boxSizing: 'border-box',
+        boxShadow: `0 0 0 1px ${highlighted ? highlightBorder : baseBorder}, 0 6px 14px rgba(15, 23, 42, 0.18)`,
         fontSize: tileFontSize,
         transition: 'border-color 120ms ease, background-color 120ms ease, transform 120ms ease',
       };
 
       if (!activeCell) {
         style.background = 'rgba(148, 163, 184, 0.12)';
-        style.border = '1.5px solid rgba(148, 163, 184, 0.35)';
+        style.border = '1.5px solid rgba(148, 163, 184, 0.3)';
+        style.boxShadow = '0 0 0 1px rgba(148, 163, 184, 0.28)';
         style.opacity = 0.55;
         style.pointerEvents = 'none';
       }

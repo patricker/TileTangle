@@ -394,6 +394,7 @@
 .hexBoard {
   position: relative;
   margin: 0 auto;
+  padding: 8px;
 }
 
 .boardCell {
@@ -461,11 +462,13 @@
 }
 
 .bonusChipWord {
-  background: linear-gradient(135deg, rgba(239, 68, 68, 0.85), rgba(220, 38, 38, 0.9));
+  background: linear-gradient(135deg, rgba(248, 113, 113, 0.25), rgba(239, 68, 68, 0.35));
+  color: #c2410c;
 }
 
 .bonusChipLetter {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.85), rgba(29, 78, 216, 0.9));
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.25), rgba(37, 99, 235, 0.35));
+  color: #1e40af;
 }
 
 .hintBadge {
@@ -543,9 +546,11 @@
 .buttonRow button {
   padding: 0.45rem 0.75rem;
   border-radius: 10px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--tt-control-border);
+  background: var(--tt-control-bg);
+  color: inherit;
   cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
 }
 
 .playerList {
@@ -567,6 +572,7 @@
 .playerCardActive {
   border-color: var(--tt-accent-border);
   box-shadow: 0 12px 28px rgba(56, 189, 248, 0.25);
+  background: rgba(56, 189, 248, 0.18);
 }
 
 .playerCardHeader {
@@ -581,6 +587,17 @@
 .playerRack {
   font-size: 0.8rem;
   color: var(--tt-text-subtle);
+}
+
+.activeBadge {
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  background: rgba(56, 189, 248, 0.22);
+  color: rgba(8, 145, 178, 0.9);
 }
 
 .modeGroup {

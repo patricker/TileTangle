@@ -47,6 +47,7 @@ export default function ClassicDemo(): JSX.Element {
   const [board, setBoard] = useState<BoardJson | null>(null);
   const [rack, setRack] = useState<{kind_id: string; mark?: string | null}[]>([]);
   const [scores, setScores] = useState<number[]>([]);
+  const [activePlayer, setActivePlayer] = useState(0);
   const [pending, setPending] = useState<Placement[]>([]);
   const [exchangeSel, setExchangeSel] = useState<Set<number>>(new Set());
   const [useDict, setUseDict] = useState(false);
@@ -92,14 +93,26 @@ export default function ClassicDemo(): JSX.Element {
   );
 
   const syncState = useCallback(async (call: WorkerGame['call']) => {
-    const [boardResp, rackResp, scoresResp] = await Promise.all([
+    const [boardResp, rackResp, scoresResp, snapshotResp] = await Promise.all([
       call('get_board'),
       call('get_rack'),
       call('get_scores'),
+      call('snapshot_json'),
     ]);
-    setBoard(JSON.parse(boardResp.board as string) as BoardJson);
+    const nextBoard = JSON.parse(boardResp.board as string) as BoardJson;
+    const nextScores = JSON.parse(scoresResp.scores as string) as number[];
+    setBoard(nextBoard);
     setRack(JSON.parse(rackResp.rack as string));
-    setScores(JSON.parse(scoresResp.scores as string));
+    setScores(nextScores);
+    try {
+      const snapshot = JSON.parse(String(snapshotResp.snapshot ?? '{}')) as {to_move?: number};
+      const toMove = typeof snapshot.to_move === 'number' ? snapshot.to_move : 0;
+      const playerCount = Math.max(1, nextScores.length);
+      setActivePlayer(playerCount > 0 ? toMove % playerCount : 0);
+    } catch (err) {
+      console.warn('Failed to parse snapshot for active player', err);
+      setActivePlayer(0);
+    }
     setPending([]);
     setExchangeSel(new Set());
   }, []);
@@ -404,12 +417,12 @@ export default function ClassicDemo(): JSX.Element {
 
   const heroStats = useMemo(
     () => [
+      {label: 'Turn', value: activePlayer === 0 ? 'Player 1' : 'Player 2'},
       {label: 'Player 1', value: `${scores[0] ?? 0} pts`},
       {label: 'Player 2', value: `${scores[1] ?? 0} pts`},
       {label: 'Rack', value: '7 tiles'},
-      {label: 'Bonuses', value: 'DW/TW layout'},
     ],
-    [scores],
+    [scores, activePlayer],
   );
 
   const rackTiles: RackRowTile[] = useMemo(
@@ -443,6 +456,24 @@ export default function ClassicDemo(): JSX.Element {
         };
       }),
     [exchangeSel, getTileMeta, onDragStartTile, palette.accentBorder, palette.rackTileBg, palette.rackTileBorder, palette.rackTileHighlight, rack, rackFontSize, rackScoreFont, rackTileSize, setExchangeSel],
+  );
+
+  const playerCards = useMemo(
+    () => [
+      {
+        key: 0,
+        label: 'Player 1',
+        score: `${scores[0] ?? 0} pts`,
+        active: activePlayer === 0,
+      },
+      {
+        key: 1,
+        label: 'Player 2',
+        score: `${scores[1] ?? 0} pts`,
+        active: activePlayer === 1,
+      },
+    ],
+    [scores, activePlayer],
   );
 
   const hintItems = useMemo(
@@ -594,6 +625,24 @@ export default function ClassicDemo(): JSX.Element {
               );
             }}
           />
+        </div>
+      </Panel>
+
+      <Panel title="Turn tracker" density="compact">
+        <div className={styles.playerList}>
+          {playerCards.map(card => (
+            <div
+              key={card.key}
+              className={`${styles.playerCard} ${card.active ? styles.playerCardActive : ''}`}
+              data-active={card.active ? '1' : '0'}
+            >
+              <div className={styles.playerCardHeader}>
+                {card.label}
+                {card.active && <span className={styles.activeBadge}>Your turn</span>}
+              </div>
+              <div className={styles.playerScore}>{card.score}</div>
+            </div>
+          ))}
         </div>
       </Panel>
 

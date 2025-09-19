@@ -26,6 +26,12 @@ const fallbackDictionaryWords = [
 ];
 const fallbackDictionaryText = fallbackDictionaryWords.join('\n');
 
+const dictionaryTextSources = ['/dictionaries/TWL06.txt', '/dictionaries/demo.txt'];
+
+type DictionaryPayload =
+  | {kind: 'fst'; bytes: Uint8Array}
+  | {kind: 'text'; text: string};
+
 
 type Placement = {x: number; y: number; kind_id: string; mark?: string | null};
 type GeneratedMove = {
@@ -338,6 +344,107 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const getTileMeta = useCallback(
     (id: string) => tileMetaMap.get(id) ?? tileMetaMap.get(id.toUpperCase()),
     [tileMetaMap],
+  );
+
+  const fetchDictionaryPayload = useCallback(
+    async (engine: 'fst' | 'set' | 'dawg' | 'gaddag'): Promise<DictionaryPayload> => {
+      if (engine === 'fst') {
+        try {
+          const resp = await fetch('/dictionaries/TWL06.fst');
+          if (resp.ok) {
+            const bytes = new Uint8Array(await resp.arrayBuffer());
+            return {kind: 'fst', bytes};
+          }
+          console.warn('TWL06.fst fetch returned status', resp.status);
+        } catch (err) {
+          console.warn('FST dictionary fetch failed', err);
+        }
+      }
+
+      for (const url of dictionaryTextSources) {
+        try {
+          const resp = await fetch(url);
+          if (!resp.ok) {
+            console.warn(`Dictionary fetch from ${url} returned status`, resp.status);
+            continue;
+          }
+          const text = await resp.text();
+          return {kind: 'text', text};
+        } catch (err) {
+          console.warn(`Dictionary fetch failed from ${url}`, err);
+        }
+      }
+
+      return {kind: 'text', text: fallbackDictionaryText};
+    },
+    [],
+  );
+
+  const applyDictionaryToWorker = useCallback(
+    async (
+      call: (action: string, payload?: any) => Promise<any>,
+      engine: 'fst' | 'set' | 'dawg' | 'gaddag',
+      shouldUseDict: boolean,
+    ): Promise<boolean> => {
+      try {
+        if (!shouldUseDict) {
+          await call('set_free_word_mode', {on: true});
+          return true;
+        }
+        const payload = await fetchDictionaryPayload(engine);
+        if (engine === 'fst' && payload.kind === 'fst') {
+          await call('set_dictionary_from_fst_bytes', {bytes: payload.bytes, case_fold: true});
+        } else {
+          const text = payload.kind === 'text' ? payload.text : fallbackDictionaryText;
+          await call('set_dictionary_engine', {text, engine, case_fold: true});
+        }
+        await call('set_free_word_mode', {on: false});
+        return true;
+      } catch (err) {
+        console.warn('Dictionary update failed (worker)', err);
+        try {
+          await call('set_free_word_mode', {on: true});
+        } catch {
+          /* no-op */
+        }
+        return false;
+      }
+    },
+    [fetchDictionaryPayload],
+  );
+
+  const applyDictionaryToWasm = useCallback(
+    async (
+      mod: any,
+      g: any,
+      engine: 'fst' | 'set' | 'dawg' | 'gaddag',
+      shouldUseDict: boolean,
+    ): Promise<boolean> => {
+      try {
+        if (!shouldUseDict) {
+          mod.set_free_word_mode(g, true);
+          return true;
+        }
+        const payload = await fetchDictionaryPayload(engine);
+        if (engine === 'fst' && payload.kind === 'fst') {
+          mod.set_dictionary_from_fst_bytes(g, payload.bytes, true);
+        } else {
+          const text = payload.kind === 'text' ? payload.text : fallbackDictionaryText;
+          mod.set_dictionary_from_text_engine(g, text, engine, true);
+        }
+        mod.set_free_word_mode(g, false);
+        return true;
+      } catch (err) {
+        console.warn('Dictionary update failed (wasm)', err);
+        try {
+          mod.set_free_word_mode(g, true);
+        } catch {
+          /* no-op */
+        }
+        return false;
+      }
+    },
+    [fetchDictionaryPayload],
   );
 
   const boardWidth = useMemo(() => clamp(appliedSettings.width, 2, 30), [appliedSettings.width]);
@@ -668,52 +775,6 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   useEffect(() => {
     let cancelled = false;
 
-    const loadDictionary = async (handlers: {
-      applyText: (text: string) => Promise<void> | void;
-      applyFst?: (bytes: Uint8Array) => Promise<void> | void;
-      preferFst: boolean;
-    }): Promise<boolean> => {
-      const {applyText, applyFst, preferFst} = handlers;
-
-      if (preferFst && applyFst) {
-        try {
-          const resp = await fetch('/dictionaries/TWL06.fst');
-          if (resp.ok) {
-            const buf = new Uint8Array(await resp.arrayBuffer());
-            await applyFst(buf);
-            return true;
-          }
-          console.warn('TWL06.fst fetch returned status', resp.status);
-        } catch (err) {
-          console.warn('FST dictionary fetch failed', err);
-        }
-      }
-
-      const textSources = ['/dictionaries/TWL06.txt', '/dictionaries/demo.txt'];
-      for (const url of textSources) {
-        try {
-          const resp = await fetch(url);
-          if (!resp.ok) {
-            console.warn(`Dictionary fetch from ${url} returned status`, resp.status);
-            continue;
-          }
-          const txt = await resp.text();
-          await applyText(txt);
-          return true;
-        } catch (err) {
-          console.warn(`Dictionary fetch failed from ${url}`, err);
-        }
-      }
-
-      try {
-        await applyText(fallbackDictionaryText);
-        return true;
-      } catch (err) {
-        console.warn('Fallback dictionary load failed', err);
-      }
-      return false;
-    };
-
     const initialise = async () => {
       setReady(false);
       setPending([]);
@@ -745,31 +806,17 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
             forbid_same: forbidSame,
             scoring: stackScoring,
           });
-          await call('set_free_word_mode', {on: !useDict});
 
-          let dictionaryLoaded = !useDict;
-          if (useDict) {
-            dictionaryLoaded = await loadDictionary({
-              preferFst: dictEngine === 'fst',
-              applyFst: async bytes => {
-                await call('set_dictionary_from_fst_bytes', {bytes, case_fold: true});
-              },
-              applyText: async text => {
-                await call('set_dictionary_engine', {text, engine: dictEngine, case_fold: true});
-              },
-            });
-          }
-
-          if (!dictionaryLoaded) {
-            await call('set_free_word_mode', {on: true});
-            if (!cancelled) {
+          const dictionaryLoaded = await applyDictionaryToWorker(call, dictEngine, useDict);
+          if (!cancelled) {
+            if (!dictionaryLoaded) {
               setDictReady(false);
               setDictError('Dictionary failed to load. Free-word mode enabled.');
               if (useDict) setUseDict(false);
+            } else {
+              setDictReady(true);
+              setDictError(null);
             }
-          } else if (!cancelled) {
-            setDictReady(true);
-            setDictError(null);
           }
 
           if (rackOverrideRef.current?.length) {
@@ -792,31 +839,17 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           mod.set_bonuses(g, JSON.stringify(bonusCells));
           mod.set_reading_direction(g, rtl);
           mod.set_stacking(g, stackOn, 7, forbidSame, stackScoring === 'sum');
-          mod.set_free_word_mode(g, !useDict);
 
-          let dictionaryLoaded = !useDict;
-          if (useDict) {
-            dictionaryLoaded = await loadDictionary({
-              preferFst: dictEngine === 'fst',
-              applyFst: async bytes => {
-                mod.set_dictionary_from_fst_bytes(g, bytes, true);
-              },
-              applyText: async text => {
-                mod.set_dictionary_from_text_engine(g, text, dictEngine, true);
-              },
-            });
-          }
-
-          if (!dictionaryLoaded) {
-            mod.set_free_word_mode(g, true);
-            if (!cancelled) {
+          const dictionaryLoaded = await applyDictionaryToWasm(mod, g, dictEngine, useDict);
+          if (!cancelled) {
+            if (!dictionaryLoaded) {
               setDictReady(false);
               setDictError('Dictionary failed to load. Free-word mode enabled.');
               if (useDict) setUseDict(false);
+            } else {
+              setDictReady(true);
+              setDictError(null);
             }
-          } else if (!cancelled) {
-            setDictReady(true);
-            setDictError(null);
           }
 
           if (rackOverrideRef.current?.length) {
@@ -869,13 +902,14 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     stackOn,
     stackScoring,
     forbidSame,
-    dictEngine,
     dictMessagesVersion,
     ensureWorker,
     callWorker,
     ensureWasmModule,
     terminateWorker,
     bonusCells,
+    applyDictionaryToWorker,
+    applyDictionaryToWasm,
   ]);
 
   useEffect(() => {
@@ -883,6 +917,71 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       terminateWorker();
     };
   }, [terminateWorker]);
+
+  useEffect(() => {
+    if (!game) return;
+    let cancelled = false;
+
+    const refresh = async () => {
+      if ('call' in game) {
+        if (!useDict) {
+          await game.call('set_free_word_mode', {on: true}).catch(() => {});
+          if (!cancelled) {
+            setDictReady(true);
+            setDictError(null);
+            setDictLoading(false);
+          }
+          return;
+        }
+        setDictLoading(true);
+        const loaded = await applyDictionaryToWorker(game.call, dictEngine, useDict);
+        if (cancelled) return;
+        if (loaded) {
+          setDictReady(true);
+          setDictError(null);
+        } else {
+          setDictReady(false);
+          setDictError('Dictionary failed to load. Free-word mode enabled.');
+          setUseDict(false);
+        }
+        setDictLoading(false);
+      } else {
+        const {mod, g} = game;
+        if (!mod || !g) return;
+        if (!useDict) {
+          try {
+            mod.set_free_word_mode(g, true);
+          } catch {
+            /* ignore */
+          }
+          if (!cancelled) {
+            setDictReady(true);
+            setDictError(null);
+            setDictLoading(false);
+          }
+          return;
+        }
+        setDictLoading(true);
+        const loaded = await applyDictionaryToWasm(mod, g, dictEngine, useDict);
+        if (cancelled) return;
+        if (loaded) {
+          setDictReady(true);
+          setDictError(null);
+        } else {
+          setDictReady(false);
+          setDictError('Dictionary failed to load. Free-word mode enabled.');
+          setUseDict(false);
+        }
+        setDictLoading(false);
+      }
+    };
+
+    refresh();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [game, dictEngine, useDict, applyDictionaryToWorker, applyDictionaryToWasm]);
 
   const applySnapshot = useCallback((boardJson: BoardJson, snapshotJson: string) => {
     setBoard(boardJson);
@@ -990,6 +1089,9 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     setUseDiag(draftAdjacencyMode === 'diagonal');
     const enable3D = draftDimensionMode === '3d';
     setUse3D(enable3D);
+    if (draftAdjacencyMode === 'hex') {
+      setUseWorker(true);
+    }
     if (!enable3D) {
       setZ(0);
       setInfoMessage(null);
@@ -1384,70 +1486,13 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     return entries.join(', ');
   }, [bagSummary]);
 
-  const appliedAdjacencyMode = useMemo(() => {
-    if (useHex) return 'hex';
-    if (useDiag) return 'diagonal';
-    return 'orthogonal';
-  }, [useHex, useDiag]);
-
-  const tileShape = useMemo<'square' | 'hex'>(() => {
-    if (use3D) return 'square';
-    return appliedAdjacencyMode === 'hex' ? 'hex' : 'square';
-  }, [use3D, appliedAdjacencyMode]);
-
-  const bonusCells = useMemo<BonusCell[]>(() => {
-    if (use3D) return [];
-    const layout = resolveBonusPreset(
-      appliedSettings.bonusPreset,
-      appliedSettings.shape,
-      boardWidth,
-      boardHeight,
-      appliedAdjacencyMode,
-    );
-    return layout
-      .filter(cell => Number.isFinite(cell.x) && Number.isFinite(cell.y))
-      .filter(cell => cell.x >= 0 && cell.x < boardWidth && cell.y >= 0 && cell.y < boardHeight)
-      .filter(cell => {
-        if (!activeMask) return true;
-        return activeMask.has(`${cell.x},${cell.y}`);
-      });
-  }, [
-    use3D,
-    appliedSettings.bonusPreset,
-    appliedSettings.shape,
-    boardWidth,
-    boardHeight,
-    appliedAdjacencyMode,
-    activeMask,
-  ]);
-
-  const bonusOverlay = useMemo(() => {
-    const map = new Map<string, {label: string; tone: 'word' | 'letter'}>();
-    for (const cell of bonusCells) {
-      const key = `${cell.x},${cell.y}`;
-      if (cell.word_mul && cell.word_mul > 1) {
-        map.set(key, {label: `${cell.word_mul}W`, tone: 'word'});
-        continue;
-      }
-      if (cell.letter_mul && cell.letter_mul > 1) {
-        if (!map.has(key)) {
-          map.set(key, {label: `${cell.letter_mul}L`, tone: 'letter'});
-        }
-        continue;
-      }
-      if (cell.tags?.includes('center')) {
-        map.set(key, {label: '★', tone: 'word'});
-      }
-    }
-    return map;
-  }, [bonusCells]);
-
   const handleAdjacencyModeChange = useCallback((mode: string) => {
     const next = mode as 'orthogonal' | 'diagonal' | 'hex';
     setDraftAdjacencyMode(next);
     if (next === 'hex') {
       setDraftSettings(prev => ({...prev, shape: 'diamond'}));
       setDraftDimensionMode('2d');
+      setUseWorker(true);
     } else if (next === 'diagonal') {
       setDraftDimensionMode('2d');
     }
@@ -1556,6 +1601,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
         setUseHex(true);
         setUseDiag(false);
         setUse3D(false);
+        setUseWorker(true);
         setZ(0);
         setInfoMessage(null);
       },
@@ -1665,6 +1711,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       boardCellBorder: palette.boardCellBorder,
       boardCellHighlight: palette.boardCellHighlight,
       boardCellBg: palette.boardCellBg,
+      boardHexBorder: palette.boardHexBorder ?? palette.boardCellBorder,
     }),
     [palette],
   );
