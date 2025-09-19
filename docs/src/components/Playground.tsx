@@ -1,6 +1,14 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useColorMode} from '@docusaurus/theme-common';
 import {classicTilesets} from './demoUtils';
+import PlaygroundBoard from './playground/PlaygroundBoard';
+import PlaygroundHero from './playground/PlaygroundHero';
+import PlaygroundShell from './playground/PlaygroundShell';
+import AlertStack, {type AlertItem} from './playground/AlertStack';
+import type {BoardJson} from './playground/types';
+import {ButtonRow, type ButtonConfig, MoveList, Panel, RackRow, type RackRowTile, SegmentedControl, type SegmentedOption} from './playground/ui';
+import {buildThemeVars, getPlaygroundPalette} from './playground/theme';
+import {useWorkerMessenger} from './playground/useWorkerMessenger';
 import styles from './PlaygroundLayout.module.css';
 
 const fallbackDictionaryWords = [
@@ -126,7 +134,6 @@ const buildShapeMask = (width: number, height: number, shape: BoardShape): Set<s
   return mask;
 };
 
-type BoardJson = {width: number; height: number; rows: string[][]};
 type Placement = {x: number; y: number; kind_id: string; mark?: string | null};
 type GeneratedMove = {
   word: string;
@@ -189,7 +196,9 @@ type BagSummary = {
   total: number;
 };
 
-type BoardShape = 'rect' | 'diamond' | 'cross';
+type BoardShape = 'rect' | 'diamond' | 'cross' | 'hexagon' | 'triangle' | 'ring';
+
+type BonusPreset = 'auto' | 'none' | 'classic' | 'hex' | 'triangle' | 'ring';
 
 type SetupState = {
   width: number;
@@ -199,34 +208,7 @@ type SetupState = {
   tileCountsText: string;
   tileScoresText: string;
   shape: BoardShape;
-};
-
-type PanelProps = {
-  title: string;
-  subtitle?: string;
-  actions?: React.ReactNode;
-  accent?: boolean;
-  density?: 'spacious' | 'compact';
-  children: React.ReactNode;
-};
-
-type StatChipProps = {
-  label: string;
-  value: React.ReactNode;
-};
-
-type SegmentedOption = {
-  value: string;
-  label: string;
-  hint?: string;
-  testId?: string;
-};
-
-type SegmentedControlProps = {
-  name: string;
-  value: string;
-  options: SegmentedOption[];
-  onChange: (value: string) => void;
+  bonusPreset: BonusPreset;
 };
 
 type QuickPreset = {
@@ -235,59 +217,6 @@ type QuickPreset = {
   description: string;
   onApply: () => void;
 };
-
-function Panel({title, subtitle, actions, accent, density = 'spacious', children}: PanelProps): JSX.Element {
-  const bodyClass = density === 'compact' ? styles.panelBodyCompact : styles.panelBody;
-  return (
-    <section className={`${styles.panel} ${accent ? styles.panelAccent : ''}`}>
-      <div className={styles.panelHeader}>
-        <div>
-          <div className={styles.panelTitle}>{title}</div>
-          {subtitle && <div className={styles.panelSubtitle}>{subtitle}</div>}
-        </div>
-        {actions && <div className={styles.panelActions}>{actions}</div>}
-      </div>
-      <div className={bodyClass}>{children}</div>
-    </section>
-  );
-}
-
-function StatChip({label, value}: StatChipProps): JSX.Element {
-  return (
-    <div className={styles.statChip}>
-      <span className={styles.statChipLabel}>{label}</span>
-      <span className={styles.statChipValue}>{value}</span>
-    </div>
-  );
-}
-
-function SegmentedControl({name, value, options, onChange}: SegmentedControlProps): JSX.Element {
-  return (
-    <div className={styles.segmentedControl} role="radiogroup" aria-label={name}>
-      {options.map(option => {
-        const active = option.value === value;
-        return (
-          <label
-            key={option.value}
-            className={styles.segmentedControlOption}
-            data-active={active ? '1' : '0'}
-          >
-            <input
-              type="radio"
-              name={`segmented-${name}`}
-              value={option.value}
-              data-testid={option.testId}
-              checked={active}
-              onChange={() => onChange(option.value)}
-            />
-            <span>{option.label}</span>
-            {option.hint && <small>{option.hint}</small>}
-          </label>
-        );
-      })}
-    </div>
-  );
-}
 
 export default function Playground({initial}: PlaygroundProps = {}): JSX.Element {
   const initialConfig = initial?.config;
@@ -299,78 +228,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
 
   const {colorMode} = useColorMode();
 
-  const palette = useMemo(() => {
-    if (colorMode === 'dark') {
-      return {
-        shellBg: 'linear-gradient(122deg, rgba(15, 23, 42, 0.96) 0%, rgba(30, 64, 175, 0.45) 100%)',
-        shellBorder: 'rgba(94, 234, 212, 0.22)',
-        heroGradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.32) 0%, rgba(14, 165, 233, 0.28) 55%, rgba(56, 189, 248, 0.22) 100%)',
-        heroText: '#e2e8f0',
-        heroAccent: 'rgba(125, 211, 252, 0.55)',
-        heroShadow: '0 40px 95px rgba(2, 6, 23, 0.6)',
-        panelBg: 'rgba(15, 23, 42, 0.82)',
-        panelBorder: 'rgba(148, 163, 184, 0.28)',
-        panelShadow: '0 30px 60px rgba(2, 6, 23, 0.55)',
-        playerActiveBg: 'rgba(56, 189, 248, 0.32)',
-        playerBg: 'rgba(17, 24, 39, 0.55)',
-        boardCellBg: 'rgba(15, 23, 42, 0.92)',
-        boardCellBorder: 'rgba(148, 163, 184, 0.35)',
-        boardCellHighlight: 'rgba(125, 211, 252, 0.4)',
-        rackTileBg: 'rgba(30, 41, 59, 0.88)',
-        rackTileBorder: 'rgba(148, 163, 184, 0.4)',
-        rackTileHighlight: 'rgba(56, 189, 248, 0.38)',
-        warningBg: 'rgba(234, 179, 8, 0.15)',
-        warningBorder: 'rgba(250, 204, 21, 0.45)',
-        errorBg: 'rgba(248, 113, 113, 0.16)',
-        errorBorder: 'rgba(248, 113, 113, 0.6)',
-        infoBg: 'rgba(56, 189, 248, 0.18)',
-        infoBorder: 'rgba(129, 199, 212, 0.5)',
-        accentBorder: 'rgba(56, 189, 248, 0.68)',
-        textSubtle: 'rgba(226, 232, 240, 0.78)',
-        statChipBg: 'rgba(30, 41, 59, 0.72)',
-        statChipBorder: 'rgba(148, 196, 255, 0.42)',
-        segmentedBg: 'rgba(17, 24, 39, 0.78)',
-        segmentedBorder: 'rgba(71, 85, 105, 0.65)',
-        segmentedActiveBg: 'rgba(56, 189, 248, 0.38)',
-        segmentedActiveBorder: 'rgba(125, 211, 252, 0.65)',
-        alertShadow: '0 18px 45px rgba(2, 6, 23, 0.55)',
-      } as const;
-    }
-    return {
-      shellBg: 'linear-gradient(128deg, rgba(248, 250, 252, 0.95) 0%, rgba(224, 242, 254, 0.9) 100%)',
-      shellBorder: 'rgba(148, 163, 184, 0.28)',
-      heroGradient: 'linear-gradient(135deg, rgba(59, 130, 246, 0.22) 0%, rgba(14, 165, 233, 0.18) 55%, rgba(2, 132, 199, 0.15) 100%)',
-      heroText: '#0f172a',
-      heroAccent: 'rgba(59, 130, 246, 0.45)',
-      heroShadow: '0 30px 75px rgba(15, 23, 42, 0.25)',
-      panelBg: 'rgba(255, 255, 255, 0.96)',
-      panelBorder: 'rgba(148, 163, 184, 0.4)',
-      panelShadow: '0 30px 60px rgba(15, 23, 42, 0.12)',
-      playerActiveBg: 'rgba(147, 197, 253, 0.4)',
-      playerBg: 'rgba(241, 245, 249, 0.9)',
-      boardCellBg: '#ffffff',
-      boardCellBorder: 'rgba(148, 163, 184, 0.38)',
-      boardCellHighlight: 'rgba(59, 130, 246, 0.25)',
-      rackTileBg: '#f8fafc',
-      rackTileBorder: 'rgba(148, 163, 184, 0.45)',
-      rackTileHighlight: 'rgba(59, 130, 246, 0.22)',
-      warningBg: 'rgba(251, 191, 36, 0.2)',
-      warningBorder: 'rgba(217, 119, 6, 0.4)',
-      errorBg: 'rgba(248, 113, 113, 0.18)',
-      errorBorder: 'rgba(220, 38, 38, 0.55)',
-      infoBg: 'rgba(59, 130, 246, 0.14)',
-      infoBorder: 'rgba(37, 99, 235, 0.4)',
-      accentBorder: 'rgba(59, 130, 246, 0.6)',
-      textSubtle: 'rgba(71, 85, 105, 0.9)',
-      statChipBg: 'rgba(226, 232, 240, 0.72)',
-      statChipBorder: 'rgba(148, 163, 184, 0.55)',
-      segmentedBg: 'rgba(244, 247, 255, 0.9)',
-      segmentedBorder: 'rgba(148, 163, 184, 0.5)',
-      segmentedActiveBg: 'rgba(59, 130, 246, 0.2)',
-      segmentedActiveBorder: 'rgba(37, 99, 235, 0.55)',
-      alertShadow: '0 18px 40px rgba(15, 23, 42, 0.18)',
-    } as const;
-  }, [colorMode]);
+  const palette = useMemo(() => getPlaygroundPalette(colorMode as 'light' | 'dark'), [colorMode]);
 
   const classic = useMemo(() => classicTilesets(), []);
   const defaultTileKinds = useMemo(() => classic.tile_kinds, [classic]);
@@ -416,10 +274,9 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const [forbidSame, setForbidSame] = useState(initial?.forbidSame ?? true);
   const [z, setZ] = useState(0);
   const rackOverrideRef = useRef<string[] | undefined>(initial?.rack);
-  const workerRef = useRef<Worker | null>(null);
-  const workerRequestId = useRef(0);
   const wasmModuleRef = useRef<any | null>(null);
   const wasmModulePromiseRef = useRef<Promise<any> | null>(null);
+  const {ensureWorker, callWorker, terminateWorker} = useWorkerMessenger();
 
   const ensureWasmModule = useCallback(async () => {
     if (wasmModuleRef.current) {
@@ -436,46 +293,6 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     return wasmModulePromiseRef.current;
   }, []);
 
-  const terminateWorker = useCallback(() => {
-    if (workerRef.current) {
-      workerRef.current.terminate();
-      workerRef.current = null;
-    }
-  }, []);
-
-  const ensureWorker = useCallback(() => {
-    if (typeof window === 'undefined') {
-      return null;
-    }
-    if (!workerRef.current) {
-      workerRef.current = new Worker('/wasm/engine/worker.js', {type: 'module'});
-    }
-    return workerRef.current;
-  }, []);
-
-  const callWorker = useCallback((action: string, payload?: any): Promise<any> => {
-    const worker = workerRef.current;
-    if (!worker) {
-      return Promise.reject(new Error('Worker not ready'));
-    }
-    return new Promise((resolve, reject) => {
-      const id = `req_${Date.now()}_${(++workerRequestId.current).toString(36)}`;
-      const listener = (event: MessageEvent) => {
-        const message = event.data as any;
-        if (message?.id === id) {
-          worker.removeEventListener('message', listener);
-          if (message.ok) {
-            resolve(message);
-          } else {
-            reject(new Error(message.error ?? 'Worker error'));
-          }
-        }
-      };
-      worker.addEventListener('message', listener);
-      worker.postMessage({id, action, payload});
-    });
-  }, []);
-
   const [appliedSettings, setAppliedSettings] = useState<SetupState>({
     width: initialWidth,
     height: initialHeight,
@@ -484,6 +301,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     tileCountsText: initialTileCountsText,
     tileScoresText: initialTileScoresText,
     shape: 'rect',
+    bonusPreset: 'auto',
   });
   const [draftSettings, setDraftSettings] = useState<SetupState>(appliedSettings);
   const [tileCountsError, setTileCountsError] = useState<string | null>(null);
@@ -1203,6 +1021,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       tileCountsText: formatTileCounts(countsParsed.map),
       tileScoresText: formatTileScores(scoresParsed.map),
       shape: settings.shape,
+      bonusPreset: settings.bonusPreset,
     };
     setAppliedSettings(nextSettings);
     setDraftSettings(prev => ({
@@ -1214,6 +1033,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       tileCountsText: nextSettings.tileCountsText,
       tileScoresText: nextSettings.tileScoresText,
       shape: settings.shape,
+      bonusPreset: settings.bonusPreset,
     }));
     setDictMessagesVersion(v => v + 1);
     return true;
@@ -1318,6 +1138,45 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       setErrorMessage(`Move failed: ${(err as Error).message ?? String(err)}`);
     }
   }, [game, pending, useWorker, useAnagram, useDict, anagramIndex, board, updateFromGame]);
+
+  const queuePlacement = useCallback(
+    (kindId: string, x: number, globalY: number, mark: string | null = null) => {
+      setPending(prev => {
+        if (prev.some(p => p.x === x && p.y === globalY)) return prev;
+        if (!board) return prev;
+        if (globalY < 0 || globalY >= board.height) return prev;
+        if (!use3D && !isCellActive(x, globalY)) {
+          return prev;
+        }
+        if (!stackOn && (board.rows[globalY]?.[x] || '').length > 0) return prev;
+        const available = rackCountByKind.get(kindId) ?? 0;
+        if (available <= 0) return prev;
+        const used = prev.filter(p => p.kind_id === kindId).length;
+        if (used >= available) {
+          return prev;
+        }
+        return [...prev, {x, y: globalY, kind_id: kindId, mark}];
+      });
+    },
+    [board, isCellActive, rackCountByKind, stackOn, use3D],
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const api = {
+      placeTile: (kindId: string, x: number, y: number, mark?: string | null) =>
+        queuePlacement(kindId, x, y, mark ?? null),
+      clearPending: () => setPending([]),
+      pendingCount: () => pending.length,
+      commitMove: () => commitMove(),
+    };
+    (window as any).__tileTanglePlayground = api;
+    return () => {
+      if ((window as any).__tileTanglePlayground === api) {
+        delete (window as any).__tileTanglePlayground;
+      }
+    };
+  }, [queuePlacement, pending, commitMove]);
 
   const playGeneratedMove = useCallback(async (move: GeneratedMove) => {
     if (!game) return;
@@ -1430,15 +1289,22 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
 
   const playCpuSuggestion = useCallback(async () => {
     if (!cpuSuggestion) return;
-    await playGeneratedMove({
-      word: cpuSuggestion.word,
-      score: cpuSuggestion.score,
-      total: cpuSuggestion.total,
-      placements: cpuSuggestion.placements,
-    });
-    setLastCpu(cpuSuggestion);
-    setCpuSuggestion(null);
-  }, [cpuSuggestion, playGeneratedMove]);
+    const suggestion = cpuSuggestion;
+    try {
+      setPending([]);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      for (const placement of suggestion.placements) {
+        queuePlacement(placement.kind_id, placement.x, placement.y, placement.mark ?? null);
+      }
+      await new Promise(resolve => setTimeout(resolve, 0));
+      await commitMove();
+      setLastCpu(suggestion);
+      setCpuSuggestion(null);
+    } catch (err) {
+      console.error('cpu autoplay failed', err);
+      setCpuError(`Auto-play failed: ${(err as Error).message ?? String(err)}`);
+    }
+  }, [cpuSuggestion, queuePlacement, commitMove]);
 
   const exportSnapshot = useCallback(async () => {
     if (!game) return;
@@ -1535,26 +1401,10 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const onDropCell = (x: number, y: number, ev: React.DragEvent<HTMLDivElement>) => {
     ev.preventDefault();
     const kindId = ev.dataTransfer.getData('text/plain');
-    if (!kindId) return;
-    setPending(prev => {
-      if (prev.some(p => p.x === x && p.y === y)) return prev;
-      if (!board) return prev;
-      const layerHeight = use3D ? Math.floor(board.height / Math.max(1, effectiveDepth)) : board.height;
-      const globalY = use3D ? y + z * layerHeight : y;
-      if (!use3D && !isCellActive(x, globalY)) {
-        return prev;
-      }
-      if (!stackOn && (board.rows[globalY]?.[x] || '').length > 0) return prev;
-      const available = rackCountByKind.get(kindId) ?? 0;
-      const used = prev.filter(p => p.kind_id === kindId).length;
-      if (used >= available && available > 0) {
-        return prev;
-      }
-      if (available === 0) {
-        return prev;
-      }
-      return [...prev, {x, y: globalY, kind_id: kindId}];
-    });
+    if (!kindId || !board) return;
+    const layerHeight = use3D ? Math.max(1, Math.floor(board.height / Math.max(1, effectiveDepth))) : board.height;
+    const globalY = use3D ? y + z * layerHeight : y;
+    queuePlacement(kindId, x, globalY);
   };
 
   const onDragStartTile = (kindId: string, ev: React.DragEvent<HTMLDivElement>) => {
@@ -1646,7 +1496,8 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     {label: 'Adjacency', value: adjacencyLabel},
     {label: 'Dimensions', value: dimensionLabel},
     {label: 'Rack', value: `${appliedSettings.rackSize} tiles`},
-  ], [boardSizeLabel, adjacencyLabel, dimensionLabel, appliedSettings.rackSize]);
+    {label: 'Automation', value: cpuLabel},
+  ], [boardSizeLabel, adjacencyLabel, dimensionLabel, appliedSettings.rackSize, cpuLabel]);
 
   const quickPresets = useMemo<QuickPreset[]>(() => [
     {
@@ -1664,6 +1515,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           tileCountsText: draftSettings.tileCountsText,
           tileScoresText: draftSettings.tileScoresText,
           shape: 'rect',
+          bonusPreset: 'classic',
         };
         setDraftSettings(next);
         setDraftAdjacencyMode(adjacency);
@@ -1695,6 +1547,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           tileCountsText: draftSettings.tileCountsText,
           tileScoresText: draftSettings.tileScoresText,
           shape: 'diamond',
+          bonusPreset: 'hex',
         };
         setDraftSettings(next);
         setDraftAdjacencyMode(adjacency);
@@ -1726,6 +1579,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           tileCountsText: draftSettings.tileCountsText,
           tileScoresText: draftSettings.tileScoresText,
           shape: 'rect',
+          bonusPreset: 'classic',
         };
         setDraftSettings(next);
         setDraftAdjacencyMode(adjacency);
@@ -1757,6 +1611,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           tileCountsText: draftSettings.tileCountsText,
           tileScoresText: draftSettings.tileScoresText,
           shape: 'rect',
+          bonusPreset: 'none',
         };
         setDraftSettings(next);
         setDraftAdjacencyMode(adjacency);
@@ -1792,32 +1647,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     setInfoMessage,
   ]);
 
-  const themeVars = useMemo(() => ({
-    '--tt-shell-bg': palette.shellBg,
-    '--tt-shell-border': palette.shellBorder,
-    '--tt-hero-gradient': palette.heroGradient,
-    '--tt-hero-text': palette.heroText,
-    '--tt-hero-accent': palette.heroAccent,
-    '--tt-hero-shadow': palette.heroShadow,
-    '--tt-panel-bg': palette.panelBg,
-    '--tt-panel-border': palette.panelBorder,
-    '--tt-panel-shadow': palette.panelShadow,
-    '--tt-accent-border': palette.accentBorder,
-    '--tt-text-subtle': palette.textSubtle,
-    '--tt-stat-chip-bg': palette.statChipBg,
-    '--tt-stat-chip-border': palette.statChipBorder,
-    '--tt-segmented-bg': palette.segmentedBg,
-    '--tt-segmented-border': palette.segmentedBorder,
-    '--tt-segmented-active-bg': palette.segmentedActiveBg,
-    '--tt-segmented-active-border': palette.segmentedActiveBorder,
-    '--tt-alert-error-bg': palette.errorBg,
-    '--tt-alert-error-border': palette.errorBorder,
-    '--tt-alert-warning-bg': palette.warningBg,
-    '--tt-alert-warning-border': palette.warningBorder,
-    '--tt-alert-info-bg': palette.infoBg,
-    '--tt-alert-info-border': palette.infoBorder,
-    '--tt-alert-shadow': palette.alertShadow,
-  }) as React.CSSProperties, [palette]);
+  const themeVars = useMemo(() => buildThemeVars(palette), [palette]);
 
   const layerHeight = use3D && board ? Math.floor(board.height / Math.max(1, effectiveDepth)) : board?.height ?? 0;
   const cellSize = useMemo(() => {
@@ -1834,6 +1664,86 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const rackFontSize = useMemo(() => Math.max(12, Math.round(rackTileSize * 0.55)), [rackTileSize]);
   const rackScoreFont = useMemo(() => Math.max(10, Math.round(rackTileSize * 0.28)), [rackTileSize]);
 
+  const boardPalette = useMemo(
+    () => ({
+      boardCellBorder: palette.boardCellBorder,
+      boardCellHighlight: palette.boardCellHighlight,
+      boardCellBg: palette.boardCellBg,
+    }),
+    [palette],
+  );
+
+  const rackTiles: RackRowTile[] = useMemo(
+    () =>
+      availableRackTiles.map(({id, index}) => {
+        const meta = getTileMeta(id);
+        const symbol = meta?.symbol ?? id;
+        const score = meta?.score;
+        return {
+          key: `${id}-${index}`,
+          symbol,
+          score,
+          size: rackTileSize,
+          fontSize: rackFontSize,
+          scoreFontSize: rackScoreFont,
+          draggable: true,
+          onDragStart: (event: React.DragEvent<HTMLDivElement>) => onDragStartTile(id, event),
+          testId: 'playground-rack-tile',
+          dataKind: id,
+        };
+      }),
+    [availableRackTiles, getTileMeta, onDragStartTile, rackFontSize, rackScoreFont, rackTileSize],
+  );
+
+  const moveListItems = useMemo(
+    () =>
+      legalMoves.map((mv, idx) => ({
+        key: `${mv.word}-${idx}`,
+        word: mv.word,
+        score: mv.total ?? mv.score,
+        testId: `legal-move-${idx}`,
+        actions: [
+          {label: 'Highlight', onClick: () => setActiveMoveIndex(idx)},
+          {label: 'Play move', onClick: () => playGeneratedMove(mv)},
+        ],
+      })),
+    [legalMoves, playGeneratedMove, setActiveMoveIndex],
+  );
+
+  const exploreMoveButtons = useMemo(() => {
+    const buttons: ButtonConfig[] = [
+      {
+        key: 'toggle-moves',
+        label: showMoves ? 'Refresh legal moves' : 'Show legal moves',
+        onClick: () => fetchMoves(),
+        disabled: !game || loadingMoves || (useDict && !dictReady) || use3D,
+      },
+    ];
+    if (showMoves) {
+      buttons.push({
+        key: 'hide-list',
+        label: 'Hide list',
+        onClick: () => {
+          setShowMoves(false);
+          setLegalMoves([]);
+          setActiveMoveIndex(null);
+        },
+      });
+    }
+    return buttons;
+  }, [dictReady, fetchMoves, game, loadingMoves, setActiveMoveIndex, showMoves, use3D, useDict]);
+
+  const handlePreviewHover = useCallback(
+    (x: number, y: number) => {
+      if (!showMoves) return;
+      const idx = legalMoves.findIndex(mv => mv.placements.some(p => p.x === x && p.y === y));
+      if (idx >= 0) {
+        setActiveMoveIndex(idx);
+      }
+    },
+    [showMoves, legalMoves],
+  );
+
   if (!ready || !board) {
     return (
       <div className={styles.breakout}>
@@ -1842,596 +1752,481 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     );
   }
 
-  return (
-    <div className={styles.breakout}>
-      <div className={styles.shell} style={themeVars}>
-        <header className={styles.hero}>
-          <div className={styles.heroCopy}>
-            <div className={styles.heroEyebrow}>TileTangle Playground</div>
-            <h2 className={styles.heroTitle}>Design. Experiment. Solve.</h2>
-            <p className={styles.heroDescription}>
-              Tune adjacency, stack rules, and automation to watch the engine reshape every move in real time.
-            </p>
-            <div className={styles.heroStatsRow}>
-              {heroStats.map(stat => (
-                <StatChip key={stat.label} label={stat.label} value={stat.value} />
-              ))}
-              <StatChip label="Automation" value={cpuLabel} />
-            </div>
-          </div>
-          <div className={styles.heroPresets}>
-            <div className={styles.presetsHeading}>Quick presets</div>
-            <div className={styles.presetGrid}>
-              {quickPresets.map(preset => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  className={styles.presetCard}
-                  onClick={preset.onApply}
-                >
-                  <span className={styles.presetTitle}>{preset.title}</span>
-                  <span className={styles.presetDescription}>{preset.description}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </header>
-        {(errorMessage || dictError || cpuError || infoMessage) && (
-          <div className={styles.alertStack}>
-            {errorMessage && <div className={`${styles.alert} ${styles.alertError}`}>{errorMessage}</div>}
-            {dictError && <div className={`${styles.alert} ${styles.alertWarning}`}>{dictError}</div>}
-            {cpuError && <div className={`${styles.alert} ${styles.alertWarning}`}>{cpuError}</div>}
-            {infoMessage && <div className={`${styles.alert} ${styles.alertInfo}`}>{infoMessage}</div>}
-          </div>
-        )}
+  const boardPanel = (
+    <Panel title="Board" subtitle={`Turn ${turnNumber + 1} • Player ${activePlayer + 1}`} accent>
+      <div className={styles.boardWrapper}>
+        <PlaygroundBoard
+          board={board}
+          layerHeight={layerHeight}
+          currentLayer={use3D ? z : 0}
+          effectiveDepth={effectiveDepth}
+          use3D={use3D}
+          cellSize={cellSize}
+          cellGap={cellGap}
+          tileFontSize={tileFontSize}
+          tileScoreFontSize={tileScoreFontSize}
+          highlightCells={highlightCells}
+          isCellActive={isCellActive}
+          cellDisplay={cellDisplay}
+          getTileMeta={getTileMeta}
+          onDropCell={onDropCell}
+          showMoves={showMoves}
+          onHoverForMoves={handlePreviewHover}
+          palette={boardPalette}
+        />
+      </div>
+      {use3D && (
+        <label className={styles.layerSlider}>
+          <span>Viewing layer {z + 1} / {effectiveDepth}</span>
+          <input
+            type="range"
+            min={0}
+            max={Math.max(0, effectiveDepth - 1)}
+            value={z}
+            onChange={e => setZ(Number(e.target.value))}
+          />
+        </label>
+      )}
+    </Panel>
+  );
 
-        <div className={styles.layout}>
-          <aside className={styles.sidebar}>
-          <Panel
-            title="Board Setup"
-            subtitle="Adjust dimensions and masks, then relaunch with Apply."
-            actions={
-              <button type="button" className={styles.applyButton} onClick={handleApplySettings}>
-                Apply configuration
-              </button>
-            }
-            density="compact"
-          >
-            <div className={styles.fieldGrid}>
-              <label className={styles.field}>
-                <span>Width</span>
-                <input
-                  type="number"
-                  min={2}
-                  max={30}
-                  value={draftSettings.width}
-                  onChange={e => setDraftSettings(prev => ({...prev, width: Number(e.target.value)}))}
-                />
-              </label>
-              <label className={styles.field}>
-                <span>Height</span>
-                <input
-                  type="number"
-                  min={2}
-                  max={30}
-                  value={draftSettings.height}
-                  onChange={e => setDraftSettings(prev => ({...prev, height: Number(e.target.value)}))}
-                />
-              </label>
-              <label className={styles.field} title="Number of layers when 3D mode is active">
-                <span>Layers</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={12}
-                  value={draftSettings.depth}
-                  onChange={e => setDraftSettings(prev => ({...prev, depth: Number(e.target.value)}))}
-                />
-              </label>
-              <label className={styles.field}>
-                <span>Rack size</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={14}
-                  value={draftSettings.rackSize}
-                  onChange={e => setDraftSettings(prev => ({...prev, rackSize: Number(e.target.value)}))}
-                />
-              </label>
-            </div>
-            <label className={styles.field}>
-              <span>Shape</span>
-              <select
-                value={draftSettings.shape}
-                data-testid="board-shape-select"
-                onChange={e => setDraftSettings(prev => ({...prev, shape: e.target.value as BoardShape}))}
-              >
-                <option value="rect">Full grid</option>
-                <option value="diamond">Diamond</option>
-                <option value="cross">Cross</option>
-              </select>
-            </label>
-            <div className={styles.helperText}>Layers only apply when 3D mode is enabled.</div>
-          </Panel>
-
-          <Panel title="Tile Pool" subtitle="Fine-tune counts and scoring." density="compact">
-            <div className={styles.tileEditor}>
-              <div className={styles.tileEditorHeader}>
-                <span>Adjust distribution.</span>
-                <button type="button" className={styles.linkButton} onClick={handleResetTiles}>
-                  Reset defaults
-                </button>
-              </div>
-              <div className={styles.tileTableWrapper}>
-                <table className={styles.tileTable}>
-                  <thead>
-                    <tr>
-                      <th>Tile</th>
-                      <th>Count</th>
-                      <th>Score</th>
-                      <th aria-hidden="true"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {draftTileRows.map(row => (
-                      <tr key={row.id}>
-                        <td>{row.id}</td>
-                        <td>
-                          <input
-                            type="number"
-                            min={0}
-                            value={row.count ?? 0}
-                            onChange={e => updateTileEntry(row.id, {count: Number(e.target.value)})}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            type="number"
-                            value={row.score ?? 0}
-                            onChange={e => updateTileEntry(row.id, {score: Number(e.target.value)})}
-                          />
-                        </td>
-                        <td className={styles.tableActions}>
-                          <button type="button" onClick={() => removeTile(row.id)} disabled={draftTileRows.length <= 1}>
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    <tr>
-                      <td>
-                        <input
-                          type="text"
-                          value={newTileId}
-                          onChange={e => setNewTileId(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
-                          placeholder="ID"
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min={1}
-                          value={newTileCount}
-                          onChange={e => setNewTileCount(Number(e.target.value) || 1)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          value={newTileScore}
-                          onChange={e => setNewTileScore(Number(e.target.value) || 0)}
-                        />
-                      </td>
-                      <td className={styles.tableActions}>
-                        <button type="button" onClick={handleAddTile} disabled={newTileId.trim() === ''}>
-                          Add
-                        </button>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              {(tileCountsError || tileScoresError) && (
-                <div className={styles.errorText}>
-                  {[tileCountsError, tileScoresError]
-                    .filter(Boolean)
-                    .map((msg, idx) => (
-                      <div key={idx}>{msg}</div>
-                    ))}
-                </div>
-              )}
-            </div>
-          </Panel>
-
-          <Panel title="Language & Dictionary" subtitle="Guard rails for move validation." density="compact">
-            <label className={styles.toggleRow}>
-              <input type="checkbox" checked={useDict} onChange={e => setUseDict(e.target.checked)} />
-              <span>Use dictionary validation</span>
-            </label>
-            <label className={styles.field}>
-              <span>Engine</span>
-              <select
-                value={dictEngine}
-                onChange={e => setDictEngine(e.target.value as 'fst' | 'set' | 'dawg' | 'gaddag')}
-                disabled={!useDict || dictLoading}
-              >
-                <option value="fst">FST</option>
-                <option value="set">Set</option>
-                <option value="dawg">DAWG</option>
-                <option value="gaddag">GADDAG</option>
-              </select>
-            </label>
-            <label className={styles.toggleRow} title="Reorder placed tiles into any valid anagram when committing the move">
-              <input type="checkbox" checked={useAnagram} onChange={e => setUseAnagram(e.target.checked)} />
-              <span>Anagram commit</span>
-            </label>
-            <label className={styles.toggleRow}>
-              <input type="checkbox" checked={rtl} onChange={e => setRtl(e.target.checked)} />
-              <span>RTL reading direction</span>
-            </label>
-            {dictLoading && (
-              <span data-testid="dictionary-loading" className={styles.helperText}>
-                Loading dictionary…
-              </span>
-            )}
-          </Panel>
-
-          <Panel title="Stacking Rules" subtitle="Experiment with layered tiles." density="compact">
-            <label className={styles.toggleRow}>
-              <input type="checkbox" checked={stackOn} onChange={e => setStackOn(e.target.checked)} />
-              <span>Enable stacking</span>
-            </label>
-            {stackOn && (
-              <div className={styles.fieldStack}>
-                <label className={styles.field}>
-                  <span>Scoring</span>
-                  <select value={stackScoring} onChange={e => setStackScoring(e.target.value as 'top' | 'sum')}>
-                    <option value="top">Top only</option>
-                    <option value="sum">Sum stack</option>
-                  </select>
-                </label>
-                <label className={styles.toggleRow}>
-                  <input type="checkbox" checked={forbidSame} onChange={e => setForbidSame(e.target.checked)} />
-                  <span>Forbid identical overlays</span>
-                </label>
-              </div>
-            )}
-          </Panel>
-        </aside>
-
-        <main className={styles.stage}>
-          <Panel
-            title="Board"
-            subtitle={`Turn ${turnNumber + 1} • Player ${activePlayer + 1}`}
-            accent
-          >
-            <div className={styles.boardWrapper}>
-              <div
-                className={styles.boardGrid}
-                style={{gridTemplateColumns: `repeat(${board.width}, ${cellSize}px)`, gap: cellGap, margin: '0 auto'}}
-              >
-                {Array.from({length: layerHeight}).map((_, y) => (
-                  Array.from({length: board.width}).map((__, x) => {
-                    const globalY = use3D ? y + z * layerHeight : y;
-                    const key = `${x}-${globalY}`;
-                    const highlighted = highlightCells.has(`${x},${globalY}`);
-                    const activeCell = use3D || isCellActive(x, globalY);
-                    const tileId = cellDisplay(x, y);
-                    const meta = tileId ? getTileMeta(tileId) : null;
-                    const symbol = meta?.symbol ?? tileId?.slice(0, 2) ?? '';
-                    const score = meta?.score;
-                    const cellStyle: React.CSSProperties = {
-                      width: cellSize,
-                      height: cellSize,
-                      border: `1px solid ${palette.boardCellBorder}`,
-                      background: highlighted
-                        ? palette.boardCellHighlight
-                        : activeCell
-                          ? palette.boardCellBg
-                          : 'rgba(148, 163, 184, 0.12)',
-                      fontWeight: highlighted ? 600 : 500,
-                      opacity: activeCell ? 1 : 0.55,
-                      cursor: activeCell ? 'default' : 'not-allowed',
-                      fontSize: tileFontSize,
-                    };
-                    return (
-                      <div
-                        key={key}
-                        data-testid="playground-board-cell"
-                        data-x={x}
-                        data-y={globalY}
-                        data-active={activeCell ? '1' : '0'}
-                        className={styles.boardCell}
-                        style={cellStyle}
-                        onDragOver={e => {
-                          if (!activeCell) return;
-                          e.preventDefault();
-                        }}
-                        onDrop={e => {
-                          if (!activeCell) return;
-                          onDropCell(x, y, e);
-                        }}
-                        onMouseEnter={() => {
-                          if (!showMoves) return;
-                          const idx = legalMoves.findIndex(mv => mv.placements.some(p => p.x === x && p.y === globalY));
-                          if (idx >= 0) setActiveMoveIndex(idx);
-                        }}
-                      >
-                        {symbol && <span>{symbol.slice(0, 2)}</span>}
-                        {typeof score === 'number' && !Number.isNaN(score) && (
-                          <span
-                            className={styles.boardCellScore}
-                            style={{fontSize: tileScoreFontSize, bottom: Math.max(2, Math.round(cellSize * 0.12)), right: Math.max(2, Math.round(cellSize * 0.12))}}
-                          >
-                            {score}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })
-                ))}
-              </div>
-            </div>
-            {use3D && (
-              <label className={styles.layerSlider}>
-                <span>Viewing layer {z + 1} / {effectiveDepth}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={Math.max(0, effectiveDepth - 1)}
-                  value={z}
-                  onChange={e => setZ(Number(e.target.value))}
-                />
-              </label>
-            )}
-          </Panel>
-
-          <div className={styles.stageSplit}>
-            <Panel title={`Active Rack • Player ${activePlayer + 1}`} density="compact">
-              <div className={styles.rackRow}>
-                {availableRackTiles.map(({id, index}) => {
-                  const meta = getTileMeta(id);
-                  const symbol = meta?.symbol ?? id.slice(0, 2);
-                  const score = meta?.score;
-                  return (
-                    <div
-                      key={`${id}-${index}`}
-                      draggable
-                      data-testid="playground-rack-tile"
-                      data-kind={id}
-                      className={styles.rackTile}
-                      style={{width: rackTileSize, height: rackTileSize, fontSize: rackFontSize}}
-                      onDragStart={e => onDragStartTile(id, e)}
-                    >
-                      <span>{symbol.slice(0, 2)}</span>
-                      {typeof score === 'number' && !Number.isNaN(score) && (
-                        <span className={styles.rackTileScore} style={{fontSize: rackScoreFont}}>{score}</span>
-                      )}
-                    </div>
-                  );
-                })}
-                {availableRackTiles.length === 0 && (
-                  <div className={styles.helperText}>Rack empty or all tiles placed.</div>
-                )}
-              </div>
-              {cpuSuggestion && (
+  const stageContent = (
+    <>
+      {boardPanel}
+      <div className={styles.stageSplit}>
+        <Panel title={`Active Rack • Player ${activePlayer + 1}`} density="compact">
+          <RackRow
+            tiles={rackTiles}
+            emptyMessage="Rack empty or all tiles placed."
+            footer={
+              cpuSuggestion ? (
                 <div className={styles.cpuPreview}>
                   <div className={styles.cpuPreviewTitle}>CPU placements preview</div>
                   <div>{cpuSuggestion.placements.map(p => `(${p.x},${p.y})`).join(', ') || '—'}</div>
                 </div>
-              )}
-            </Panel>
+              ) : undefined
+            }
+          />
+        </Panel>
 
-            <Panel title="Move Controls" density="compact">
-              <div className={styles.buttonRow}>
-                <button onClick={commitMove} disabled={pending.length === 0}>
-                  Commit move ({pending.length})
-                </button>
-                <button onClick={handlePendingReset} disabled={pending.length === 0}>
-                  Reset pending
-                </button>
-              </div>
-              <div className={styles.buttonRow}>
-                <button onClick={undoMove} disabled={!game}>Undo</button>
-                <button onClick={redoMove} disabled={!game}>Redo</button>
-                <button
-                  onClick={() => {
-                    if (showMoves) {
-                      setShowMoves(false);
-                      setLegalMoves([]);
-                      setActiveMoveIndex(null);
-                    } else {
-                      fetchMoves();
-                    }
-                  }}
-                  disabled={!game || loadingMoves || (useDict && !dictReady) || use3D}
-                >
-                  {showMoves ? 'Hide legal moves' : 'Show legal moves'}
-                </button>
-              </div>
-              {loadingMoves && <div className={styles.helperText}>Loading legal moves…</div>}
-            </Panel>
-          </div>
-        </main>
-
-        <aside className={styles.rightRail}>
-          <Panel title="Turn Tracker" subtitle="Scoreboard and bag" density="compact">
-            <div className={styles.playerList}>
-              {players.length === 0 && <div className={styles.helperText}>Loading players…</div>}
-              {players.map(player => (
-                <div
-                  key={player.index}
-                  className={`${styles.playerCard} ${player.index === activePlayer ? styles.playerCardActive : ''}`}
-                >
-                  <div className={styles.playerCardHeader}>Player {player.index + 1}</div>
-                  <div className={styles.playerScore}>{player.score} pts</div>
-                  <div className={styles.playerRack}>{player.rack.join(' ') || '—'}</div>
-                </div>
-              ))}
-            </div>
-            <div className={styles.helperText}>
-              Bag: {bagSummary.total} tiles{bagSummary.total > 0 && bagPreview ? ` • ${bagPreview}` : ''}
-            </div>
-          </Panel>
-
-          <Panel title="Playground Modes" subtitle="Switch adjacency and runtime modes." density="compact">
-            <div className={styles.modeGroup}>
-              <div className={styles.modeLabel}>Adjacency</div>
-              <SegmentedControl
-                name="Adjacency"
-                value={draftAdjacencyMode}
-                onChange={handleAdjacencyModeChange}
-                options={[
-                  {value: 'orthogonal', label: 'Orthogonal', hint: 'Classic'},
-                  {value: 'diagonal', label: 'Diagonal', hint: 'Eight-way'},
-                  {value: 'hex', label: 'Hex', hint: 'Three axes', testId: 'toggle-hex-adjacency'},
-                ]}
-              />
-            </div>
-            <div className={styles.modeGroup}>
-              <div className={styles.modeLabel}>Dimensions</div>
-              <SegmentedControl
-                name="Dimensions"
-                value={draftDimensionMode}
-                onChange={handleDimensionModeChange}
-                options={[
-                  {value: '2d', label: '2D'},
-                  {value: '3d', label: '3D', hint: 'Stacked'},
-                ]}
-              />
-            </div>
-            <label className={styles.toggleRow}>
-              <input type="checkbox" checked={useWorker} onChange={e => setUseWorker(e.target.checked)} />
-              <span>Run heavy work in a Web Worker</span>
-            </label>
-            {draftAdjacencyMode === 'hex' && (
-              <div className={styles.helperText}>Hex adjacency uses staggered rows with three axes (E, NE, SE).</div>
-            )}
-            {draftAdjacencyMode === 'diagonal' && (
-              <div className={styles.helperText}>Diagonal mode enables moves along all eight directions.</div>
-            )}
-          </Panel>
-
-          <Panel title="Automation & Hints" subtitle="Let the engine explore." density="compact">
-            <SegmentedControl
-              name="CPU Difficulty"
-              value={cpuDifficulty}
-              onChange={value => setCpuDifficulty(value as 'off' | 'easy' | 'medium' | 'hard')}
-              options={[
-                {value: 'off', label: 'Off'},
-                {value: 'easy', label: 'Easy'},
-                {value: 'medium', label: 'Medium'},
-                {value: 'hard', label: 'Hard'},
-              ]}
-            />
-            <div className={styles.buttonRow}>
-              <button
-                onClick={requestCpuHint}
-                disabled={!game || cpuDifficulty === 'off' || cpuThinking || !dictReady || use3D}
-              >
-                CPU hint
-              </button>
-              <button
-                data-testid="cpu-play-button"
-                onClick={playCpuSuggestion}
-                disabled={!game || cpuSuggestion == null || cpuThinking || use3D}
-              >
-                Play as CPU
-              </button>
-            </div>
-            {cpuThinking && <div className={styles.helperText}>Computing best move…</div>}
-            {cpuSuggestion && (
-              <div className={styles.cpuCard}>
-                <div className={styles.cpuCardTitle}>CPU ({cpuSuggestion.difficulty}) suggests</div>
-                <div className={styles.cpuCardBody}>
-                  <strong>{cpuSuggestion.word}</strong> — {cpuSuggestion.total} pts
-                </div>
-                <div className={styles.cpuCardMeta}>Raw {cpuSuggestion.score}, leave {cpuSuggestion.rackLeave}, equity {cpuSuggestion.boardEquity}</div>
-              </div>
-            )}
-            {!cpuSuggestion && lastCpu && (
-              <div className={styles.cpuCardMuted}>
-                <div className={styles.cpuCardTitle}>Last hint ({lastCpu.difficulty})</div>
-                <div className={styles.cpuCardBody}>
-                  <strong>{lastCpu.word}</strong> — {lastCpu.total} pts
-                </div>
-                <div className={styles.cpuCardMeta}>Raw {lastCpu.score}, leave {lastCpu.rackLeave}, equity {lastCpu.boardEquity}</div>
-              </div>
-            )}
-          </Panel>
-
-          <Panel
-            title="Explore Moves"
-            subtitle="Generate legal plays for the current rack."
-            density="compact"
-            accent={showMoves}
-          >
-            <div className={styles.buttonRow}>
-              <button
-                onClick={() => fetchMoves()}
-                disabled={!game || loadingMoves || (useDict && !dictReady) || use3D}
-              >
-                {showMoves ? 'Refresh legal moves' : 'Show legal moves'}
-              </button>
-              {showMoves && (
-                <button
-                  onClick={() => {
+        <Panel title="Move Controls" density="compact">
+          <ButtonRow
+            buttons={[
+              {
+                key: 'commit',
+                label: `Commit move (${pending.length})`,
+                onClick: commitMove,
+                disabled: pending.length === 0,
+              },
+              {
+                key: 'reset',
+                label: 'Reset pending',
+                onClick: handlePendingReset,
+                disabled: pending.length === 0,
+              },
+            ]}
+          />
+          <ButtonRow
+            buttons={[
+              {
+                key: 'undo',
+                label: 'Undo',
+                onClick: undoMove,
+                disabled: !game,
+                testId: 'playground-undo',
+              },
+              {
+                key: 'redo',
+                label: 'Redo',
+                onClick: redoMove,
+                disabled: !game,
+                testId: 'playground-redo',
+              },
+              {
+                key: showMoves ? 'hide-moves' : 'show-moves',
+                label: showMoves ? 'Hide legal moves' : 'Show legal moves',
+                onClick: () => {
+                  if (showMoves) {
                     setShowMoves(false);
                     setLegalMoves([]);
                     setActiveMoveIndex(null);
-                  }}
-                >
-                  Hide list
-                </button>
-              )}
-            </div>
-            {showMoves && (
-              <div className={styles.movesList}>
-                {legalMoves.length === 0 && !loadingMoves && (
-                  <div className={styles.helperText}>No moves available for the current rack.</div>
-                )}
-                {legalMoves.map((mv, idx) => (
-                  <div key={`${mv.word}-${idx}`} data-testid={`legal-move-${idx}`} className={styles.moveCard}>
-                    <div className={styles.moveHeader}>
-                      <span>#{idx + 1}</span>
-                      <strong>{mv.word}</strong>
-                      <span className={styles.moveScore}>{mv.total ?? mv.score} pts</span>
-                    </div>
-                    <div className={styles.buttonRow}>
-                      <button type="button" onClick={() => setActiveMoveIndex(idx)}>
-                        Highlight
-                      </button>
-                      <button type="button" onClick={() => playGeneratedMove(mv)}>
-                        Play move
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {loadingMoves && <div className={styles.helperText}>Loading legal moves…</div>}
-          </Panel>
-
-          <Panel title="Snapshots & Log" subtitle="Export state or inspect history." density="compact">
-            <textarea
-              value={snapshotText}
-              onChange={e => setSnapshotText(e.target.value)}
-              rows={5}
-              className={styles.snapshotArea}
-              placeholder="Click Save snapshot to capture the current game state"
+                  } else {
+                    fetchMoves();
+                  }
+                },
+                disabled: !game || loadingMoves || (useDict && !dictReady) || use3D,
+              },
+            ]}
+          />
+          {showMoves && !loadingMoves && (
+            <ButtonRow
+              buttons={[
+                {
+                  key: 'refresh',
+                  label: 'Refresh legal moves',
+                  onClick: () => fetchMoves(),
+                  disabled: !game || loadingMoves || (useDict && !dictReady) || use3D,
+                },
+                {
+                  key: 'hide-list',
+                  label: 'Hide list',
+                  onClick: () => {
+                    setShowMoves(false);
+                    setLegalMoves([]);
+                    setActiveMoveIndex(null);
+                  },
+                },
+              ]}
             />
-            <div className={styles.buttonRow}>
-              <button onClick={exportSnapshot} disabled={!game}>Save snapshot</button>
-              <button onClick={importSnapshot} disabled={!game || snapshotText.trim() === ''}>Load snapshot</button>
-              <button onClick={fetchEventLog} disabled={!game}>Show event log</button>
-            </div>
-            {eventLogText && (
-              <pre className={styles.logViewer}>{eventLogText}</pre>
-            )}
-          </Panel>
-        </aside>
+          )}
+          {loadingMoves && <div className={styles.helperText}>Loading legal moves…</div>}
+        </Panel>
       </div>
-    </div>
-  </div>
+    </>
+  );
+
+  const sidebarContent = (
+    <>
+      <Panel
+        title="Board Setup"
+        subtitle="Adjust dimensions and masks, then relaunch with Apply."
+        actions={
+          <button type="button" className={styles.applyButton} onClick={handleApplySettings}>
+            Apply configuration
+          </button>
+        }
+        density="compact"
+      >
+        <div className={styles.fieldGrid}>
+          <label className={styles.field}>
+            <span>Width</span>
+            <input
+              type="number"
+              min={2}
+              max={30}
+              value={draftSettings.width}
+              onChange={e => setDraftSettings(prev => ({...prev, width: Number(e.target.value)}))}
+            />
+          </label>
+          <label className={styles.field}>
+            <span>Height</span>
+            <input
+              type="number"
+              min={2}
+              max={30}
+              value={draftSettings.height}
+              onChange={e => setDraftSettings(prev => ({...prev, height: Number(e.target.value)}))}
+            />
+          </label>
+          <label className={styles.field} title="Number of layers when 3D mode is active">
+            <span>Layers</span>
+            <input
+              type="number"
+              min={1}
+              max={12}
+              value={draftSettings.depth}
+              onChange={e => setDraftSettings(prev => ({...prev, depth: Number(e.target.value)}))}
+            />
+          </label>
+          <label className={styles.field}>
+            <span>Rack size</span>
+            <input
+              type="number"
+              min={1}
+              max={14}
+              value={draftSettings.rackSize}
+              onChange={e => setDraftSettings(prev => ({...prev, rackSize: Number(e.target.value)}))}
+            />
+          </label>
+        </div>
+        <label className={styles.field}>
+          <span>Shape</span>
+          <select
+            value={draftSettings.shape}
+            data-testid="board-shape-select"
+            onChange={e => setDraftSettings(prev => ({...prev, shape: e.target.value as BoardShape}))}
+          >
+            <option value="rect">Full grid</option>
+            <option value="diamond">Diamond</option>
+            <option value="cross">Cross</option>
+            <option value="hexagon">Hexagon</option>
+            <option value="triangle">Triangle</option>
+            <option value="ring">Hollow ring</option>
+          </select>
+        </label>
+        <label className={styles.field}>
+          <span>Bonuses</span>
+          <select
+            value={draftSettings.bonusPreset}
+            onChange={e => setDraftSettings(prev => ({...prev, bonusPreset: e.target.value as BonusPreset}))}
+          >
+            <option value="auto">Auto (match shape)</option>
+            <option value="classic">Classic crossword</option>
+            <option value="hex">Hex rings</option>
+            <option value="triangle">Triangle bands</option>
+            <option value="ring">Hollow frame</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <div className={styles.helperText}>Layers only apply when 3D mode is enabled.</div>
+        <div className={styles.helperText}>Auto picks a bonus layout tuned to the current shape.</div>
+      </Panel>
+
+      <Panel title="Language & Dictionary" subtitle="Guard rails for move validation." density="compact">
+        <label className={styles.toggleRow}>
+          <input type="checkbox" checked={useDict} onChange={e => setUseDict(e.target.checked)} />
+          <span>Use dictionary validation</span>
+        </label>
+        <label className={styles.field}>
+          <span>Engine</span>
+          <select
+            value={dictEngine}
+            onChange={e => setDictEngine(e.target.value as 'fst' | 'set' | 'dawg' | 'gaddag')}
+            disabled={!useDict || dictLoading}
+          >
+            <option value="fst">FST</option>
+            <option value="set">Set</option>
+            <option value="dawg">DAWG</option>
+            <option value="gaddag">GADDAG</option>
+          </select>
+        </label>
+        <label className={styles.toggleRow} title="Reorder placed tiles into any valid anagram when committing the move">
+          <input type="checkbox" checked={useAnagram} onChange={e => setUseAnagram(e.target.checked)} />
+          <span>Anagram commit</span>
+        </label>
+        <label className={styles.toggleRow}>
+          <input type="checkbox" checked={rtl} onChange={e => setRtl(e.target.checked)} />
+          <span>RTL reading direction</span>
+        </label>
+        {dictLoading && (
+          <span data-testid="dictionary-loading" className={styles.helperText}>
+            Loading dictionary…
+          </span>
+        )}
+      </Panel>
+
+      <Panel title="Stacking Rules" subtitle="Experiment with layered tiles." density="compact">
+        <label className={styles.toggleRow}>
+          <input type="checkbox" checked={stackOn} onChange={e => setStackOn(e.target.checked)} />
+          <span>Enable stacking</span>
+        </label>
+        {stackOn && (
+          <div className={styles.fieldStack}>
+            <label className={styles.field}>
+              <span>Scoring</span>
+              <select value={stackScoring} onChange={e => setStackScoring(e.target.value as 'top' | 'sum')}>
+                <option value="top">Top only</option>
+                <option value="sum">Sum stack</option>
+              </select>
+            </label>
+            <label className={styles.toggleRow}>
+              <input type="checkbox" checked={forbidSame} onChange={e => setForbidSame(e.target.checked)} />
+              <span>Forbid identical overlays</span>
+            </label>
+          </div>
+        )}
+      </Panel>
+    </>
+  );
+
+  const rightRailContent = (
+    <>
+      <Panel title="Turn Tracker" subtitle="Scoreboard and bag" density="compact">
+        <div className={styles.playerList}>
+          {players.length === 0 && <div className={styles.helperText}>Loading players…</div>}
+          {players.map(player => (
+            <div
+              key={player.index}
+              className={`${styles.playerCard} ${player.index === activePlayer ? styles.playerCardActive : ''}`}
+            >
+              <div className={styles.playerCardHeader}>Player {player.index + 1}</div>
+              <div className={styles.playerScore}>{player.score} pts</div>
+              <div className={styles.playerRack}>{player.rack.join(' ') || '—'}</div>
+            </div>
+          ))}
+        </div>
+        <div className={styles.helperText}>
+          Bag: {bagSummary.total} tiles{bagSummary.total > 0 && bagPreview ? ` • ${bagPreview}` : ''}
+        </div>
+      </Panel>
+
+      <Panel title="Playground Modes" subtitle="Switch adjacency and runtime modes." density="compact">
+        <div className={styles.modeGroup}>
+          <div className={styles.modeLabel}>Adjacency</div>
+          <SegmentedControl
+            name="Adjacency"
+            value={draftAdjacencyMode}
+            onChange={handleAdjacencyModeChange}
+            options={[
+              {value: 'orthogonal', label: 'Orthogonal', hint: 'Classic'},
+              {value: 'diagonal', label: 'Diagonal', hint: 'Eight-way'},
+              {value: 'hex', label: 'Hex', hint: 'Three axes', testId: 'toggle-hex-adjacency'},
+            ]}
+          />
+        </div>
+        <div className={styles.modeGroup}>
+          <div className={styles.modeLabel}>Dimensions</div>
+          <SegmentedControl
+            name="Dimensions"
+            value={draftDimensionMode}
+            onChange={handleDimensionModeChange}
+            options={[
+              {value: '2d', label: '2D'},
+              {value: '3d', label: '3D', hint: 'Stacked'},
+            ]}
+          />
+        </div>
+        <label className={styles.toggleRow}>
+          <input type="checkbox" checked={useWorker} onChange={e => setUseWorker(e.target.checked)} />
+          <span>Run heavy work in a Web Worker</span>
+        </label>
+        {draftAdjacencyMode === 'hex' && (
+          <div className={styles.helperText}>Hex adjacency uses staggered rows with three axes (E, NE, SE).</div>
+        )}
+        {draftAdjacencyMode === 'diagonal' && (
+          <div className={styles.helperText}>Diagonal mode enables moves along all eight directions.</div>
+        )}
+      </Panel>
+
+      <Panel title="Automation & Hints" subtitle="Let the engine explore." density="compact">
+        <SegmentedControl
+          name="CPU Difficulty"
+          value={cpuDifficulty}
+          onChange={value => setCpuDifficulty(value as 'off' | 'easy' | 'medium' | 'hard')}
+          options={[
+            {value: 'off', label: 'Off'},
+            {value: 'easy', label: 'Easy'},
+            {value: 'medium', label: 'Medium'},
+            {value: 'hard', label: 'Hard'},
+          ]}
+        />
+        <ButtonRow
+          buttons={[
+            {
+              key: 'cpu-hint',
+              label: cpuThinking ? 'Thinking…' : 'CPU hint',
+              onClick: requestCpuHint,
+              disabled: !game || cpuDifficulty === 'off' || cpuThinking || !dictReady || use3D,
+            },
+            {
+              key: 'cpu-play',
+              label: 'Play as CPU',
+              onClick: playCpuSuggestion,
+              disabled: !game || cpuSuggestion == null || cpuThinking || use3D,
+              testId: 'cpu-play-button',
+            },
+          ]}
+        />
+        {cpuThinking && <div className={styles.helperText}>Computing best move…</div>}
+        {cpuSuggestion && (
+          <div className={styles.cpuCard}>
+            <div className={styles.cpuCardTitle}>CPU ({cpuSuggestion.difficulty}) suggests</div>
+            <div className={styles.cpuCardBody}>
+              <strong>{cpuSuggestion.word}</strong> — {cpuSuggestion.total} pts
+            </div>
+            <div className={styles.cpuCardMeta}>Raw {cpuSuggestion.score}, leave {cpuSuggestion.rackLeave}, equity {cpuSuggestion.boardEquity}</div>
+          </div>
+        )}
+        {!cpuSuggestion && lastCpu && (
+          <div className={styles.cpuCardMuted}>
+            <div className={styles.cpuCardTitle}>Last hint ({lastCpu.difficulty})</div>
+            <div className={styles.cpuCardBody}>
+              <strong>{lastCpu.word}</strong> — {lastCpu.total} pts
+            </div>
+            <div className={styles.cpuCardMeta}>Raw {lastCpu.score}, leave {lastCpu.rackLeave}, equity {lastCpu.boardEquity}</div>
+          </div>
+        )}
+        {cpuError && <div className={styles.errorText}>{cpuError}</div>}
+      </Panel>
+
+      <Panel
+        title="Explore Moves"
+        subtitle="Generate legal plays for the current rack."
+        density="compact"
+        accent={showMoves}
+      >
+        <ButtonRow buttons={exploreMoveButtons} />
+        {showMoves && (
+          loadingMoves ? (
+            <div className={styles.helperText}>Loading legal moves…</div>
+          ) : (
+            <MoveList
+              items={moveListItems}
+              emptyMessage="No moves available for the current rack."
+            />
+          )
+        )}
+      </Panel>
+
+      <Panel title="Snapshots & Log" subtitle="Export state or inspect history." density="compact">
+        <textarea
+          value={snapshotText}
+          onChange={e => setSnapshotText(e.target.value)}
+          rows={5}
+          className={styles.snapshotArea}
+          placeholder="Click Save snapshot to capture the current game state"
+        />
+        <ButtonRow
+          buttons={[
+            {key: 'save', label: 'Save snapshot', onClick: exportSnapshot, disabled: !game},
+            {
+              key: 'load',
+              label: 'Load snapshot',
+              onClick: importSnapshot,
+              disabled: !game || snapshotText.trim() === '',
+            },
+            {key: 'log', label: 'Show event log', onClick: fetchEventLog, disabled: !game},
+          ]}
+        />
+        {eventLogText && <pre className={styles.logViewer}>{eventLogText}</pre>}
+      </Panel>
+    </>
+  );
+
+  const heroNode = (
+    <PlaygroundHero
+      eyebrow="TileTangle Playground"
+      title="Design. Experiment. Solve."
+      description="Tune adjacency, stack rules, and automation to watch the engine reshape every move in real time."
+      stats={heroStats}
+      rightSlot={(
+        <div className={styles.heroPresets}>
+          <div className={styles.presetsHeading}>Quick presets</div>
+          <div className={styles.presetGrid}>
+            {quickPresets.map(preset => (
+              <button
+                key={preset.id}
+                type="button"
+                className={styles.presetCard}
+                onClick={preset.onApply}
+              >
+                <span className={styles.presetTitle}>{preset.title}</span>
+                <span className={styles.presetDescription}>{preset.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    />
+  );
+
+  const alerts: AlertItem[] = [
+    errorMessage ? {id: 'error', kind: 'error', message: errorMessage} : null,
+    dictError ? {id: 'dict', kind: 'warning', message: dictError} : null,
+    cpuError ? {id: 'cpu', kind: 'warning', message: cpuError} : null,
+    infoMessage ? {id: 'info', kind: 'info', message: infoMessage} : null,
+  ].filter((item): item is AlertItem => item != null);
+
+  const alertsNode = <AlertStack alerts={alerts} />;
+
+  return (
+    <PlaygroundShell
+      themeVars={themeVars}
+      hero={heroNode}
+      alerts={alertsNode}
+      sidebar={sidebarContent}
+      main={stageContent}
+      rightRail={rightRailContent}
+    />
   );
 }

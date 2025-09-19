@@ -99,6 +99,12 @@
   gap: 0.75rem;
 }
 
+.heroRight {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
 .presetsHeading {
   font-size: 0.85rem;
   font-weight: 600;
@@ -339,6 +345,10 @@
     flex: 1;
   }
 
+  .heroRight {
+    flex: 1;
+  }
+
   .layout {
     grid-template-columns: minmax(280px, 360px) minmax(720px, 1fr) minmax(280px, 360px);
   }
@@ -373,6 +383,20 @@
   font-size: 0.65rem;
   font-weight: 600;
   opacity: 0.8;
+}
+
+.hintBadge {
+  position: absolute;
+  inset: 2px;
+  border-radius: 4px;
+  background: rgba(251, 191, 36, 0.28);
+  color: #b45309;
+  font-size: 0.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  pointer-events: none;
 }
 
 .layerSlider {

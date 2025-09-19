@@ -11,11 +11,40 @@ async function waitForPlaygroundReady(page: Page) {
   if ((await dictLoading.count()) > 0) {
     await dictLoading.waitFor({ state: 'detached', timeout: 60000 }).catch(() => {});
   }
+
+  await page
+    .waitForFunction(
+      () => typeof (window as any).__tileTanglePlayground !== 'undefined',
+      { timeout: 10000 },
+    )
+    .catch(() => {});
 }
 
 async function openPlayground(page: Page) {
   await page.goto('/docs/playground');
   await waitForPlaygroundReady(page);
+}
+
+async function waitForClassicDemoReady(page: Page) {
+  const loader = page.locator('text=Loading classic demo…');
+  await loader.waitFor({state: 'hidden', timeout: 60000}).catch(() => {});
+
+  await page.waitForSelector('[data-testid="playground-board-cell"]', {
+    state: 'attached',
+    timeout: 60000,
+  });
+
+  await page
+    .waitForFunction(
+      () => typeof (window as any).__classicDemo !== 'undefined',
+      {timeout: 10000},
+    )
+    .catch(() => {});
+}
+
+async function openClassicDemo(page: Page) {
+  await page.goto('/docs/classic-demo');
+  await waitForClassicDemoReady(page);
 }
 
 test('homepage loads', async ({ page }) => {
@@ -42,22 +71,21 @@ test('Performance toolkit page renders', async ({ page }) => {
 });
 
 test('playground supports undo/redo', async ({ page }) => {
-  await page.goto('/docs/playground');
-  await page.waitForSelector('text=Loading WASM…', { state: 'detached', timeout: 15000 }).catch(() => {});
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="playground-board-cell"]').length > 0, { timeout: 15000 });
-  await page.locator('[data-testid="dictionary-loading"]').first().waitFor({ state: 'detached', timeout: 20000 }).catch(() => {});
-  await page.getByLabel('Dictionary checks').uncheck();
-  await page.waitForSelector('text=Loading WASM…', { state: 'attached', timeout: 10000 }).catch(() => {});
-  await page.waitForSelector('text=Loading WASM…', { state: 'detached', timeout: 15000 }).catch(() => {});
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="playground-board-cell"]').length > 0, { timeout: 15000 });
-  await page.waitForSelector('text=Loading WASM…', { state: 'attached', timeout: 10000 }).catch(() => {});
-  await page.waitForSelector('text=Loading WASM…', { state: 'detached', timeout: 15000 }).catch(() => {});
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="playground-board-cell"]').length > 0, { timeout: 15000 });
+  await openPlayground(page);
+  await page.getByLabel('Use dictionary validation').uncheck();
+  await waitForPlaygroundReady(page);
 
   const rackTile = page.locator('[data-testid="playground-rack-tile"]').first();
-  const targetCell = page.locator('[data-testid="playground-board-cell"][data-x="4"][data-y="4"]');
-  await rackTile.dragTo(targetCell);
-  await page.getByRole('button', { name: /Commit move/ }).click();
+  const kind = await rackTile.getAttribute('data-kind');
+  if (!kind) throw new Error('Failed to read rack tile kind');
+
+  await page.evaluate(([k, x, y]) => {
+    (window as any).__tileTanglePlayground?.placeTile(k, x, y);
+  }, [kind, 4, 4]);
+
+  const commitButton = page.getByRole('button', { name: /Commit move/ });
+  await expect(commitButton).toBeEnabled({ timeout: 5000 });
+  await commitButton.click();
   await page.waitForFunction(() => {
     const cell = document.querySelector('[data-testid="playground-board-cell"][data-x="4"][data-y="4"]');
     return cell && (cell.textContent || '').trim().length > 0;
@@ -88,22 +116,18 @@ test('playground loads without console errors', async ({ page }) => {
 });
 
 test('playground legal moves are unique', async ({ page }) => {
-  await page.goto('/docs/playground');
-  await page.waitForSelector('text=Loading WASM…', { state: 'detached', timeout: 15000 }).catch(() => {});
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="playground-board-cell"]').length > 0, { timeout: 15000 });
-  await page.locator('[data-testid="dictionary-loading"]').first().waitFor({ state: 'detached', timeout: 20000 }).catch(() => {});
-  await page.getByLabel('Dictionary checks').uncheck();
+  await openPlayground(page);
+  await page.getByLabel('Use dictionary validation').uncheck();
+  await waitForPlaygroundReady(page);
 
   const tilePool = page.locator('textarea').first();
   await tilePool.fill('A:40');
   await page.getByRole('button', { name: 'Apply configuration' }).click();
-  await page.waitForSelector('text=Loading WASM…', { state: 'attached', timeout: 10000 }).catch(() => {});
-  await page.waitForSelector('text=Loading WASM…', { state: 'detached', timeout: 15000 }).catch(() => {});
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="playground-board-cell"]').length > 0, { timeout: 15000 });
-  await page.locator('[data-testid="dictionary-loading"]').first().waitFor({ state: 'detached', timeout: 20000 }).catch(() => {});
-  await page.getByLabel('Dictionary checks').uncheck();
+  await waitForPlaygroundReady(page);
+  await page.getByLabel('Use dictionary validation').uncheck();
+  await waitForPlaygroundReady(page);
 
-  await page.getByRole('button', { name: 'Show legal moves' }).click();
+  await page.getByRole('button', { name: 'Show legal moves' }).first().click();
   await page.locator('[data-testid^="legal-move-"]').first().waitFor({ timeout: 15000 });
 
   const moves = await page.$$eval('[data-testid^="legal-move-"]', nodes => nodes.map(n => n.textContent?.trim() || ''));
@@ -176,16 +200,18 @@ test('playground toggles 3D layers without errors', async ({ page }) => {
   page.on('pageerror', (err) => errors.push(err.message));
   page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()); });
 
-  await page.goto('/docs/playground');
-  await page.waitForSelector('text=Loading WASM…', { state: 'detached', timeout: 15000 }).catch(() => {});
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="playground-board-cell"]').length > 0, { timeout: 15000 });
-  await page.locator('[data-testid="dictionary-loading"]').first().waitFor({ state: 'detached', timeout: 20000 }).catch(() => {});
+  await openPlayground(page);
 
-  await page.getByLabel('3D (layers)').check();
-  const depthInput = page.getByLabel('Depth', { exact: false });
+  const threeDOption = page.getByRole('radio', { name: '3D' }).first();
+  await threeDOption.check({ force: true });
+  await expect(threeDOption).toBeChecked();
+  await page.getByRole('button', { name: 'Apply configuration' }).click();
+  await waitForPlaygroundReady(page);
+
+  const depthInput = page.getByLabel('Layers', { exact: false });
   await depthInput.fill('2');
 
-  const sliceSlider = page.getByLabel('Slice z', { exact: false });
+  const sliceSlider = page.getByLabel(/Viewing layer/i);
   await sliceSlider.evaluate((el: HTMLInputElement) => {
     el.value = el.max && Number(el.max) >= 1 ? '1' : '0';
     el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -215,9 +241,9 @@ test('playground CPU hint plays a move', async ({ page }) => {
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="playground-board-cell"]').length > 0, { timeout: 15000 });
   await page.locator('[data-testid="dictionary-loading"]').first().waitFor({ state: 'detached', timeout: 20000 }).catch(() => {});
 
-  const cpuSelect = page.getByLabel('CPU difficulty', { exact: false });
-  await cpuSelect.selectOption('medium');
-  await expect(cpuSelect).toHaveValue('medium');
+  const cpuMediumOption = page.getByRole('radio', { name: 'Medium' });
+  await cpuMediumOption.check();
+  await expect(cpuMediumOption).toBeChecked();
 
   await page.getByRole('button', { name: 'CPU hint' }).click();
   await page.locator('text=computing…').waitFor({ state: 'detached', timeout: 20000 }).catch(() => {});
@@ -253,4 +279,43 @@ test('showcase docs mention CPU controls and 3D slice overlay', async ({ page })
   const article = page.locator('article');
   await expect(article).toContainText(/CPU Move/i);
   await expect(article).toContainText(/sample vertical word/i);
+});
+
+test('classic demo commits a move', async ({page}) => {
+  const consoleErrors: string[] = [];
+  page.on('console', msg => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
+
+  await openClassicDemo(page);
+
+  const rackTile = page.locator('[data-testid="classic-rack-tile"]').first();
+  await expect(rackTile).toBeVisible();
+  const kind = await rackTile.getAttribute('data-kind');
+  expect(kind).toBeTruthy();
+
+  const center = Math.floor(15 / 2);
+  await page.evaluate(([k, x, y]) => {
+    (window as any).__classicDemo?.placeTile(k, x, y, null);
+  }, [kind, center, center]);
+
+  const commitButton = page.getByRole('button', {name: /Commit/});
+  await expect(commitButton).toBeEnabled();
+  await commitButton.click();
+
+  await page.waitForFunction(([x, y]) => {
+    const cell = document.querySelector(`[data-testid="playground-board-cell"][data-x="${x}"][data-y="${y}"]`);
+    return !!cell && ((cell.textContent || '').trim().length > 0);
+  }, [center, center], {timeout: 10000});
+
+  await expect(commitButton).toBeDisabled();
+  expect(consoleErrors.filter(msg => !msg.includes('404'))).toHaveLength(0);
+});
+
+test('classic demo shows hint overlays', async ({page}) => {
+  await openClassicDemo(page);
+
+  await page.getByLabel('Show Hints').check();
+
+  const hintBadge = page.locator('[data-testid="classic-hint-badge"]').first();
+  await hintBadge.waitFor({timeout: 20000});
+  await expect(page.locator('[data-testid="classic-hint-card"]').first()).toBeVisible();
 });

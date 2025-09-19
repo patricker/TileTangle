@@ -280,6 +280,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 * [x] Wire up real move generation & CPU search paths for custom adjacency boards (graph / hex) instead of disabling them in the Playground.
 * [x] Add per-shape presets (true hex mask, diamond/cross defaults) so graph boards feel native without manual tweaking.
 * [x] Polish Playground layout with dedicated panels, quick presets, and themed controls to encourage experimentation.
+* [x] Extract shared hero, alert, rack, move-list, and control button primitives so Playground and Classic demo reuse the same UI building blocks.
 
 ### Exit Criteria
 
