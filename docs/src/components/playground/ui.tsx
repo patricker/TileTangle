@@ -215,6 +215,7 @@ export function RackRow({tiles, emptyMessage, footer, className}: RackRowProps):
 
 export type MoveListItem = {
   key: React.Key;
+  index: number;
   word: string;
   score?: number;
   actions?: MoveCardAction[];
@@ -240,9 +241,9 @@ export function MoveList({items, emptyMessage}: MoveListProps): JSX.Element {
   return (
     <div className={styles.movesList}>
       {items.map(item => {
-        const {key, body, ...rest} = item;
+        const {key, body, index, ...rest} = item;
         return (
-          <MoveCard key={key} {...rest}>
+          <MoveCard key={key} index={index} {...rest}>
             {body}
           </MoveCard>
         );
@@ -280,6 +281,70 @@ export function ButtonRow({buttons, className}: ButtonRowProps): JSX.Element {
         >
           {button.label}
         </button>
+      ))}
+    </div>
+  );
+}
+
+export type ToggleFieldProps = {
+  label: React.ReactNode;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  title?: string;
+  testId?: string;
+  className?: string;
+};
+
+export function ToggleField({label, checked, onChange, disabled, title, testId, className}: ToggleFieldProps): JSX.Element {
+  return (
+    <label className={className ? `${styles.toggleRow} ${className}` : styles.toggleRow} title={title}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={event => onChange(event.target.checked)}
+        disabled={disabled}
+        data-testid={testId}
+      />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+export type PlayerSummaryCard = {
+  key: React.Key;
+  label: React.ReactNode;
+  score: React.ReactNode;
+  rack?: React.ReactNode;
+  active?: boolean;
+};
+
+export type PlayerListProps = {
+  players: PlayerSummaryCard[];
+  emptyMessage?: React.ReactNode;
+};
+
+export function PlayerList({players, emptyMessage}: PlayerListProps): JSX.Element {
+  if (players.length === 0) {
+    if (!emptyMessage) {
+      return <div className={styles.helperText}>No players available.</div>;
+    }
+    return React.isValidElement(emptyMessage)
+      ? emptyMessage
+      : <div className={styles.helperText}>{emptyMessage}</div>;
+  }
+
+  return (
+    <div className={styles.playerList}>
+      {players.map(player => (
+        <div
+          key={player.key}
+          className={`${styles.playerCard} ${player.active ? styles.playerCardActive : ''}`}
+        >
+          <div className={styles.playerCardHeader}>{player.label}</div>
+          <div className={styles.playerScore}>{player.score}</div>
+          {player.rack && <div className={styles.playerRack}>{player.rack}</div>}
+        </div>
       ))}
     </div>
   );

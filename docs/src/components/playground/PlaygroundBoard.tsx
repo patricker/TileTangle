@@ -68,7 +68,7 @@ const PlaygroundBoard: React.FC<PlaygroundBoardProps> = ({
       const score = meta?.score;
       const highlighted = highlightCells.has(`${x},${globalRow}`);
       const overlay = renderOverlay
-        ? renderOverlay({x, viewY, globalY: globalRow, placement, meta, highlighted})
+        ? renderOverlay({x, viewY: viewRow, globalY: globalRow, placement, meta, highlighted})
         : null;
 
       const cellStyle: React.CSSProperties = {

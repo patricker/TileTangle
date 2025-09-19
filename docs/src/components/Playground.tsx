@@ -6,7 +6,7 @@ import PlaygroundHero from './playground/PlaygroundHero';
 import PlaygroundShell from './playground/PlaygroundShell';
 import AlertStack, {type AlertItem} from './playground/AlertStack';
 import type {BoardJson} from './playground/types';
-import {ButtonRow, type ButtonConfig, MoveList, Panel, RackRow, type RackRowTile, SegmentedControl, type SegmentedOption} from './playground/ui';
+import {ButtonRow, type ButtonConfig, MoveList, Panel, PlayerList, RackRow, ToggleField, type RackRowTile, SegmentedControl, type SegmentedOption} from './playground/ui';
 import {buildThemeVars, getPlaygroundPalette} from './playground/theme';
 import {useWorkerMessenger} from './playground/useWorkerMessenger';
 import styles from './PlaygroundLayout.module.css';
@@ -1699,6 +1699,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     () =>
       legalMoves.map((mv, idx) => ({
         key: `${mv.word}-${idx}`,
+        index: idx,
         word: mv.word,
         score: mv.total ?? mv.score,
         testId: `legal-move-${idx}`,
@@ -1742,6 +1743,18 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       }
     },
     [showMoves, legalMoves],
+  );
+
+  const playerCards = useMemo(
+    () =>
+      players.map(player => ({
+        key: player.index,
+        label: `Player ${player.index + 1}`,
+        score: `${player.score} pts`,
+        rack: player.rack.join(' ') || '—',
+        active: player.index === activePlayer,
+      })),
+    [players, activePlayer],
   );
 
   if (!ready || !board) {
@@ -1973,10 +1986,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       </Panel>
 
       <Panel title="Language & Dictionary" subtitle="Guard rails for move validation." density="compact">
-        <label className={styles.toggleRow}>
-          <input type="checkbox" checked={useDict} onChange={e => setUseDict(e.target.checked)} />
-          <span>Use dictionary validation</span>
-        </label>
+        <ToggleField label="Use dictionary validation" checked={useDict} onChange={setUseDict} />
         <label className={styles.field}>
           <span>Engine</span>
           <select
@@ -1990,14 +2000,13 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
             <option value="gaddag">GADDAG</option>
           </select>
         </label>
-        <label className={styles.toggleRow} title="Reorder placed tiles into any valid anagram when committing the move">
-          <input type="checkbox" checked={useAnagram} onChange={e => setUseAnagram(e.target.checked)} />
-          <span>Anagram commit</span>
-        </label>
-        <label className={styles.toggleRow}>
-          <input type="checkbox" checked={rtl} onChange={e => setRtl(e.target.checked)} />
-          <span>RTL reading direction</span>
-        </label>
+        <ToggleField
+          label="Anagram commit"
+          checked={useAnagram}
+          onChange={setUseAnagram}
+          title="Reorder placed tiles into any valid anagram when committing the move"
+        />
+        <ToggleField label="RTL reading direction" checked={rtl} onChange={setRtl} />
         {dictLoading && (
           <span data-testid="dictionary-loading" className={styles.helperText}>
             Loading dictionary…
@@ -2006,10 +2015,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       </Panel>
 
       <Panel title="Stacking Rules" subtitle="Experiment with layered tiles." density="compact">
-        <label className={styles.toggleRow}>
-          <input type="checkbox" checked={stackOn} onChange={e => setStackOn(e.target.checked)} />
-          <span>Enable stacking</span>
-        </label>
+        <ToggleField label="Enable stacking" checked={stackOn} onChange={setStackOn} />
         {stackOn && (
           <div className={styles.fieldStack}>
             <label className={styles.field}>
@@ -2019,10 +2025,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
                 <option value="sum">Sum stack</option>
               </select>
             </label>
-            <label className={styles.toggleRow}>
-              <input type="checkbox" checked={forbidSame} onChange={e => setForbidSame(e.target.checked)} />
-              <span>Forbid identical overlays</span>
-            </label>
+            <ToggleField label="Forbid identical overlays" checked={forbidSame} onChange={setForbidSame} />
           </div>
         )}
       </Panel>
@@ -2032,19 +2035,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const rightRailContent = (
     <>
       <Panel title="Turn Tracker" subtitle="Scoreboard and bag" density="compact">
-        <div className={styles.playerList}>
-          {players.length === 0 && <div className={styles.helperText}>Loading players…</div>}
-          {players.map(player => (
-            <div
-              key={player.index}
-              className={`${styles.playerCard} ${player.index === activePlayer ? styles.playerCardActive : ''}`}
-            >
-              <div className={styles.playerCardHeader}>Player {player.index + 1}</div>
-              <div className={styles.playerScore}>{player.score} pts</div>
-              <div className={styles.playerRack}>{player.rack.join(' ') || '—'}</div>
-            </div>
-          ))}
-        </div>
+        <PlayerList players={playerCards} emptyMessage="Loading players…" />
         <div className={styles.helperText}>
           Bag: {bagSummary.total} tiles{bagSummary.total > 0 && bagPreview ? ` • ${bagPreview}` : ''}
         </div>
@@ -2076,10 +2067,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
             ]}
           />
         </div>
-        <label className={styles.toggleRow}>
-          <input type="checkbox" checked={useWorker} onChange={e => setUseWorker(e.target.checked)} />
-          <span>Run heavy work in a Web Worker</span>
-        </label>
+        <ToggleField label="Run heavy work in a Web Worker" checked={useWorker} onChange={setUseWorker} />
         {draftAdjacencyMode === 'hex' && (
           <div className={styles.helperText}>Hex adjacency uses staggered rows with three axes (E, NE, SE).</div>
         )}
@@ -2210,12 +2198,19 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     />
   );
 
-  const alerts: AlertItem[] = [
-    errorMessage ? {id: 'error', kind: 'error', message: errorMessage} : null,
-    dictError ? {id: 'dict', kind: 'warning', message: dictError} : null,
-    cpuError ? {id: 'cpu', kind: 'warning', message: cpuError} : null,
-    infoMessage ? {id: 'info', kind: 'info', message: infoMessage} : null,
-  ].filter((item): item is AlertItem => item != null);
+  const alerts: AlertItem[] = [];
+  if (errorMessage) {
+    alerts.push({id: 'error', kind: 'error', message: errorMessage});
+  }
+  if (dictError) {
+    alerts.push({id: 'dict', kind: 'warning', message: dictError});
+  }
+  if (cpuError) {
+    alerts.push({id: 'cpu', kind: 'warning', message: cpuError});
+  }
+  if (infoMessage) {
+    alerts.push({id: 'info', kind: 'info', message: infoMessage});
+  }
 
   const alertsNode = <AlertStack alerts={alerts} />;
 

@@ -7,7 +7,7 @@ import PlaygroundHero from './playground/PlaygroundHero';
 import PlaygroundShell from './playground/PlaygroundShell';
 import AlertStack, {type AlertItem} from './playground/AlertStack';
 import {buildThemeVars, getPlaygroundPalette} from './playground/theme';
-import {ButtonRow, MoveList, Panel, RackRow, type RackRowTile, SegmentedControl, type SegmentedOption} from './playground/ui';
+import {ButtonRow, MoveList, Panel, RackRow, ToggleField, type RackRowTile, SegmentedControl, type SegmentedOption} from './playground/ui';
 import type {BoardJson} from './playground/types';
 import styles from './PlaygroundLayout.module.css';
 import {useWorkerMessenger} from './playground/useWorkerMessenger';
@@ -434,6 +434,7 @@ export default function ClassicDemo(): JSX.Element {
     () =>
       hints.map((hint, index) => ({
         key: `${hint.word}-${index}`,
+        index,
         word: hint.word,
         score: hint.score,
         testId: 'classic-hint-card',
@@ -466,10 +467,13 @@ export default function ClassicDemo(): JSX.Element {
     <div className={styles.helperText}>Enable hints to preview generated moves.</div>
   );
 
-  const alerts: AlertItem[] = [
-    errorMessage ? {id: 'error', kind: 'error', message: errorMessage} : null,
-    infoMessage ? {id: 'info', kind: 'info', message: infoMessage} : null,
-  ].filter((item): item is AlertItem => item != null);
+  const alerts: AlertItem[] = [];
+  if (errorMessage) {
+    alerts.push({id: 'error', kind: 'error', message: errorMessage});
+  }
+  if (infoMessage) {
+    alerts.push({id: 'info', kind: 'info', message: infoMessage});
+  }
 
   const alertsNode = <AlertStack alerts={alerts} />;
 
@@ -488,22 +492,9 @@ export default function ClassicDemo(): JSX.Element {
         subtitle="Toggle validation and stacking rules."
         density="compact"
       >
-        <label className={styles.toggleRow}>
-          <input
-            type="checkbox"
-            checked={useDict}
-            onChange={e => setUseDict(e.target.checked)}
-          />
-          <span>Dictionary checks</span>
-        </label>
-        <label className={styles.toggleRow}>
-          <input type="checkbox" checked={rtl} onChange={e => setRtl(e.target.checked)} />
-          <span>RTL reading direction</span>
-        </label>
-        <label className={styles.toggleRow}>
-          <input type="checkbox" checked={stackOn} onChange={e => setStackOn(e.target.checked)} />
-          <span>Enable stacking</span>
-        </label>
+        <ToggleField label="Dictionary checks" checked={useDict} onChange={setUseDict} />
+        <ToggleField label="RTL reading direction" checked={rtl} onChange={setRtl} />
+        <ToggleField label="Enable stacking" checked={stackOn} onChange={setStackOn} />
         {stackOn && (
           <div className={styles.fieldStack}>
             <SegmentedControl
@@ -515,14 +506,7 @@ export default function ClassicDemo(): JSX.Element {
                 {value: 'sum', label: 'Sum stack'},
               ] satisfies SegmentedOption[]}
             />
-            <label className={styles.toggleRow}>
-              <input
-                type="checkbox"
-                checked={forbidSame}
-                onChange={e => setForbidSame(e.target.checked)}
-              />
-              <span>Forbid identical overlays</span>
-            </label>
+            <ToggleField label="Forbid identical overlays" checked={forbidSame} onChange={setForbidSame} />
           </div>
         )}
       </Panel>

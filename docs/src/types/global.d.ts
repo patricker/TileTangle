@@ -88,17 +88,4 @@ declare module '@theme/Heading' {
 
 declare module '@theme/*';
 
-declare global {
-  namespace JSX {
-    interface Element extends React.ReactElement<any, any> {}
-    interface ElementClass extends React.Component<any, any> {}
-    interface ElementChildrenAttribute {
-      children?: React.ReactNode;
-    }
-    interface IntrinsicAttributes extends React.JSX.IntrinsicAttributes {}
-    interface IntrinsicClassAttributes<T> extends React.JSX.IntrinsicClassAttributes<T> {}
-    interface IntrinsicElements extends React.JSX.IntrinsicElements {}
-  }
-}
-
 export {};
