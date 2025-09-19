@@ -232,10 +232,11 @@
 .field select {
   width: 100%;
   border-radius: 10px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
+  border: 1px solid var(--tt-control-border);
   padding: 0.45rem 0.55rem;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--tt-control-bg);
   color: inherit;
+  transition: border-color 140ms ease, background-color 140ms ease;
 }
 
 .toggleRow {
@@ -243,6 +244,36 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.9rem;
+}
+
+.field select:focus,
+.field input:focus {
+  outline: none;
+  border-color: var(--tt-control-hover-border);
+  box-shadow: var(--tt-control-focus-shadow);
+}
+
+.buttonRow button {
+  padding: 0.45rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--tt-control-border);
+  background: var(--tt-control-bg);
+  cursor: pointer;
+  color: inherit;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.buttonRow button[disabled] {
+  background: var(--tt-control-disabled-bg);
+  border-color: var(--tt-control-disabled-border);
+  color: var(--tt-text-subtle);
+  opacity: 0.75;
+  cursor: not-allowed;
+}
+
+.buttonRow button:not([disabled]):hover {
+  border-color: var(--tt-control-hover-border);
+  background: var(--tt-control-hover-bg);
 }
 
 .fieldStack {
@@ -360,6 +391,11 @@
   justify-content: center;
 }
 
+.hexBoard {
+  position: relative;
+  margin: 0 auto;
+}
+
 .boardCell {
   width: 28px;
   height: 28px;
@@ -376,6 +412,29 @@
   transform: translateY(-2px);
 }
 
+.hexCell {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: inherit;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.hexCell:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.18);
+}
+
+.hexCellLabel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  pointer-events: none;
+}
+
 .boardCellScore {
   position: absolute;
   bottom: 2px;
@@ -383,6 +442,30 @@
   font-size: 0.65rem;
   font-weight: 600;
   opacity: 0.8;
+}
+
+.bonusChip {
+  position: absolute;
+  inset: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border-radius: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.bonusChipWord {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.85), rgba(220, 38, 38, 0.9));
+}
+
+.bonusChipLetter {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.85), rgba(29, 78, 216, 0.9));
 }
 
 .hintBadge {

@@ -7,7 +7,8 @@ import PlaygroundHero from './playground/PlaygroundHero';
 import PlaygroundShell from './playground/PlaygroundShell';
 import AlertStack, {type AlertItem} from './playground/AlertStack';
 import {buildThemeVars, getPlaygroundPalette} from './playground/theme';
-import {ButtonRow, MoveList, Panel, RackRow, ToggleField, type RackRowTile, SegmentedControl, type SegmentedOption} from './playground/ui';
+import {ButtonRow, MoveList, Panel, RackRow, ToggleField, type RackRowTile} from './playground/ui';
+import {StackingControls} from './playground/panels';
 import type {BoardJson} from './playground/types';
 import styles from './PlaygroundLayout.module.css';
 import {useWorkerMessenger} from './playground/useWorkerMessenger';
@@ -27,6 +28,20 @@ export default function ClassicDemo(): JSX.Element {
 
   const classic = useMemo(() => classicTilesets(), []);
   const bonusLayout = useMemo(() => classicBonuses(), []);
+  const bonusOverlay = useMemo(() => {
+    const map = new Map<string, {label: string; tone: 'word' | 'letter'}>();
+    for (const cell of bonusLayout) {
+      const key = `${cell.x},${cell.y}`;
+      if (cell.word_mul && cell.word_mul > 1) {
+        map.set(key, {label: `${cell.word_mul}W`, tone: 'word'});
+        continue;
+      }
+      if (cell.letter_mul && cell.letter_mul > 1 && !map.has(key)) {
+        map.set(key, {label: `${cell.letter_mul}L`, tone: 'letter'});
+      }
+    }
+    return map;
+  }, [bonusLayout]);
 
   const [game, setGame] = useState<WorkerGame | null>(null);
   const [board, setBoard] = useState<BoardJson | null>(null);
@@ -494,21 +509,14 @@ export default function ClassicDemo(): JSX.Element {
       >
         <ToggleField label="Dictionary checks" checked={useDict} onChange={setUseDict} />
         <ToggleField label="RTL reading direction" checked={rtl} onChange={setRtl} />
-        <ToggleField label="Enable stacking" checked={stackOn} onChange={setStackOn} />
-        {stackOn && (
-          <div className={styles.fieldStack}>
-            <SegmentedControl
-              name="Stack scoring"
-              value={stackScoring}
-              onChange={value => setStackScoring(value as 'top' | 'sum')}
-              options={[
-                {value: 'top', label: 'Top only'},
-                {value: 'sum', label: 'Sum stack'},
-              ] satisfies SegmentedOption[]}
-            />
-            <ToggleField label="Forbid identical overlays" checked={forbidSame} onChange={setForbidSame} />
-          </div>
-        )}
+        <StackingControls
+          stackOn={stackOn}
+          onStackOnChange={setStackOn}
+          stackScoring={stackScoring}
+          onStackScoringChange={setStackScoring}
+          forbidSame={forbidSame}
+          onForbidSameChange={setForbidSame}
+        />
       </Panel>
 
       <Panel title="Automation" subtitle="Let the engine explore." density="compact">
@@ -562,14 +570,27 @@ export default function ClassicDemo(): JSX.Element {
               boardCellHighlight: palette.boardCellHighlight,
               boardCellBg: palette.boardCellBg,
             }}
-            renderOverlay={({x, globalY}) => {
-              if (!showHints) return null;
-              const label = hintOverlay.get(`${x},${globalY}`);
-              if (!label) return null;
+            renderOverlay={({x, globalY, placement}) => {
+              if (placement) return null;
+              const key = `${x},${globalY}`;
+              const bonus = bonusOverlay.get(key);
+              const label = showHints ? hintOverlay.get(key) : null;
+              if (!bonus && !label) return null;
               return (
-                <span className={styles.hintBadge} data-testid="classic-hint-badge">
-                  {label}
-                </span>
+                <>
+                  {bonus && (
+                    <span
+                      className={`${styles.bonusChip} ${bonus.tone === 'word' ? styles.bonusChipWord : styles.bonusChipLetter}`}
+                    >
+                      {bonus.label}
+                    </span>
+                  )}
+                  {label && (
+                    <span className={styles.hintBadge} data-testid="classic-hint-badge">
+                      {label}
+                    </span>
+                  )}
+                </>
               );
             }}
           />

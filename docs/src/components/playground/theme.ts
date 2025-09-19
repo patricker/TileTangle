@@ -34,6 +34,13 @@ export type PlaygroundPalette = {
   segmentedActiveBorder: string;
   alertShadow: string;
   rackTileShadow?: string;
+  controlBg: string;
+  controlHoverBg: string;
+  controlBorder: string;
+  controlHoverBorder: string;
+  controlFocusShadow: string;
+  controlDisabledBg: string;
+  controlDisabledBorder: string;
 };
 
 export function getPlaygroundPalette(colorMode: 'light' | 'dark'): PlaygroundPalette {
@@ -71,6 +78,13 @@ export function getPlaygroundPalette(colorMode: 'light' | 'dark'): PlaygroundPal
       segmentedActiveBg: 'rgba(56, 189, 248, 0.38)',
       segmentedActiveBorder: 'rgba(125, 211, 252, 0.65)',
       alertShadow: '0 18px 45px rgba(2, 6, 23, 0.55)',
+      controlBg: 'rgba(15, 23, 42, 0.78)',
+      controlHoverBg: 'rgba(125, 211, 252, 0.22)',
+      controlBorder: 'rgba(148, 163, 184, 0.4)',
+      controlHoverBorder: 'rgba(125, 211, 252, 0.65)',
+      controlFocusShadow: '0 0 0 3px rgba(125, 211, 252, 0.32)',
+      controlDisabledBg: 'rgba(30, 41, 59, 0.55)',
+      controlDisabledBorder: 'rgba(148, 163, 184, 0.28)',
     };
   }
 
@@ -107,6 +121,13 @@ export function getPlaygroundPalette(colorMode: 'light' | 'dark'): PlaygroundPal
     segmentedActiveBg: 'rgba(59, 130, 246, 0.2)',
     segmentedActiveBorder: 'rgba(37, 99, 235, 0.55)',
     alertShadow: '0 18px 40px rgba(15, 23, 42, 0.18)',
+    controlBg: 'rgba(255, 255, 255, 0.94)',
+    controlHoverBg: 'rgba(59, 130, 246, 0.16)',
+    controlBorder: 'rgba(148, 163, 184, 0.35)',
+    controlHoverBorder: 'rgba(59, 130, 246, 0.55)',
+    controlFocusShadow: '0 0 0 3px rgba(56, 189, 248, 0.25)',
+    controlDisabledBg: 'rgba(248, 250, 252, 0.7)',
+    controlDisabledBorder: 'rgba(148, 163, 184, 0.28)',
   };
 }
 
@@ -136,5 +157,12 @@ export function buildThemeVars(palette: PlaygroundPalette): CSSProperties {
     '--tt-alert-info-bg': palette.infoBg,
     '--tt-alert-info-border': palette.infoBorder,
     '--tt-alert-shadow': palette.alertShadow,
+    '--tt-control-bg': palette.controlBg,
+    '--tt-control-hover-bg': palette.controlHoverBg,
+    '--tt-control-border': palette.controlBorder,
+    '--tt-control-hover-border': palette.controlHoverBorder,
+    '--tt-control-focus-shadow': palette.controlFocusShadow,
+    '--tt-control-disabled-bg': palette.controlDisabledBg,
+    '--tt-control-disabled-border': palette.controlDisabledBorder,
   } as CSSProperties;
 }

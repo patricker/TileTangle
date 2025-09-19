@@ -1,12 +1,15 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useColorMode} from '@docusaurus/theme-common';
 import {classicTilesets} from './demoUtils';
-import PlaygroundBoard from './playground/PlaygroundBoard';
+import PlaygroundBoard, {HEX_POLYGON} from './playground/PlaygroundBoard';
 import PlaygroundHero from './playground/PlaygroundHero';
 import PlaygroundShell from './playground/PlaygroundShell';
 import AlertStack, {type AlertItem} from './playground/AlertStack';
 import type {BoardJson} from './playground/types';
-import {ButtonRow, type ButtonConfig, MoveList, Panel, PlayerList, RackRow, ToggleField, type RackRowTile, SegmentedControl, type SegmentedOption} from './playground/ui';
+import {SetupState, buildShapeMask, clamp, formatTileCounts, formatTileScores, parseTileCounts, parseTileScores} from './playground/config';
+import {resolveBonusPreset, type BonusCell} from './playground/bonuses';
+import {BoardSetupPanel, LanguagePanel, StackingPanel} from './playground/panels';
+import {ButtonRow, type ButtonConfig, CpuHintSummary, MoveList, Panel, PlayerList, RackRow, ToggleField, type RackRowTile, SegmentedControl, type SegmentedOption} from './playground/ui';
 import {buildThemeVars, getPlaygroundPalette} from './playground/theme';
 import {useWorkerMessenger} from './playground/useWorkerMessenger';
 import styles from './PlaygroundLayout.module.css';
@@ -23,116 +26,6 @@ const fallbackDictionaryWords = [
 ];
 const fallbackDictionaryText = fallbackDictionaryWords.join('\n');
 
-const clamp = (value: number, min: number, max: number): number => {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(Math.max(value, min), max);
-};
-
-const formatTileCounts = (counts: Record<string, number>): string => {
-  return Object.entries(counts)
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([id, count]) => `${id}:${count}`)
-    .join('\n');
-};
-
-const parseTileCounts = (text: string, fallback: Record<string, number>) => {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return {map: fallback, error: 'Tile pool cannot be empty.'};
-  }
-  const map: Record<string, number> = {};
-  const tokens = trimmed.split(/[,\n]+/);
-  for (const token of tokens) {
-    const entry = token.trim();
-    if (!entry) continue;
-    const match = entry.match(/^([A-Za-z_]+)\s*[:=]\s*(\d+)$/);
-    if (!match) {
-      return {map: fallback, error: `Invalid tile entry: “${entry}”`};
-    }
-    const id = match[1].toUpperCase();
-    const count = Number.parseInt(match[2], 10);
-    if (!Number.isFinite(count) || count < 0) {
-      return {map: fallback, error: `Invalid count for ${id}`};
-    }
-    map[id] = count;
-  }
-  if (Object.keys(map).length === 0) {
-    return {map: fallback, error: 'Tile pool must include at least one tile.'};
-  }
-  return {map, error: null};
-};
-
-const formatTileScores = (scores: Record<string, number>): string => {
-  return Object.entries(scores)
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([id, score]) => `${id}:${score}`)
-    .join('\n');
-};
-
-const parseTileScores = (text: string, fallback: Record<string, number>) => {
-  const map: Record<string, number> = {...fallback};
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return {map, error: 'Tile scores cannot be empty.'};
-  }
-  const tokens = trimmed.split(/[,\n]+/);
-  for (const token of tokens) {
-    const entry = token.trim();
-    if (!entry) continue;
-    const match = entry.match(/^([A-Za-z_]+)\s*[:=]\s*(-?\d+)$/);
-    if (!match) {
-      return {map, error: `Invalid score entry: “${entry}”`};
-    }
-    const id = match[1].toUpperCase();
-    const score = Number.parseInt(match[2], 10);
-    if (!Number.isFinite(score)) {
-      return {map, error: `Invalid score for ${id}`};
-    }
-    map[id] = score;
-  }
-  return {map, error: null};
-};
-
-const buildShapeMask = (width: number, height: number, shape: BoardShape): Set<string> => {
-  const mask = new Set<string>();
-  if (width <= 0 || height <= 0) {
-    return mask;
-  }
-  const midX = Math.floor((width - 1) / 2);
-  const midY = Math.floor((height - 1) / 2);
-  const diamondRadius = Math.floor(Math.min(width, height) / 2);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const key = `${x},${y}`;
-      if (shape === 'rect') {
-        mask.add(key);
-        continue;
-      }
-      if (shape === 'diamond') {
-        const dist = Math.abs(x - midX) + Math.abs(y - midY);
-        if (dist <= diamondRadius) {
-          mask.add(key);
-        }
-        continue;
-      }
-      if (shape === 'cross') {
-        if (x === midX || y === midY) {
-          mask.add(key);
-        }
-        continue;
-      }
-    }
-  }
-  // Safety: if mask ended up empty (e.g. huge radius trimming), fall back to full rect
-  if (mask.size === 0) {
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        mask.add(`${x},${y}`);
-      }
-    }
-  }
-  return mask;
-};
 
 type Placement = {x: number; y: number; kind_id: string; mark?: string | null};
 type GeneratedMove = {
@@ -194,21 +87,6 @@ type PlayerSummary = {
 type BagSummary = {
   counts: Record<string, number>;
   total: number;
-};
-
-type BoardShape = 'rect' | 'diamond' | 'cross' | 'hexagon' | 'triangle' | 'ring';
-
-type BonusPreset = 'auto' | 'none' | 'classic' | 'hex' | 'triangle' | 'ring';
-
-type SetupState = {
-  width: number;
-  height: number;
-  depth: number;
-  rackSize: number;
-  tileCountsText: string;
-  tileScoresText: string;
-  shape: BoardShape;
-  bonusPreset: BonusPreset;
 };
 
 type QuickPreset = {
@@ -304,6 +182,9 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     bonusPreset: 'auto',
   });
   const [draftSettings, setDraftSettings] = useState<SetupState>(appliedSettings);
+  const handleDraftSettingsChange = useCallback((updates: Partial<SetupState>) => {
+    setDraftSettings(prev => ({...prev, ...updates}));
+  }, []);
   const [tileCountsError, setTileCountsError] = useState<string | null>(null);
   const [tileScoresError, setTileScoresError] = useState<string | null>(null);
   const [newTileId, setNewTileId] = useState('');
@@ -459,10 +340,14 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     [tileMetaMap],
   );
 
+  const boardWidth = useMemo(() => clamp(appliedSettings.width, 2, 30), [appliedSettings.width]);
+  const boardHeight = useMemo(() => clamp(appliedSettings.height, 2, 30), [appliedSettings.height]);
+  const boardDepth = useMemo(() => clamp(appliedSettings.depth, 1, 12), [appliedSettings.depth]);
+
   const activeMask = useMemo(() => {
     if (use3D) return null;
-    return buildShapeMask(appliedSettings.width, appliedSettings.height, appliedSettings.shape);
-  }, [use3D, appliedSettings.width, appliedSettings.height, appliedSettings.shape]);
+    return buildShapeMask(boardWidth, boardHeight, appliedSettings.shape);
+  }, [use3D, boardWidth, boardHeight, appliedSettings.shape]);
 
   const isCellActive = useCallback(
     (x: number, y: number) => {
@@ -573,10 +458,66 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     };
   }, [useAnagram, useDict, appliedSettings.rackSize]);
 
+  const appliedAdjacencyMode = useMemo(() => {
+    if (useHex) return 'hex';
+    if (useDiag) return 'diagonal';
+    return 'orthogonal';
+  }, [useHex, useDiag]);
+
+  const tileShape = useMemo<'square' | 'hex'>(() => {
+    if (use3D) return 'square';
+    return appliedAdjacencyMode === 'hex' ? 'hex' : 'square';
+  }, [use3D, appliedAdjacencyMode]);
+
+  const bonusCells = useMemo<BonusCell[]>(() => {
+    if (use3D) return [];
+    const layout = resolveBonusPreset(
+      appliedSettings.bonusPreset,
+      appliedSettings.shape,
+      boardWidth,
+      boardHeight,
+      appliedAdjacencyMode,
+    );
+    return layout
+      .filter(cell => Number.isFinite(cell.x) && Number.isFinite(cell.y))
+      .filter(cell => cell.x >= 0 && cell.x < boardWidth && cell.y >= 0 && cell.y < boardHeight)
+      .filter(cell => {
+        if (!activeMask) return true;
+        return activeMask.has(`${cell.x},${cell.y}`);
+      });
+  }, [
+    use3D,
+    appliedSettings.bonusPreset,
+    appliedSettings.shape,
+    boardWidth,
+    boardHeight,
+    appliedAdjacencyMode,
+    activeMask,
+  ]);
+
+  const bonusOverlay = useMemo(() => {
+    const map = new Map<string, {label: string; tone: 'word' | 'letter'}>();
+    for (const cell of bonusCells) {
+      const key = `${cell.x},${cell.y}`;
+      if (cell.word_mul && cell.word_mul > 1) {
+        map.set(key, {label: `${cell.word_mul}W`, tone: 'word'});
+        continue;
+      }
+      if (cell.letter_mul && cell.letter_mul > 1 && !map.has(key)) {
+        map.set(key, {label: `${cell.letter_mul}L`, tone: 'letter'});
+        continue;
+      }
+      if (cell.tags?.includes('center')) {
+        map.set(key, {label: '★', tone: 'word'});
+      }
+    }
+    return map;
+  }, [bonusCells]);
+
   const cfg = useMemo(() => {
-    const width = clamp(appliedSettings.width, 2, 30);
-    const height = clamp(appliedSettings.height, 2, 30);
-    const layoutDepth = clamp(appliedSettings.depth, 1, 12);
+    const width = boardWidth;
+    const height = boardHeight;
+    const layoutDepth = boardDepth;
 
     const shapeMask = buildShapeMask(width, height, appliedSettings.shape);
     const shapeHasMask = appliedSettings.shape !== 'rect';
@@ -706,9 +647,9 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       free_word_mode: !useDict,
     } as any;
   }, [
-    appliedSettings.width,
-    appliedSettings.height,
-    appliedSettings.depth,
+    boardWidth,
+    boardHeight,
+    boardDepth,
     appliedSettings.rackSize,
     appliedSettings.shape,
     appliedTileCounts,
@@ -795,6 +736,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           const call = callWorker;
           const cfg2 = {...cfg, free_word_mode: !useDict};
           await call('new_game', {config: cfg2, players: 2});
+          await call('set_bonuses', bonusCells);
           if (cancelled) return;
           await call('set_reading_direction', {rtl});
           await call('set_stacking', {
@@ -847,6 +789,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           const mod = await ensureWasmModule();
           const cfg2 = {...cfg, free_word_mode: !useDict};
           const g = mod.new_game(JSON.stringify(cfg2), 2);
+          mod.set_bonuses(g, JSON.stringify(bonusCells));
           mod.set_reading_direction(g, rtl);
           mod.set_stacking(g, stackOn, 7, forbidSame, stackScoring === 'sum');
           mod.set_free_word_mode(g, !useDict);
@@ -932,6 +875,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     callWorker,
     ensureWasmModule,
     terminateWorker,
+    bonusCells,
   ]);
 
   useEffect(() => {
@@ -1446,6 +1390,58 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     return 'orthogonal';
   }, [useHex, useDiag]);
 
+  const tileShape = useMemo<'square' | 'hex'>(() => {
+    if (use3D) return 'square';
+    return appliedAdjacencyMode === 'hex' ? 'hex' : 'square';
+  }, [use3D, appliedAdjacencyMode]);
+
+  const bonusCells = useMemo<BonusCell[]>(() => {
+    if (use3D) return [];
+    const layout = resolveBonusPreset(
+      appliedSettings.bonusPreset,
+      appliedSettings.shape,
+      boardWidth,
+      boardHeight,
+      appliedAdjacencyMode,
+    );
+    return layout
+      .filter(cell => Number.isFinite(cell.x) && Number.isFinite(cell.y))
+      .filter(cell => cell.x >= 0 && cell.x < boardWidth && cell.y >= 0 && cell.y < boardHeight)
+      .filter(cell => {
+        if (!activeMask) return true;
+        return activeMask.has(`${cell.x},${cell.y}`);
+      });
+  }, [
+    use3D,
+    appliedSettings.bonusPreset,
+    appliedSettings.shape,
+    boardWidth,
+    boardHeight,
+    appliedAdjacencyMode,
+    activeMask,
+  ]);
+
+  const bonusOverlay = useMemo(() => {
+    const map = new Map<string, {label: string; tone: 'word' | 'letter'}>();
+    for (const cell of bonusCells) {
+      const key = `${cell.x},${cell.y}`;
+      if (cell.word_mul && cell.word_mul > 1) {
+        map.set(key, {label: `${cell.word_mul}W`, tone: 'word'});
+        continue;
+      }
+      if (cell.letter_mul && cell.letter_mul > 1) {
+        if (!map.has(key)) {
+          map.set(key, {label: `${cell.letter_mul}L`, tone: 'letter'});
+        }
+        continue;
+      }
+      if (cell.tags?.includes('center')) {
+        map.set(key, {label: '★', tone: 'word'});
+      }
+    }
+    return map;
+  }, [bonusCells]);
+
   const handleAdjacencyModeChange = useCallback((mode: string) => {
     const next = mode as 'orthogonal' | 'diagonal' | 'hex';
     setDraftAdjacencyMode(next);
@@ -1786,6 +1782,22 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           showMoves={showMoves}
           onHoverForMoves={handlePreviewHover}
           palette={boardPalette}
+          tileShape={tileShape}
+          renderOverlay={({x, globalY, placement}) => {
+            if (placement) return null;
+            const bonus = bonusOverlay.get(`${x},${globalY}`);
+            if (!bonus) return null;
+            const clip = tileShape === 'hex' ? HEX_POLYGON : undefined;
+            return (
+              <span
+                className={`${styles.bonusChip} ${bonus.tone === 'word' ? styles.bonusChipWord : styles.bonusChipLetter}`}
+                style={clip ? {clipPath: clip} : undefined}
+                data-testid="playground-bonus"
+              >
+                {bonus.label}
+              </span>
+            );
+          }}
         />
       </div>
       {use3D && (
@@ -1900,135 +1912,26 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
 
   const sidebarContent = (
     <>
-      <Panel
-        title="Board Setup"
-        subtitle="Adjust dimensions and masks, then relaunch with Apply."
-        actions={
-          <button type="button" className={styles.applyButton} onClick={handleApplySettings}>
-            Apply configuration
-          </button>
-        }
-        density="compact"
-      >
-        <div className={styles.fieldGrid}>
-          <label className={styles.field}>
-            <span>Width</span>
-            <input
-              type="number"
-              min={2}
-              max={30}
-              value={draftSettings.width}
-              onChange={e => setDraftSettings(prev => ({...prev, width: Number(e.target.value)}))}
-            />
-          </label>
-          <label className={styles.field}>
-            <span>Height</span>
-            <input
-              type="number"
-              min={2}
-              max={30}
-              value={draftSettings.height}
-              onChange={e => setDraftSettings(prev => ({...prev, height: Number(e.target.value)}))}
-            />
-          </label>
-          <label className={styles.field} title="Number of layers when 3D mode is active">
-            <span>Layers</span>
-            <input
-              type="number"
-              min={1}
-              max={12}
-              value={draftSettings.depth}
-              onChange={e => setDraftSettings(prev => ({...prev, depth: Number(e.target.value)}))}
-            />
-          </label>
-          <label className={styles.field}>
-            <span>Rack size</span>
-            <input
-              type="number"
-              min={1}
-              max={14}
-              value={draftSettings.rackSize}
-              onChange={e => setDraftSettings(prev => ({...prev, rackSize: Number(e.target.value)}))}
-            />
-          </label>
-        </div>
-        <label className={styles.field}>
-          <span>Shape</span>
-          <select
-            value={draftSettings.shape}
-            data-testid="board-shape-select"
-            onChange={e => setDraftSettings(prev => ({...prev, shape: e.target.value as BoardShape}))}
-          >
-            <option value="rect">Full grid</option>
-            <option value="diamond">Diamond</option>
-            <option value="cross">Cross</option>
-            <option value="hexagon">Hexagon</option>
-            <option value="triangle">Triangle</option>
-            <option value="ring">Hollow ring</option>
-          </select>
-        </label>
-        <label className={styles.field}>
-          <span>Bonuses</span>
-          <select
-            value={draftSettings.bonusPreset}
-            onChange={e => setDraftSettings(prev => ({...prev, bonusPreset: e.target.value as BonusPreset}))}
-          >
-            <option value="auto">Auto (match shape)</option>
-            <option value="classic">Classic crossword</option>
-            <option value="hex">Hex rings</option>
-            <option value="triangle">Triangle bands</option>
-            <option value="ring">Hollow frame</option>
-            <option value="none">None</option>
-          </select>
-        </label>
-        <div className={styles.helperText}>Layers only apply when 3D mode is enabled.</div>
-        <div className={styles.helperText}>Auto picks a bonus layout tuned to the current shape.</div>
-      </Panel>
-
-      <Panel title="Language & Dictionary" subtitle="Guard rails for move validation." density="compact">
-        <ToggleField label="Use dictionary validation" checked={useDict} onChange={setUseDict} />
-        <label className={styles.field}>
-          <span>Engine</span>
-          <select
-            value={dictEngine}
-            onChange={e => setDictEngine(e.target.value as 'fst' | 'set' | 'dawg' | 'gaddag')}
-            disabled={!useDict || dictLoading}
-          >
-            <option value="fst">FST</option>
-            <option value="set">Set</option>
-            <option value="dawg">DAWG</option>
-            <option value="gaddag">GADDAG</option>
-          </select>
-        </label>
-        <ToggleField
-          label="Anagram commit"
-          checked={useAnagram}
-          onChange={setUseAnagram}
-          title="Reorder placed tiles into any valid anagram when committing the move"
-        />
-        <ToggleField label="RTL reading direction" checked={rtl} onChange={setRtl} />
-        {dictLoading && (
-          <span data-testid="dictionary-loading" className={styles.helperText}>
-            Loading dictionary…
-          </span>
-        )}
-      </Panel>
-
-      <Panel title="Stacking Rules" subtitle="Experiment with layered tiles." density="compact">
-        <ToggleField label="Enable stacking" checked={stackOn} onChange={setStackOn} />
-        {stackOn && (
-          <div className={styles.fieldStack}>
-            <label className={styles.field}>
-              <span>Scoring</span>
-              <select value={stackScoring} onChange={e => setStackScoring(e.target.value as 'top' | 'sum')}>
-                <option value="top">Top only</option>
-                <option value="sum">Sum stack</option>
-              </select>
-            </label>
-            <ToggleField label="Forbid identical overlays" checked={forbidSame} onChange={setForbidSame} />
-          </div>
-        )}
-      </Panel>
+      <BoardSetupPanel draft={draftSettings} onDraftChange={handleDraftSettingsChange} onApply={handleApplySettings} />
+      <LanguagePanel
+        useDict={useDict}
+        onUseDictChange={setUseDict}
+        dictEngine={dictEngine}
+        onDictEngineChange={setDictEngine}
+        useAnagram={useAnagram}
+        onUseAnagramChange={setUseAnagram}
+        rtl={rtl}
+        onRtlChange={setRtl}
+        dictLoading={dictLoading}
+      />
+      <StackingPanel
+        stackOn={stackOn}
+        onStackOnChange={setStackOn}
+        stackScoring={stackScoring}
+        onStackScoringChange={setStackScoring}
+        forbidSame={forbidSame}
+        onForbidSameChange={setForbidSame}
+      />
     </>
   );
 
@@ -2107,22 +2010,26 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
         />
         {cpuThinking && <div className={styles.helperText}>Computing best move…</div>}
         {cpuSuggestion && (
-          <div className={styles.cpuCard}>
-            <div className={styles.cpuCardTitle}>CPU ({cpuSuggestion.difficulty}) suggests</div>
-            <div className={styles.cpuCardBody}>
-              <strong>{cpuSuggestion.word}</strong> — {cpuSuggestion.total} pts
-            </div>
-            <div className={styles.cpuCardMeta}>Raw {cpuSuggestion.score}, leave {cpuSuggestion.rackLeave}, equity {cpuSuggestion.boardEquity}</div>
-          </div>
+          <CpuHintSummary
+            tone="active"
+            title={<>CPU ({cpuSuggestion.difficulty}) suggests</>}
+            word={cpuSuggestion.word}
+            total={<>{cpuSuggestion.total} pts</>}
+            meta={
+              <>Raw {cpuSuggestion.score}, leave {cpuSuggestion.rackLeave}, equity {cpuSuggestion.boardEquity}</>
+            }
+          />
         )}
         {!cpuSuggestion && lastCpu && (
-          <div className={styles.cpuCardMuted}>
-            <div className={styles.cpuCardTitle}>Last hint ({lastCpu.difficulty})</div>
-            <div className={styles.cpuCardBody}>
-              <strong>{lastCpu.word}</strong> — {lastCpu.total} pts
-            </div>
-            <div className={styles.cpuCardMeta}>Raw {lastCpu.score}, leave {lastCpu.rackLeave}, equity {lastCpu.boardEquity}</div>
-          </div>
+          <CpuHintSummary
+            tone="muted"
+            title={<>Last hint ({lastCpu.difficulty})</>}
+            word={lastCpu.word}
+            total={<>{lastCpu.total} pts</>}
+            meta={
+              <>Raw {lastCpu.score}, leave {lastCpu.rackLeave}, equity {lastCpu.boardEquity}</>
+            }
+          />
         )}
         {cpuError && <div className={styles.errorText}>{cpuError}</div>}
       </Panel>

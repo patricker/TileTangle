@@ -349,3 +349,24 @@ export function PlayerList({players, emptyMessage}: PlayerListProps): JSX.Elemen
     </div>
   );
 }
+
+export type CpuHintSummaryProps = {
+  tone?: 'active' | 'muted';
+  title: React.ReactNode;
+  word: React.ReactNode;
+  total: React.ReactNode;
+  meta?: React.ReactNode;
+};
+
+export function CpuHintSummary({tone = 'active', title, word, total, meta}: CpuHintSummaryProps): JSX.Element {
+  const cardClass = tone === 'muted' ? styles.cpuCardMuted : styles.cpuCard;
+  return (
+    <div className={cardClass}>
+      <div className={styles.cpuCardTitle}>{title}</div>
+      <div className={styles.cpuCardBody}>
+        <strong>{word}</strong> — {total}
+      </div>
+      {meta && <div className={styles.cpuCardMeta}>{meta}</div>}
+    </div>
+  );
+}

@@ -29,7 +29,7 @@ const wasmBuildPlugin = (): Plugin<void> => ({
 const config: Config = {
   title: 'TileTangle',
   tagline: 'Universal word‑game engine',
-  favicon: 'img/favicon.ico',
+  favicon: 'img/tiletangle_t.png',
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
   future: {
