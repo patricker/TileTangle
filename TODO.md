@@ -854,6 +854,15 @@ edges = [{a=0,b=1,dir="E"}, {a=0,b=2,dir="SE"}, {a=1,b=2,dir="SW"}]
 - [x] Build a dedicated Godot Playground scene that mirrors the web controls (board presets, adjacency modes, automation, hints, snapshots).
 - [x] Document build/run steps and asset placement for the Godot Playground so the team can launch it locally.
 
+### Unity Playground Parity
+
+- [x] Expose FFI for `set_bonuses`, `set_reading_direction`, `set_stacking`, `snapshot/restore`.
+- [x] Update C# wrapper to mirror new FFI and add helpers.
+- [x] Enhance Unity demo with adjacency (orth/diag/hex) and shape (rect/diamond) toggles.
+- [x] Add 3D layering (depth + Z slice) UI and rendering of current slice.
+- [x] Add undo/redo (client-managed snapshots) and CPU move snapshotting.
+- [x] Auto-apply bonus presets approximating Docs baseline/hex accents.
+
 ---
 
 ## Documentation Pages Checklist (running list)

@@ -26,7 +26,7 @@ Copy the file into your Unity project under `Assets/Plugins/<Platform>/` with th
 
 1. Add `Assets/Plugins/<Platform>/libtiletangle_ffi.(so|dylib|dll)`.
 2. Add `TileTangle.cs` to a suitable folder under your `Assets/` (e.g., `Assets/Scripts/TileTangle/`).
-3. (Optional) Drop in the demo scripts `Examples/BoardDemo.cs`, `Examples/RackTileDraggable.cs`, and `Examples/BoardCellDropTarget.cs`. Attach `BoardDemo` to an empty GameObject in a new scene. It creates a Canvas with a grid, a rack bar, and a score overlay. You can toggle Free Word Mode/Hex geometry, pick an AI difficulty, and fire the **CPU Move** button to watch the Rust solver respond. Drag tiles from the rack onto board cells, then press “Commit Move” (or cancel).
+3. (Optional) Drop in the demo scripts `Examples/BoardDemo.cs`, `Examples/RackTileDraggable.cs`, and `Examples/BoardCellDropTarget.cs`. Attach `BoardDemo` to an empty GameObject in a new scene. It creates a Canvas with a grid, a rack bar, and a score overlay. You can toggle Free Word Mode, reading direction (RTL), stacking, board adjacency (Orth/Diag/Hex), shape masks (Rect/Diamond), and 2D vs 3D layers (with Z slice). Pick an AI difficulty and fire the **CPU Move** button to watch the Rust solver respond. Drag tiles from the rack onto board cells, then press “Commit Move” (or cancel). Undo/Redo is supported via client‑side JSON snapshots.
 4. Call the wrapper directly, or use the demo script:
 
 ```csharp
@@ -50,3 +50,4 @@ See `Examples/ConsoleSmoke.cs` for a runnable snippet (outside Unity) to sanity-
 - Strings are marshaled as UTF-8 null-terminated C strings; free any returned string via `tt_string_free` (handled by the wrapper).
 - Retrieve last error message via `TileTangle.Engine.LastError()` if a call returns `null`.
 - The engine expects a JSON config matching `Appendix A — Sample Configs` in the repo `TODO.md`.
+- Extra FFI available in Unity: `SetBonuses(json)`, `SetReadingDirection(rtl)`, `SetStacking(...)`, `SnapshotStateJson()`, and `RestoreStateJson(json)` to align with the Docs Playground features.

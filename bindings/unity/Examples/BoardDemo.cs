@@ -14,9 +14,19 @@ namespace TileTangle.Examples
     {
         [Header("Board Settings")]
         public int width = 5;
-        public int height = 5;
-        public bool useHexGeometry = true;
+        public int height = 5; // per-layer height
+        public bool use3D = false;
+        public int depth = 1;
+        public int zLayer = 0;
+        public enum AdjacencyMode { Orthogonal, Diagonal, Hex }
+        public AdjacencyMode adjacency = AdjacencyMode.Orthogonal;
+        public enum ShapeMask { Rect, Diamond }
+        public ShapeMask shape = ShapeMask.Rect;
         public bool freeWordMode = true;
+        public bool rtl = false;
+        public bool stackingEnabled = false;
+        public bool sumStackScoring = false;
+        public bool forbidSameOverlay = true;
 
         [Header("UI Settings")]
         public Vector2 cellSize = new Vector2(48, 48);
@@ -41,6 +51,10 @@ namespace TileTangle.Examples
         private Coroutine cpuAutoRoutine;
         private bool cpuBusy;
         private string cpuDifficulty = "medium";
+        private Button undoButton;
+        private Button redoButton;
+        private readonly List<string> history = new();
+        private int historyIndex = -1;
 
         void Start()
         {
@@ -63,14 +77,6 @@ namespace TileTangle.Examples
             engine.SetFreeWordMode(on);
         }
 
-        public void ToggleGeometry(bool hex)
-        {
-            useHexGeometry = hex;
-            BuildOrRebuildEngine();
-            RebuildGrid();
-            RefreshBoard();
-        }
-
         private void BuildOrRebuildEngine()
         {
             var cfg = BuildConfigJson();
@@ -79,6 +85,10 @@ namespace TileTangle.Examples
                 Debug.LogError($"Failed to create game: {Engine.LastError()}");
             }
             engine.SetFreeWordMode(freeWordMode);
+            engine.SetReadingDirection(rtl);
+            engine.SetStacking(stackingEnabled, 7, forbidSameOverlay, sumStackScoring);
+            ApplyAutoBonuses();
+            ResetHistory();
         }
 
         private void BuildGrid()
@@ -111,10 +121,22 @@ namespace TileTangle.Examples
             layout.padding = new RectOffset(12, 12, 6, 6);
             layout.spacing = 12;
 
-            var freeToggle = CreateToggle(bar.transform, "Free Word Mode", freeWordMode);
+            var freeToggle = CreateToggle(bar.transform, "Free Word", freeWordMode);
             freeToggle.onValueChanged.AddListener(ToggleFreeWordMode);
-            var geomToggle = CreateToggle(bar.transform, "Hex Geometry", useHexGeometry);
-            geomToggle.onValueChanged.AddListener(ToggleGeometry);
+            var rtlToggle = CreateToggle(bar.transform, "RTL", rtl);
+            rtlToggle.onValueChanged.AddListener(on => { rtl = on; engine.SetReadingDirection(on); });
+            var stackToggle = CreateToggle(bar.transform, "Stack", stackingEnabled);
+            stackToggle.onValueChanged.AddListener(on => { stackingEnabled = on; engine.SetStacking(stackingEnabled, 7, forbidSameOverlay, sumStackScoring); });
+            var adjBtn = CreateButton(bar.transform, $"Adj: {adjacency}");
+            adjBtn.onClick.AddListener(() => { CycleAdjacency(adjBtn); });
+            var shapeBtn = CreateButton(bar.transform, $"Shape: {shape}");
+            shapeBtn.onClick.AddListener(() => { CycleShape(shapeBtn); });
+            var dimToggle = CreateToggle(bar.transform, "3D", use3D);
+            dimToggle.onValueChanged.AddListener(on => { use3D = on; if (!use3D) { zLayer = 0; depth = 1; } BuildOrRebuildEngine(); RebuildGrid(); RefreshBoard(); });
+            var zDec = CreateButton(bar.transform, "Z-");
+            zDec.onClick.AddListener(() => { SetZLayer(zLayer - 1); });
+            var zInc = CreateButton(bar.transform, "Z+");
+            zInc.onClick.AddListener(() => { SetZLayer(zLayer + 1); });
 
             // Score label
             var scoreGo = new GameObject("Score", typeof(RectTransform), typeof(Text));
@@ -141,6 +163,21 @@ namespace TileTangle.Examples
             rackBar.padding = new RectOffset(12, 12, 10, 10);
             rackBar.spacing = 8;
 
+            // Right rail for moves
+            var rightGo = new GameObject("MovesPanel", typeof(RectTransform), typeof(Image), typeof(VerticalLayoutGroup));
+            rightGo.transform.SetParent(canvas.transform, false);
+            var rightRt = rightGo.GetComponent<RectTransform>();
+            rightRt.anchorMin = new Vector2(1f, 0f);
+            rightRt.anchorMax = new Vector2(1f, 1f);
+            rightRt.pivot = new Vector2(1f, 0.5f);
+            rightRt.sizeDelta = new Vector2(220, -60);
+            rightRt.anchoredPosition = new Vector2(-8, 30);
+            var rightBg = rightGo.GetComponent<Image>();
+            rightBg.color = new Color(0.1f, 0.1f, 0.12f, 0.6f);
+            movesPanel = rightGo.GetComponent<VerticalLayoutGroup>();
+            movesPanel.padding = new RectOffset(8, 8, 8, 8);
+            movesPanel.spacing = 6;
+
             // Commit / Cancel buttons
             var commit = CreateButton(bar.transform, "Commit Move");
             commit.onClick.AddListener(CommitStaged);
@@ -155,6 +192,14 @@ namespace TileTangle.Examples
 
             cpuAutoToggle = CreateToggle(bar.transform, "CPU Opponent", cpuAutoEnabled);
             cpuAutoToggle.onValueChanged.AddListener(SetCpuAuto);
+
+            undoButton = CreateButton(bar.transform, "Undo");
+            undoButton.onClick.AddListener(Undo);
+            redoButton = CreateButton(bar.transform, "Redo");
+            redoButton.onClick.AddListener(Redo);
+
+            movesButton = CreateButton(bar.transform, "Moves");
+            movesButton.onClick.AddListener(FetchMoves);
         }
 
         private void RebuildGrid()
@@ -183,10 +228,12 @@ namespace TileTangle.Examples
 
         private void OnCellClicked(int x, int y)
         {
-            var placements = new[] { new { x, y, kind_id = "A" } };
+            int gy = GlobalY(y);
+            var placements = new[] { new { x, y = gy, kind_id = "A" } };
             if (!string.IsNullOrEmpty(selectedKindId))
-                placements = new[] { new { x, y, kind_id = selectedKindId } };
+                placements = new[] { new { x, y = gy, kind_id = selectedKindId } };
             var json = JsonSerializer.Serialize(placements);
+            PushSnapshot();
             var res = engine.PlayMove(json);
             if (res == null)
                 Debug.LogError($"play_move error: {Engine.LastError()}");
@@ -205,16 +252,19 @@ namespace TileTangle.Examples
                 var doc = JsonDocument.Parse(boardJson);
                 var rows = doc.RootElement.GetProperty("rows");
                 int i = 0;
+                int startY = GlobalY(0);
                 for (int y = 0; y < height; y++)
                 for (int x = 0; x < width; x++)
                 {
-                    var sym = rows[y][x].GetString() ?? string.Empty;
+                    var sym = rows[startY + y][x].GetString() ?? string.Empty;
                     SetCellText(cells[i++], sym);
                 }
-                // Overlay preview/committed highlights
+                // Overlay preview/committed highlights (map to local slice)
                 foreach (var v in hlMain)
                 {
-                    int idx = v.y * width + v.x;
+                    int ly = v.y - startY;
+                    if (ly < 0 || ly >= height) continue;
+                    int idx = ly * width + v.x;
                     if (idx >= 0 && idx < cells.Count)
                     {
                         var img = cells[idx].GetComponent<Image>();
@@ -225,7 +275,9 @@ namespace TileTangle.Examples
                 {
                     foreach (var v in list)
                     {
-                        int idx = v.y * width + v.x;
+                        int ly = v.y - startY;
+                        if (ly < 0 || ly >= height) continue;
+                        int idx = ly * width + v.x;
                         if (idx >= 0 && idx < cells.Count)
                         {
                             var img = cells[idx].GetComponent<Image>();
@@ -511,6 +563,7 @@ namespace TileTangle.Examples
                 {
                     ApplyPreviewHighlights(preview);
                 }
+                PushSnapshot();
                 var res = engine.PlayMove(placementsJson);
                 if (res == null)
                 {
@@ -554,32 +607,74 @@ namespace TileTangle.Examples
                 ["tile_counts"] = new { A = 10, B = 10 },
                 ["free_word_mode"] = freeWordMode,
             };
-            if (useHexGeometry)
+            if (use3D)
             {
+                baseCfg["board_layout"] = new { type = "3d", width, height, depth = Mathf.Max(1, depth) };
+            }
+            else
+            {
+                bool shapeMask = shape == ShapeMask.Diamond;
                 var nodes = new List<object>();
+                var coordToIndex = new Dictionary<string, int>();
                 for (int y = 0; y < height; y++)
-                    for (int x = 0; x < width; x++)
-                        nodes.Add(new { x, y });
-                int Idx(int x, int y) => y * width + x;
+                for (int x = 0; x < width; x++)
+                {
+                    if (shapeMask && !IsActiveInMask(x, y)) continue;
+                    coordToIndex[$"{x},{y}"] = nodes.Count;
+                    nodes.Add(new { x, y });
+                }
                 var edges = new List<object>();
-                void TryEdge(int x1, int y1, int x2, int y2, string dir)
+                void AddEdge(int x1, int y1, int x2, int y2, string dir)
                 {
                     if (x2 < 0 || x2 >= width || y2 < 0 || y2 >= height) return;
-                    edges.Add(new { a = Idx(x1, y1), b = Idx(x2, y2), dir });
+                    if (shapeMask && (!IsActiveInMask(x1, y1) || !IsActiveInMask(x2, y2))) return;
+                    if (!coordToIndex.TryGetValue($"{x1},{y1}", out var a)) return;
+                    if (!coordToIndex.TryGetValue($"{x2},{y2}", out var b)) return;
+                    edges.Add(new { a, b, dir });
                 }
                 for (int y = 0; y < height; y++)
                 for (int x = 0; x < width; x++)
                 {
-                    bool even = (y % 2) == 0;
-                    TryEdge(x, y, x + 1, y, "E");
-                    TryEdge(x, y, x + (even ? 0 : 1), y - 1, "NE");
-                    TryEdge(x, y, x + (even ? 0 : 1), y + 1, "SE");
+                    if (shapeMask && !IsActiveInMask(x, y)) continue;
+                    if (adjacency == AdjacencyMode.Hex)
+                    {
+                        bool even = (y % 2) == 0;
+                        int eastShift = even ? 0 : 1;
+                        int westShift = even ? -1 : 0;
+                        AddEdge(x, y, x + 1, y, "E");
+                        AddEdge(x, y, x - 1, y, "W");
+                        AddEdge(x, y, x + eastShift, y - 1, "NE");
+                        AddEdge(x, y, x + westShift, y - 1, "NW");
+                        AddEdge(x, y, x + eastShift, y + 1, "SE");
+                        AddEdge(x, y, x + westShift, y + 1, "SW");
+                    }
+                    else if (adjacency == AdjacencyMode.Diagonal)
+                    {
+                        AddEdge(x, y, x + 1, y, "E");
+                        AddEdge(x, y, x - 1, y, "W");
+                        AddEdge(x, y, x, y - 1, "N");
+                        AddEdge(x, y, x, y + 1, "S");
+                        AddEdge(x, y, x + 1, y - 1, "NE");
+                        AddEdge(x, y, x - 1, y - 1, "NW");
+                        AddEdge(x, y, x + 1, y + 1, "SE");
+                        AddEdge(x, y, x - 1, y + 1, "SW");
+                    }
+                    else
+                    {
+                        AddEdge(x, y, x + 1, y, "E");
+                        AddEdge(x, y, x - 1, y, "W");
+                        AddEdge(x, y, x, y - 1, "N");
+                        AddEdge(x, y, x, y + 1, "S");
+                    }
                 }
-                baseCfg["board_layout"] = new { width, height, type = "graph", nodes, edges };
-            }
-            else
-            {
-                baseCfg["board_layout"] = new { width, height };
+                if (adjacency == AdjacencyMode.Orthogonal && !shapeMask)
+                {
+                    baseCfg["board_layout"] = new { width, height };
+                }
+                else
+                {
+                    baseCfg["board_layout"] = new { width, height, type = "graph", nodes, edges };
+                }
             }
             return JsonSerializer.Serialize(baseCfg);
         }
@@ -743,7 +838,7 @@ namespace TileTangle.Examples
         private void CommitStaged()
         {
             if (staged.Count == 0) return;
-            var placements = staged.ConvertAll(p => new { x = p.x, y = p.y, kind_id = p.kindId });
+            var placements = staged.ConvertAll(p => new { x = p.x, y = GlobalY(p.y), kind_id = p.kindId });
             var json = JsonSerializer.Serialize(placements);
             var res = engine.PlayMove(json);
             if (res == null)
@@ -810,6 +905,254 @@ namespace TileTangle.Examples
             {
                 statusDetail = string.Empty;
                 RenderStatus();
+            }
+        }
+
+        // --- Parity helpers ---
+        private int GlobalY(int localY) => use3D ? (zLayer * height + localY) : localY;
+
+        private void SetZLayer(int next)
+        {
+            if (!use3D) return;
+            int maxLayer = Math.Max(0, depth - 1);
+            zLayer = Mathf.Clamp(next, 0, maxLayer);
+            RefreshBoard();
+        }
+
+        private void CycleAdjacency(Button labelBtn)
+        {
+            adjacency = adjacency switch
+            {
+                AdjacencyMode.Orthogonal => AdjacencyMode.Diagonal,
+                AdjacencyMode.Diagonal => AdjacencyMode.Hex,
+                _ => AdjacencyMode.Orthogonal,
+            };
+            labelBtn.GetComponentInChildren<Text>().text = $"Adj: {adjacency}";
+            BuildOrRebuildEngine();
+            RebuildGrid();
+            RefreshBoard();
+        }
+
+        private void CycleShape(Button labelBtn)
+        {
+            shape = shape == ShapeMask.Rect ? ShapeMask.Diamond : ShapeMask.Rect;
+            labelBtn.GetComponentInChildren<Text>().text = $"Shape: {shape}";
+            BuildOrRebuildEngine();
+            RebuildGrid();
+            RefreshBoard();
+        }
+
+        private void ResetHistory()
+        {
+            history.Clear();
+            historyIndex = -1;
+            PushSnapshot();
+        }
+
+        private void PushSnapshot()
+        {
+            var snap = engine.SnapshotStateJson();
+            if (string.IsNullOrEmpty(snap)) return;
+            if (historyIndex >= 0 && historyIndex < history.Count - 1)
+            {
+                history.RemoveRange(historyIndex + 1, history.Count - (historyIndex + 1));
+            }
+            history.Add(snap);
+            historyIndex = history.Count - 1;
+        }
+
+        private void Undo()
+        {
+            if (history.Count == 0) return;
+            if (historyIndex <= 0) return;
+            historyIndex--;
+            if (engine.RestoreStateJson(history[historyIndex]))
+            {
+                staged.Clear(); hlMain.Clear(); hlCross.Clear();
+                RefreshBoard();
+                RefreshRack();
+                SyncScoresAndMaybeTriggerCpu();
+            }
+        }
+
+        private void Redo()
+        {
+            if (history.Count == 0) return;
+            if (historyIndex >= history.Count - 1) return;
+            historyIndex++;
+            if (engine.RestoreStateJson(history[historyIndex]))
+            {
+                staged.Clear(); hlMain.Clear(); hlCross.Clear();
+                RefreshBoard();
+                RefreshRack();
+                SyncScoresAndMaybeTriggerCpu();
+            }
+        }
+
+        private void ApplyAutoBonuses()
+        {
+            try
+            {
+                var bonuses = ResolveAutoBonuses();
+                var json = JsonSerializer.Serialize(bonuses);
+                engine.SetBonuses(json);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"Failed to set bonuses: {e.Message}");
+            }
+        }
+
+        private struct BonusCell { public int x; public int y; public int? letter_mul; public int? word_mul; public string[]? tags; }
+
+        private BonusCell[] ResolveAutoBonuses()
+        {
+            var list = new List<BonusCell>();
+            int W = width; int H = height;
+            int centerX = (W - 1) / 2;
+            int centerY = (H - 1) / 2;
+            for (int y = 0; y < H; y++)
+            {
+                for (int x = 0; x < W; x++)
+                {
+                    if (!IsActiveInMask(x, y)) continue;
+                    int edgeDist = Math.Min(Math.Min(x, W - 1 - x), Math.Min(y, H - 1 - y));
+                    if (edgeDist == 0)
+                    {
+                        list.Add(new BonusCell { x = x, y = GlobalY(y), word_mul = 3 });
+                        continue;
+                    }
+                    if (edgeDist == 1)
+                    {
+                        list.Add(new BonusCell { x = x, y = GlobalY(y), word_mul = 2 });
+                        continue;
+                    }
+                    int manhattanCenter = Math.Abs(x - centerX) + Math.Abs(y - centerY);
+                    if (manhattanCenter == 0)
+                    {
+                        continue;
+                    }
+                    if (manhattanCenter % 4 == 0)
+                    {
+                        list.Add(new BonusCell { x = x, y = GlobalY(y), letter_mul = 3 });
+                    }
+                    else if (((x + y) % 3) == 0)
+                    {
+                        list.Add(new BonusCell { x = x, y = GlobalY(y), letter_mul = 2 });
+                    }
+                }
+            }
+            int mx = Mathf.RoundToInt(centerX);
+            int my = Mathf.RoundToInt(centerY);
+            if (mx >= 0 && mx < W && my >= 0 && my < H)
+            {
+                list.Add(new BonusCell { x = mx, y = GlobalY(my), word_mul = 2, tags = new[] { "center" } });
+            }
+            if (adjacency == AdjacencyMode.Hex || shape == ShapeMask.Diamond)
+            {
+                for (int y = 0; y < H; y++)
+                {
+                    for (int x = 0; x < W; x++)
+                    {
+                        if (!IsActiveInMask(x, y)) continue;
+                        float axialQ = x - centerX;
+                        float axialR = y - centerY;
+                        float axialS = -axialQ - axialR;
+                        float radius = Math.Max(Math.Max(Math.Abs(axialQ), Math.Abs(axialR)), Math.Abs(axialS));
+                        if (Math.Abs(radius - 2f) < 1e-6)
+                        {
+                            list.Add(new BonusCell { x = x, y = GlobalY(y), letter_mul = 3, tags = new[] { "hex" } });
+                        }
+                        else if (Math.Abs(radius - 3f) < 1e-6)
+                        {
+                            list.Add(new BonusCell { x = x, y = GlobalY(y), letter_mul = 2, tags = new[] { "hex" } });
+                        }
+                    }
+                }
+            }
+            return list.ToArray();
+        }
+
+        private bool IsActiveInMask(int x, int y)
+        {
+            if (shape == ShapeMask.Rect) return true;
+            int cx = (width - 1) / 2; int cy = (height - 1) / 2;
+            int r = Math.Min(cx, cy);
+            return Math.Abs(x - cx) + Math.Abs(y - cy) <= r;
+        }
+
+        private void FetchMoves()
+        {
+            if (use3D)
+            {
+                statusDetail = "3D move generation not available";
+                RenderStatus();
+                return;
+            }
+            try
+            {
+                var json = engine.GenerateMoves(7, 30);
+                foreach (var b in moveButtons) Destroy(b.gameObject);
+                moveButtons.Clear();
+                if (string.IsNullOrEmpty(json)) return;
+                using var doc = JsonDocument.Parse(json);
+                foreach (var el in doc.RootElement.EnumerateArray())
+                {
+                    var word = el.TryGetProperty("word", out var wEl) && wEl.ValueKind == JsonValueKind.String ? wEl.GetString() ?? "" : "";
+                    var score = el.TryGetProperty("score", out var sEl) && sEl.ValueKind == JsonValueKind.Number ? sEl.GetInt32() : 0;
+                    var btn = CreateButton(movesPanel.transform, $"{word} (+{score})");
+                    // Capture element by value
+                    var placements = el.GetProperty("placements").Clone();
+                    btn.onClick.AddListener(() => ApplyGeneratedMove(placements));
+                    moveButtons.Add(btn);
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"generate_moves failed: {e.Message}");
+            }
+        }
+
+        private void ApplyGeneratedMove(JsonElement placements)
+        {
+            try
+            {
+                var list = new List<Dictionary<string, object?>>();
+                foreach (var p in placements.EnumerateArray())
+                {
+                    var entry = new Dictionary<string, object?>
+                    {
+                        ["x"] = p.GetProperty("x").GetInt32(),
+                        ["y"] = p.GetProperty("y").GetInt32(),
+                        ["kind_id"] = p.GetProperty("kind_id").GetString() ?? string.Empty,
+                    };
+                    if (p.TryGetProperty("mark", out var mEl) && mEl.ValueKind == JsonValueKind.String)
+                    {
+                        entry["mark"] = mEl.GetString();
+                    }
+                    list.Add(entry);
+                }
+                var placementsJson = JsonSerializer.Serialize(list);
+                PushSnapshot();
+                var preview = engine.PreviewMoveJson(placementsJson);
+                if (!string.IsNullOrEmpty(preview)) ApplyPreviewHighlights(preview);
+                var res = engine.PlayMove(placementsJson);
+                if (res == null)
+                {
+                    Debug.LogError($"play_move error: {Engine.LastError()}");
+                }
+                else
+                {
+                    UpdateScoreOverlay(res);
+                }
+                staged.Clear();
+                RefreshBoard();
+                RefreshRack();
+                SyncScoresAndMaybeTriggerCpu();
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"ApplyGeneratedMove failed: {e.Message}");
             }
         }
     }

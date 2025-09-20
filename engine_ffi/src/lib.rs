@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_uint};
+use std::slice;
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<String>> = RefCell::new(None);
@@ -102,6 +103,18 @@ struct JsPlacement {
     x: i32,
     y: i32,
     kind_id: String,
+}
+
+#[derive(Deserialize)]
+struct JsBonusCell {
+    x: i32,
+    y: i32,
+    #[serde(default)]
+    letter_mul: Option<i8>,
+    #[serde(default)]
+    word_mul: Option<i8>,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 /// Returns null on error; call `tt_last_error_message()` to retrieve the error string.
@@ -407,6 +420,62 @@ pub extern "C" fn tt_get_rack(game: *const GameHandle) -> *mut c_char {
         }));
     }
     take_cstring(serde_json::to_string(&arr).unwrap())
+}
+
+/// Set board bonuses from JSON array of cells: [{x,y,letter_mul?,word_mul?,tags?}]
+/// Returns 1 on success, 0 on error (see tt_last_error_message()).
+#[no_mangle]
+pub extern "C" fn tt_set_bonuses(game: *mut GameHandle, bonuses_json: *const c_char) -> c_uint {
+    LAST_ERROR.with(|e| *e.borrow_mut() = None);
+    if game.is_null() {
+        set_error("game is null");
+        return 0;
+    }
+    if bonuses_json.is_null() {
+        set_error("bonuses_json is null");
+        return 0;
+    }
+    let g = unsafe { &mut *(game as *mut FfiGame) };
+    let cstr = unsafe { CStr::from_ptr(bonuses_json) };
+    let json_str = match cstr.to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_error("bonuses_json is not valid UTF-8");
+            return 0;
+        }
+    };
+    let cells: Vec<JsBonusCell> = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(format!("bonuses parse error: {}", e));
+            return 0;
+        }
+    };
+    // Clear and set
+    g.state.board.bonuses.clear();
+    for bc in cells.into_iter() {
+        let Some(id) = g
+            .state
+            .board
+            .geom
+            .to_cell_id(engine::Coord2D { x: bc.x, y: bc.y })
+        else {
+            // Ignore out-of-bounds silently
+            continue;
+        };
+        let mut bonus = engine::Bonus::default();
+        if let Some(lm) = bc.letter_mul {
+            bonus.letter_mul = lm;
+        }
+        if let Some(wm) = bc.word_mul {
+            bonus.word_mul = wm;
+        }
+        for t in bc.tags.into_iter() {
+            bonus.tags.insert(t);
+        }
+        g.state.board.bonuses.insert(id, bonus);
+    }
+    1
 }
 
 /// Returns players' scores and to_move index: { players:[{score}], to_move }
@@ -812,6 +881,58 @@ pub extern "C" fn tt_best_move(
     take_cstring(val.to_string())
 }
 
+/// Snapshot current game state as JSON string. Returns null on error.
+#[no_mangle]
+pub extern "C" fn tt_snapshot_state_json(game: *const GameHandle) -> *mut c_char {
+    if game.is_null() {
+        set_error("game is null");
+        return std::ptr::null_mut();
+    }
+    let g = unsafe { &*(game as *const FfiGame) };
+    match g.state.snapshot_json() {
+        Ok(s) => take_cstring(s),
+        Err(e) => {
+            set_error(format!("{}", e));
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Restore game state from a JSON snapshot. Returns 1 on success, 0 on error.
+#[no_mangle]
+pub extern "C" fn tt_restore_state_json(game: *mut GameHandle, snapshot_json: *const c_char) -> c_uint {
+    LAST_ERROR.with(|e| *e.borrow_mut() = None);
+    if game.is_null() {
+        set_error("game is null");
+        return 0;
+    }
+    if snapshot_json.is_null() {
+        set_error("snapshot_json is null");
+        return 0;
+    }
+    let g = unsafe { &mut *(game as *mut FfiGame) };
+    let cstr = unsafe { CStr::from_ptr(snapshot_json) };
+    let snap = match cstr.to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_error("snapshot_json is not valid UTF-8");
+            return 0;
+        }
+    };
+    match engine::GameState::from_snapshot_json(snap) {
+        Ok(mut s) => {
+            // Preserve dictionary (none by default for FFI) and keep rules separate
+            s.dictionary = g.state.dictionary.take();
+            g.state = s;
+            1
+        }
+        Err(e) => {
+            set_error(format!("{}", e));
+            0
+        }
+    }
+}
+
 /// Free a C string previously returned by this library.
 #[no_mangle]
 pub extern "C" fn tt_string_free(ptr: *mut c_char) {
@@ -850,6 +971,168 @@ pub extern "C" fn tt_set_free_word_mode(game: *mut GameHandle, on: c_uint) {
     }
     let g = unsafe { &mut *(game as *mut FfiGame) };
     g.rules.free_word_mode = on != 0;
+}
+
+/// Set reading direction: rtl != 0 => RTL, otherwise LTR
+#[no_mangle]
+pub extern "C" fn tt_set_reading_direction(game: *mut GameHandle, rtl: c_uint) {
+    if game.is_null() {
+        return;
+    }
+    let g = unsafe { &mut *(game as *mut FfiGame) };
+    g.rules.reading_dir = if rtl != 0 {
+        engine::ReadingDirection::RTL
+    } else {
+        engine::ReadingDirection::LTR
+    };
+}
+
+/// Configure stacking rules.
+/// enabled!=0 to enable stacking; sum_scoring!=0 for sum-of-stack scoring; forbid_same!=0 to forbid same symbol overlays.
+#[no_mangle]
+pub extern "C" fn tt_set_stacking(
+    game: *mut GameHandle,
+    enabled: c_uint,
+    max_height: c_uint,
+    forbid_same: c_uint,
+    sum_scoring: c_uint,
+) {
+    if game.is_null() {
+        return;
+    }
+    let g = unsafe { &mut *(game as *mut FfiGame) };
+    g.rules.stacking_enabled = enabled != 0;
+    g.rules.stacking_max_height = max_height as usize;
+    g.rules.forbid_same_symbol_overlay = forbid_same != 0;
+    g.rules.stacking_scoring = if sum_scoring != 0 {
+        engine::StackScoring::SumStack
+    } else {
+        engine::StackScoring::TopOnly
+    };
+}
+
+/// Set dictionary from text (newline-separated words). `kind` in {"fst","set","dawg","gaddag"}.
+/// `case_fold` non-zero enables case-folding.
+#[no_mangle]
+pub extern "C" fn tt_set_dictionary_from_text(
+    game: *mut GameHandle,
+    kind: *const c_char,
+    text: *const c_char,
+    case_fold: c_uint,
+) -> c_uint {
+    LAST_ERROR.with(|e| *e.borrow_mut() = None);
+    if game.is_null() {
+        set_error("game is null");
+        return 0;
+    }
+    if kind.is_null() || text.is_null() {
+        set_error("null pointer");
+        return 0;
+    }
+    let g = unsafe { &mut *(game as *mut FfiGame) };
+    let kind_c = unsafe { CStr::from_ptr(kind) };
+    let text_c = unsafe { CStr::from_ptr(text) };
+    let kind_str = match kind_c.to_str() {
+        Ok(s) => s.to_ascii_lowercase(),
+        Err(_) => {
+            set_error("kind is not valid UTF-8");
+            return 0;
+        }
+    };
+    let text_str = match text_c.to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_error("text is not valid UTF-8");
+            return 0;
+        }
+    };
+    let case_fold = case_fold != 0;
+    let words: Vec<String> = text_str
+        .lines()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    let dict: Box<dyn engine::Dictionary + Send + Sync> = match kind_str.as_str() {
+        "set" => Box::new(engine::SetDictionary::from_words(words, case_fold)),
+        "dawg" => Box::new(engine::DawgDictionary::from_words(words, case_fold)),
+        "gaddag" => {
+            let opts = engine::DictionaryOptions {
+                case_fold,
+                ..engine::DictionaryOptions::default()
+            };
+            Box::new(engine::GaddagDictionary::from_words_opts(words, opts))
+        }
+        _ => Box::new(engine::FstDictionary::from_words(words, case_fold)),
+    };
+    g.state.dictionary = Some(dict);
+    1
+}
+
+/// Set dictionary from FST bytes buffer.
+#[no_mangle]
+pub extern "C" fn tt_set_dictionary_from_fst_bytes(
+    game: *mut GameHandle,
+    bytes: *const u8,
+    len: usize,
+    case_fold: c_uint,
+) -> c_uint {
+    LAST_ERROR.with(|e| *e.borrow_mut() = None);
+    if game.is_null() {
+        set_error("game is null");
+        return 0;
+    }
+    if bytes.is_null() {
+        set_error("bytes is null");
+        return 0;
+    }
+    let g = unsafe { &mut *(game as *mut FfiGame) };
+    let slice = unsafe { slice::from_raw_parts(bytes, len) };
+    match engine::FstDictionary::from_bytes(slice, case_fold != 0) {
+        Ok(dict) => {
+            g.state.dictionary = Some(Box::new(dict));
+            1
+        }
+        Err(e) => {
+            set_error(format!("{}", e));
+            0
+        }
+    }
+}
+
+/// Generate naive moves based on current rack. Returns JSON array of candidates.
+#[no_mangle]
+pub extern "C" fn tt_generate_moves(
+    game: *const GameHandle,
+    max_len: c_uint,
+    limit: c_uint,
+) -> *mut c_char {
+    if game.is_null() {
+        set_error("game is null");
+        return std::ptr::null_mut();
+    }
+    let g = unsafe { &*(game as *const FfiGame) };
+    let pid = g.state.to_move.0 as usize;
+    let rack_kinds: Vec<String> = g.state.players[pid]
+        .rack
+        .tiles
+        .iter()
+        .map(|t| t.kind_id.clone())
+        .collect();
+    let cands = engine::generate_moves(&g.state, &g.rules, &rack_kinds, max_len as usize);
+    let mut out = Vec::new();
+    for cm in cands.into_iter().take(limit as usize) {
+        let placements: Vec<serde_json::Value> = cm
+            .placements
+            .iter()
+            .map(|(cid, t)| {
+                let c = g.state.board.geom.from_cell_id(*cid).unwrap();
+                serde_json::json!({ "x": c.x, "y": c.y, "kind_id": t.kind_id, "mark": t.mark })
+            })
+            .collect();
+        out.push(serde_json::json!({ "word": cm.word, "score": cm.score, "placements": placements }));
+    }
+    take_cstring(serde_json::to_string(&out).unwrap())
 }
 
 #[cfg(test)]

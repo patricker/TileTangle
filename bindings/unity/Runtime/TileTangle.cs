@@ -32,6 +32,9 @@ namespace TileTangle
         public static extern IntPtr tt_best_move(IntPtr game, IntPtr difficulty, ulong seed, uint seedIsSome);
 
         [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern uint tt_set_bonuses(IntPtr game, IntPtr bonusesJson);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
         public static extern void tt_string_free(IntPtr ptr);
 
         [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
@@ -39,6 +42,27 @@ namespace TileTangle
 
         [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
         public static extern void tt_set_free_word_mode(IntPtr game, uint on);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void tt_set_reading_direction(IntPtr game, uint rtl);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void tt_set_stacking(IntPtr game, uint enabled, uint maxHeight, uint forbidSame, uint sumScoring);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr tt_snapshot_state_json(IntPtr game);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern uint tt_restore_state_json(IntPtr game, IntPtr snapshotJson);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern uint tt_set_dictionary_from_text(IntPtr game, IntPtr kind, IntPtr text, uint caseFold);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern uint tt_set_dictionary_from_fst_bytes(IntPtr game, IntPtr bytes, UIntPtr len, uint caseFold);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr tt_generate_moves(IntPtr game, uint maxLen, uint limit);
     }
 
     public sealed class Engine : IDisposable
@@ -129,6 +153,21 @@ namespace TileTangle
             }
         }
 
+        public bool SetBonuses(string bonusesJson)
+        {
+            EnsureHandle();
+            var ptr = StringToUtf8(bonusesJson);
+            try
+            {
+                var ok = Native.tt_set_bonuses(handle, ptr);
+                return ok != 0u;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(ptr);
+            }
+        }
+
         public static string? LastError()
         {
             var ptr = Native.tt_last_error_message();
@@ -150,6 +189,81 @@ namespace TileTangle
         {
             EnsureHandle();
             Native.tt_set_free_word_mode(handle, on ? 1u : 0u);
+        }
+
+        public void SetReadingDirection(bool rtl)
+        {
+            EnsureHandle();
+            Native.tt_set_reading_direction(handle, rtl ? 1u : 0u);
+        }
+
+        public void SetStacking(bool enabled, uint maxHeight = 7, bool forbidSame = true, bool sumStackScoring = false)
+        {
+            EnsureHandle();
+            Native.tt_set_stacking(handle, enabled ? 1u : 0u, maxHeight, forbidSame ? 1u : 0u, sumStackScoring ? 1u : 0u);
+        }
+
+        public string? SnapshotStateJson()
+        {
+            EnsureHandle();
+            var ptr = Native.tt_snapshot_state_json(handle);
+            return TakeString(ptr);
+        }
+
+        public bool RestoreStateJson(string snapshotJson)
+        {
+            EnsureHandle();
+            var sPtr = StringToUtf8(snapshotJson);
+            try
+            {
+                var ok = Native.tt_restore_state_json(handle, sPtr);
+                return ok != 0u;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(sPtr);
+            }
+        }
+
+        public bool SetDictionaryFromText(string kind, string text, bool caseFold = true)
+        {
+            EnsureHandle();
+            var kindPtr = StringToUtf8(kind);
+            var textPtr = StringToUtf8(text);
+            try
+            {
+                var ok = Native.tt_set_dictionary_from_text(handle, kindPtr, textPtr, caseFold ? 1u : 0u);
+                return ok != 0u;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(kindPtr);
+                Marshal.FreeHGlobal(textPtr);
+            }
+        }
+
+        public bool SetDictionaryFromFstBytes(byte[] bytes, bool caseFold = true)
+        {
+            EnsureHandle();
+            if (bytes == null || bytes.Length == 0) return false;
+            var unmanaged = Marshal.AllocHGlobal(bytes.Length);
+            try
+            {
+                Marshal.Copy(bytes, 0, unmanaged, bytes.Length);
+                var ok = Native.tt_set_dictionary_from_fst_bytes(handle, unmanaged, (UIntPtr)bytes.Length, caseFold ? 1u : 0u);
+                return ok != 0u;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(unmanaged);
+            }
+        }
+
+        public string? GenerateMoves(uint maxLen, uint limit)
+        {
+            EnsureHandle();
+            var ptr = Native.tt_generate_moves(handle, maxLen, limit);
+            return TakeString(ptr);
         }
 
         private void EnsureHandle()

@@ -157,7 +157,7 @@ static func build_overlay(width: int, height: int, mask: Dictionary, adjacency: 
         index_for[key] = idx
         idx += 1
   var edges := []
-  func add_edge(ax: int, ay: int, bx: int, by: int, dir: String) -> void:
+  var add_edge = func(ax: int, ay: int, bx: int, by: int, dir: String) -> void:
     var key_a := _key(ax, ay)
     var key_b := _key(bx, by)
     if not index_for.has(key_a) or not index_for.has(key_b):

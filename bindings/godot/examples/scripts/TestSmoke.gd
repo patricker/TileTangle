@@ -18,8 +18,8 @@ func run_tests():
         "free_word_mode": true,
     }
     assert(e.new_game(JSON.stringify(cfg), 2))
-    var score := e.play_move('[{"x":1,"y":1,"kind_id":"A"}]')
+    var score: String = e.play_move('[{"x":1,"y":1,"kind_id":"A"}]')
     assert(score != "")
-    var board := e.get_board_json()
+    var board: String = e.get_board_json()
     assert(board != "")
     print("Godot smoke tests passed")

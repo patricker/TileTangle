@@ -1,5 +1,6 @@
 [configuration]
 entry_symbol = "gdext_rust_init"
+compatibility_minimum = "4.3"
 
 [libraries]
 linux.debug = "res://bin/linux/libtiletangle_godot.so"
@@ -8,4 +9,3 @@ windows.debug = "res://bin/windows/tiletangle_godot.dll"
 windows.release = "res://bin/windows/tiletangle_godot.dll"
 macos.debug = "res://bin/macos/libtiletangle_godot.dylib"
 macos.release = "res://bin/macos/libtiletangle_godot.dylib"
-

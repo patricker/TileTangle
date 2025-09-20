@@ -58,7 +58,7 @@ func _rebuild_cells() -> void:
       var key := _key(x, y)
       if not mask.has(key):
         continue
-      var cell := PlaygroundBoardCell.new()
+      var cell: PlaygroundBoardCell = PlaygroundBoardCell.new()
       cell.set_coord(x, y)
       cell.set_shape("hex" if hex_mode else "square")
       cell.set_bonus(bonus_map.get(key, {}))
@@ -71,7 +71,7 @@ func _rebuild_cells() -> void:
 
 func _refresh_cells() -> void:
   for key in cells.keys():
-    var cell := cells[key]
+    var cell: PlaygroundBoardCell = cells[key]
     if board_state.has(key):
       cell.apply_tile(board_state[key])
     else:
@@ -119,17 +119,17 @@ func _position_cells() -> void:
     _position_grid_cells()
 
 func _position_grid_cells() -> void:
-  var width := float(layout.get("width", 0))
-  var height := float(layout.get("height", 0))
+  var width: float = float(layout.get("width", 0))
+  var height: float = float(layout.get("height", 0))
   if width <= 0 or height <= 0:
     return
-  var size := get_size()
-  var cell := min(size.x / width, size.y / height)
-  var board_w := cell * width
-  var board_h := cell * height
-  var origin := Vector2((size.x - board_w) * 0.5, (size.y - board_h) * 0.5)
+  var size: Vector2 = get_size()
+  var cell: float = min(size.x / width, size.y / height)
+  var board_w: float = cell * width
+  var board_h: float = cell * height
+  var origin: Vector2 = Vector2((size.x - board_w) * 0.5, (size.y - board_h) * 0.5)
   for key in cells.keys():
-    var parts := key.split(",")
+    var parts: Array = key.split(",")
     var x := int(parts[0])
     var y := int(parts[1])
     var node: PlaygroundBoardCell = cells[key]
@@ -138,26 +138,26 @@ func _position_grid_cells() -> void:
     node.set_shape("square")
 
 func _position_hex_cells() -> void:
-  var width := float(layout.get("width", 0))
-  var height := float(layout.get("height", 0))
+  var width: float = float(layout.get("width", 0))
+  var height: float = float(layout.get("height", 0))
   if width <= 0 or height <= 0:
     return
-  var size := get_size()
-  var sqrt3 := sqrt(3.0)
-  var radius_w := size.x / (width * sqrt3 + sqrt3 * 0.5)
-  var radius_h := size.y / (radius_height(height))
-  var radius := min(radius_w, radius_h)
-  var hex_w := sqrt3 * radius
-  var hex_h := radius * 2.0
-  var board_w := hex_w * width + (hex_w * 0.5)
-  var board_h := hex_h + radius * 1.5 * max(height - 1.0, 0.0)
-  var origin := Vector2((size.x - board_w) * 0.5, (size.y - board_h) * 0.5)
+  var size: Vector2 = get_size()
+  var sqrt3: float = sqrt(3.0)
+  var radius_w: float = size.x / (width * sqrt3 + sqrt3 * 0.5)
+  var radius_h: float = size.y / (radius_height(height))
+  var radius: float = min(radius_w, radius_h)
+  var hex_w: float = sqrt3 * radius
+  var hex_h: float = radius * 2.0
+  var board_w: float = hex_w * width + (hex_w * 0.5)
+  var board_h: float = hex_h + radius * 1.5 * max(height - 1.0, 0.0)
+  var origin: Vector2 = Vector2((size.x - board_w) * 0.5, (size.y - board_h) * 0.5)
   for key in cells.keys():
-    var parts := key.split(",")
+    var parts: Array = key.split(",")
     var x := int(parts[0])
     var y := int(parts[1])
     var node: PlaygroundBoardCell = cells[key]
-    var offset := (y % 2) * (hex_w * 0.5)
+    var offset: float = (y % 2) * (hex_w * 0.5)
     var center := Vector2(hex_w * x + offset + hex_w * 0.5, radius + 1.5 * radius * y)
     var top_left := origin + center - Vector2(hex_w * 0.5, hex_h * 0.5)
     node.position = top_left

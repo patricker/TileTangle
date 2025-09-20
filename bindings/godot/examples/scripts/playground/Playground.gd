@@ -40,8 +40,8 @@ func _ready() -> void:
   rng.randomize()
   eng = _instantiate_engine()
   if eng == null:
-    push_error("WordEngine extension missing")
-    return
+	push_error("WordEngine extension missing")
+	return
   _build_ui()
   _populate_presets()
   _apply_preset_values("classic")
@@ -104,7 +104,7 @@ func _build_ui() -> void:
 
   shape_selector = OptionButton.new()
   for shape in PlaygroundConfig.BOARD_SHAPES:
-    shape_selector.add_item(shape.capitalize())
+	shape_selector.add_item(shape.capitalize())
   left.add_child(_wrap_field("Board shape", shape_selector))
 
   adjacency_selector = OptionButton.new()
@@ -115,7 +115,7 @@ func _build_ui() -> void:
 
   bonus_selector = OptionButton.new()
   for preset in ["Auto", "Classic", "Hex", "Triangle", "Ring", "None"]:
-    bonus_selector.add_item(preset)
+	bonus_selector.add_item(preset)
   left.add_child(_wrap_field("Bonuses", bonus_selector))
 
   rack_size_spin = SpinBox.new()
@@ -221,7 +221,7 @@ func _build_ui() -> void:
 
 func _instantiate_engine():
   if not ClassDB.class_exists("WordEngine"):
-    return null
+	return null
   return ClassDB.instantiate("WordEngine")
 
 func _wrap_field(label_text: String, node: Control) -> VBoxContainer:
@@ -245,8 +245,8 @@ func _populate_presets() -> void:
   var opts := PlaygroundConfig.preset_options()
   opts.sort_custom(func(a, b): return String(a.label).naturalnocasecmp_to(String(b.label)))
   for entry in opts:
-    preset_selector.add_item(entry.label)
-    preset_selector.set_item_metadata(preset_selector.item_count - 1, entry.value)
+	preset_selector.add_item(entry.label)
+	preset_selector.set_item_metadata(preset_selector.item_count - 1, entry.value)
 
 func _apply_preset_values(key: String) -> void:
   var preset := PlaygroundConfig.resolve_preset(key)
@@ -255,61 +255,61 @@ func _apply_preset_values(key: String) -> void:
   rack_size_spin.value = preset.rack
   var shape_index := PlaygroundConfig.BOARD_SHAPES.find(preset.shape)
   if shape_index >= 0:
-    shape_selector.select(shape_index)
+	shape_selector.select(shape_index)
   var adj_index := 0
   match preset.adjacency:
-    "diagonal": adj_index = 1
-    "hex": adj_index = 2
-    _:
-      adj_index = 0
+	"diagonal": adj_index = 1
+	"hex": adj_index = 2
+	_:
+	  adj_index = 0
   adjacency_selector.select(adj_index)
   match preset.bonus:
-    "classic": bonus_selector.select(1)
-    "hex": bonus_selector.select(2)
-    "triangle": bonus_selector.select(3)
-    "ring": bonus_selector.select(4)
-    "none": bonus_selector.select(5)
-    _:
-      bonus_selector.select(0)
+	"classic": bonus_selector.select(1)
+	"hex": bonus_selector.select(2)
+	"triangle": bonus_selector.select(3)
+	"ring": bonus_selector.select(4)
+	"none": bonus_selector.select(5)
+	_:
+	  bonus_selector.select(0)
 
 func _on_preset_selected(index: int) -> void:
   var meta := preset_selector.get_item_metadata(index)
   if meta is String:
-    _apply_preset_values(meta)
+	_apply_preset_values(meta)
 
 func _start_new_game() -> void:
   var preset_index := preset_selector.get_selected()
   var preset_key := preset_selector.get_item_metadata(preset_index)
   if not (preset_key is String):
-    preset_key = "classic"
+	preset_key = "classic"
   var adjacency_options := ["orthogonal", "diagonal", "hex"]
   var settings := {
-    "preset": preset_key,
-    "width": int(width_spin.value),
-    "height": int(height_spin.value),
-    "shape": PlaygroundConfig.BOARD_SHAPES[shape_selector.get_selected()],
-    "adjacency": adjacency_options[adjacency_selector.get_selected()],
-    "bonus": _bonus_key(),
-    "rack_size": int(rack_size_spin.value),
-    "rng_seed": _next_seed(),
-    "free_word_mode": true,
+	"preset": preset_key,
+	"width": int(width_spin.value),
+	"height": int(height_spin.value),
+	"shape": PlaygroundConfig.BOARD_SHAPES[shape_selector.get_selected()],
+	"adjacency": adjacency_options[adjacency_selector.get_selected()],
+	"bonus": _bonus_key(),
+	"rack_size": int(rack_size_spin.value),
+	"rng_seed": _next_seed(),
+	"free_word_mode": true,
   }
   var result := PlaygroundConfig.build_config(settings)
   var config_json := JSON.stringify(result.config)
   if not eng.new_game(config_json, 2):
-    push_error("Failed to initialize game")
-    return
+	push_error("Failed to initialize game")
+	return
   if result.bonuses.size() > 0:
-    var ok := eng.set_bonuses(JSON.stringify(result.bonuses))
-    if not ok:
-      push_warning("Failed to apply bonuses")
+	var ok := eng.set_bonuses(JSON.stringify(result.bonuses))
+	if not ok:
+	  push_warning("Failed to apply bonuses")
   tile_lookup = {}
   for kind in result.tileset.tile_kinds:
-    tile_lookup[kind.id] = {
-      "symbol": kind.get("symbol", kind.id),
-      "score": kind.get("score", 0),
-      "is_blank": kind.get("is_blank", false),
-    }
+	tile_lookup[kind.id] = {
+	  "symbol": kind.get("symbol", kind.id),
+	  "score": kind.get("score", 0),
+	  "is_blank": kind.get("is_blank", false),
+	}
   layout = result.layout
   staged.clear()
   highlight.clear()
@@ -319,16 +319,16 @@ func _start_new_game() -> void:
 
 func _bonus_key() -> String:
   match bonus_selector.get_selected():
-    1:
-      return "classic"
-    2:
-      return "hex"
-    3:
-      return "triangle"
-    4:
-      return "ring"
-    5:
-      return "none"
+	1:
+	  return "classic"
+	2:
+	  return "hex"
+	3:
+	  return "triangle"
+	4:
+	  return "ring"
+	5:
+	  return "none"
   return "auto"
 
 func _next_seed() -> int:
@@ -348,81 +348,81 @@ func _refresh_board_state() -> void:
   var json := eng.get_board_cells_json()
   var parsed := JSON.parse_string(json)
   if parsed == null:
-    return
+	return
   board_state.clear()
   for cell in parsed.get("cells", []):
-    var key := "%d,%d" % [int(cell.x), int(cell.y)]
-    var top := cell.get("top", null)
-    if top != null:
-      var kind_id := String(top.get("kind_id", ""))
-      var lookup := tile_lookup.get(kind_id, {})
-      var symbol := lookup.get("symbol", kind_id)
-      if lookup.get("is_blank", false) and top.has("mark") and top.mark != null:
-        symbol = String(top.mark)
-      var score := lookup.get("score", 0)
-      board_state[key] = {
-        "kind_id": kind_id,
-        "symbol": symbol,
-        "score": score,
-      }
+	var key := "%d,%d" % [int(cell.x), int(cell.y)]
+	var top := cell.get("top", null)
+	if top != null:
+	  var kind_id := String(top.get("kind_id", ""))
+	  var lookup := tile_lookup.get(kind_id, {})
+	  var symbol := lookup.get("symbol", kind_id)
+	  if lookup.get("is_blank", false) and top.has("mark") and top.mark != null:
+		symbol = String(top.mark)
+	  var score := lookup.get("score", 0)
+	  board_state[key] = {
+		"kind_id": kind_id,
+		"symbol": symbol,
+		"score": score,
+	  }
   board.update_board(board_state, _staged_tiles(), _compose_highlights())
 
 func _staged_tiles() -> Dictionary:
   var out := {}
   for key in staged.keys():
-    out[key] = staged[key]
+	out[key] = staged[key]
   return out
 
 func _compose_highlights() -> Dictionary:
   var map := {}
   for k in last_move.keys():
-    map[k] = last_move[k]
+	map[k] = last_move[k]
   for k in highlight.keys():
-    map[k] = highlight[k]
+	map[k] = highlight[k]
   return map
 
 func _refresh_rack() -> void:
   for child in rack_bar.get_children():
-    child.queue_free()
+	child.queue_free()
   rack_buttons.clear()
   var json := eng.get_rack_json()
   var parsed := JSON.parse_string(json)
   if parsed == null:
-    return
+	return
   for entry in parsed:
-    var btn := PlaygroundRackTile.new()
-    var symbol := entry.get("symbol", entry.get("kind_id", ""))
-    var info := {
-      "kind_id": entry.get("kind_id", ""),
-      "symbol": symbol,
-      "score": entry.get("score", 0),
-    }
-    btn.set_tile(info)
-    btn.pressed.connect(func(): _select_rack_tile(btn))
-    rack_bar.add_child(btn)
-    rack_buttons.append(btn)
+	var btn := PlaygroundRackTile.new()
+	var symbol := entry.get("symbol", entry.get("kind_id", ""))
+	var info := {
+	  "kind_id": entry.get("kind_id", ""),
+	  "symbol": symbol,
+	  "score": entry.get("score", 0),
+	}
+	btn.set_tile(info)
+	btn.pressed.connect(func(): _select_rack_tile(btn))
+	rack_bar.add_child(btn)
+	rack_buttons.append(btn)
   if rack_buttons.size() > 0:
-    _select_rack_tile(rack_buttons[0])
+	_select_rack_tile(rack_buttons[0])
 
 func _select_rack_tile(btn: PlaygroundRackTile) -> void:
   selected_kind = btn.kind_id
   for other in rack_buttons:
-    other.select(other == btn)
+	other.select(other == btn)
 
 func _update_scores() -> void:
   var json := eng.get_scores_json()
   var parsed := JSON.parse_string(json)
   if parsed == null:
-    score_label.text = ""
-    return
+	score_label.text = ""
+	return
   var players := parsed.get("players", [])
   var to_move := int(parsed.get("to_move", 0))
   var you := 0
   var cpu := 0
   if players.size() > 0:
-    you = int(players[0].get("score", 0))
+	you = int(players[0].get("score", 0))
   if players.size() > 1:
-    cpu = int(players[1].get("score", 0))
+	cpu = int(players[1].get("score", 0))
   var turn := "Your turn" if to_move == 0 else "CPU thinking"
   score_label.text = "You: %d | CPU: %d – %s" % [you, cpu, turn]
 
@@ -433,85 +433,85 @@ func _refresh_event_log() -> void:
   var json := eng.get_event_log_json(MAX_EVENT_LOG)
   var parsed := JSON.parse_string(json)
   if parsed == null:
-    return
+	return
   var lines := []
   for entry in parsed:
-    var turn := int(entry.get("turn", 0))
-    var player := int(entry.get("player", 0))
-    var who := "You" if player == 0 else "CPU"
-    match entry.get("type", ""):
-      "play":
-        lines.append("Turn %d: %s played %d" % [turn, who, int(entry.get("total", entry.get("score", 0)))])
-      "draw":
-        lines.append("Turn %d: %s drew %s" % [turn, who, String(entry.get("tiles", []) )])
-      "exchange":
-        lines.append("Turn %d: %s exchanged" % [turn, who])
-      "pass":
-        lines.append("Turn %d: %s passed" % [turn, who])
-      _:
-        lines.append("Turn %d: %s" % [turn, who])
+	var turn := int(entry.get("turn", 0))
+	var player := int(entry.get("player", 0))
+	var who := "You" if player == 0 else "CPU"
+	match entry.get("type", ""):
+	  "play":
+		lines.append("Turn %d: %s played %d" % [turn, who, int(entry.get("total", entry.get("score", 0)))])
+	  "draw":
+		lines.append("Turn %d: %s drew %s" % [turn, who, String(entry.get("tiles", []) )])
+	  "exchange":
+		lines.append("Turn %d: %s exchanged" % [turn, who])
+	  "pass":
+		lines.append("Turn %d: %s passed" % [turn, who])
+	  _:
+		lines.append("Turn %d: %s" % [turn, who])
   log_view.text = "\n".join(lines)
 
 func _place_tile(key: String, kind_id: String) -> void:
   if not tile_lookup.has(kind_id):
-    return
+	return
   var info := tile_lookup[kind_id]
   staged[key] = {
-    "kind_id": kind_id,
-    "symbol": info.get("symbol", kind_id),
-    "score": info.get("score", 0),
+	"kind_id": kind_id,
+	"symbol": info.get("symbol", kind_id),
+	"score": info.get("score", 0),
   }
   highlight.clear()
   _queue_preview()
 
 func _remove_staged(key: String) -> void:
   if staged.has(key):
-    staged.erase(key)
-    highlight.clear()
-    board.update_board(board_state, _staged_tiles(), _compose_highlights())
-    _update_preview_label("")
+	staged.erase(key)
+	highlight.clear()
+	board.update_board(board_state, _staged_tiles(), _compose_highlights())
+	_update_preview_label("")
 
 func _on_board_cell(x: int, y: int) -> void:
   var key := "%d,%d" % [x, y]
   if staged.has(key):
-    _remove_staged(key)
-    return
+	_remove_staged(key)
+	return
   if selected_kind == "":
-    return
+	return
   if board_state.has(key):
-    push_warning("Cell already occupied")
-    return
+	push_warning("Cell already occupied")
+	return
   _place_tile(key, selected_kind)
 
 func _on_tile_dropped(x: int, y: int, kind_id: String) -> void:
   var key := "%d,%d" % [x, y]
   if board_state.has(key):
-    return
+	return
   _place_tile(key, kind_id)
 
 func _queue_preview() -> void:
   if staged.is_empty():
-    highlight.clear()
-    board.update_board(board_state, _staged_tiles(), _compose_highlights())
-    _update_preview_label("")
-    return
+	highlight.clear()
+	board.update_board(board_state, _staged_tiles(), _compose_highlights())
+	_update_preview_label("")
+	return
   var placements := []
   for key in staged.keys():
-    var parts := key.split(",")
-    placements.append({
-      "x": int(parts[0]),
-      "y": int(parts[1]),
-      "kind_id": String(staged[key].get("kind_id", "")),
-    })
+	var parts := key.split(",")
+	placements.append({
+	  "x": int(parts[0]),
+	  "y": int(parts[1]),
+	  "kind_id": String(staged[key].get("kind_id", "")),
+	})
   var json := eng.preview_move(JSON.stringify(placements))
   if json == "":
-    highlight["invalid"] = true
-    board.update_board(board_state, _staged_tiles(), _compose_highlights())
-    _update_preview_label("Preview: invalid move")
-    return
+	highlight["invalid"] = true
+	board.update_board(board_state, _staged_tiles(), _compose_highlights())
+	_update_preview_label("Preview: invalid move")
+	return
   var parsed := JSON.parse_string(json)
   if parsed == null:
-    return
+	return
   highlight.clear()
   var main_cells := parsed.get("main_cells", [])
   var cross_cells := parsed.get("cross_cells", [])
@@ -524,25 +524,25 @@ func _queue_preview() -> void:
 
 func _commit_move() -> void:
   if staged.is_empty():
-    return
+	return
   var placements := []
   for key in staged.keys():
-    var parts := key.split(",")
-    placements.append({
-      "x": int(parts[0]),
-      "y": int(parts[1]),
-      "kind_id": String(staged[key].get("kind_id", "")),
-    })
+	var parts := key.split(",")
+	placements.append({
+	  "x": int(parts[0]),
+	  "y": int(parts[1]),
+	  "kind_id": String(staged[key].get("kind_id", "")),
+	})
   var preview_json := eng.preview_move(JSON.stringify(placements))
   var preview := JSON.parse_string(preview_json)
   var result := eng.play_move(JSON.stringify(placements))
   if result == "":
-    push_error("Move rejected")
-    return
+	push_error("Move rejected")
+	return
   if preview != null:
-    last_move.clear()
-    last_move["last_main"] = preview.get("main_cells", [])
-    last_move["last_cross"] = preview.get("cross_cells", [])
+	last_move.clear()
+	last_move["last_main"] = preview.get("main_cells", [])
+	last_move["last_cross"] = preview.get("cross_cells", [])
   staged.clear()
   highlight.clear()
   _refresh_all()
@@ -557,15 +557,15 @@ func _cpu_hint() -> void:
   var diff := ["easy", "medium", "hard"][cpu_difficulty.get_selected()]
   var json := eng.best_move(diff, _next_seed())
   if json == "" or json == "null":
-    push_warning("No hint available")
-    return
+	push_warning("No hint available")
+	return
   var parsed := JSON.parse_string(json)
   if parsed == null:
-    return
+	return
   highlight.clear()
   var preview_cells := []
   for entry in parsed.get("placements", []):
-    preview_cells.append([int(entry.get("x", 0)), int(entry.get("y", 0))])
+	preview_cells.append([int(entry.get("x", 0)), int(entry.get("y", 0))])
   highlight["preview_main"] = preview_cells
   _update_preview_label("CPU suggests %s (%d)" % [parsed.get("word", ""), int(parsed.get("total", parsed.get("score", 0)))])
   board.update_board(board_state, _staged_tiles(), _compose_highlights())
@@ -574,22 +574,22 @@ func _cpu_play() -> void:
   var diff := ["easy", "medium", "hard"][cpu_difficulty.get_selected()]
   var json := eng.best_move(diff, _next_seed())
   if json == "" or json == "null":
-    push_warning("CPU has no moves")
-    return
+	push_warning("CPU has no moves")
+	return
   var parsed := JSON.parse_string(json)
   if parsed == null:
-    return
+	return
   var placements := parsed.get("placements", [])
   if placements.is_empty():
-    return
+	return
   var result := eng.play_move(JSON.stringify(placements))
   if result == "":
-    push_error("CPU move failed")
-    return
+	push_error("CPU move failed")
+	return
   last_move.clear()
   var last_cells := []
   for entry in placements:
-    last_cells.append([int(entry.get("x", 0)), int(entry.get("y", 0))])
+	last_cells.append([int(entry.get("x", 0)), int(entry.get("y", 0))])
   last_move["last_main"] = last_cells
   staged.clear()
   highlight.clear()
@@ -600,9 +600,9 @@ func _show_moves() -> void:
   var json := eng.generate_moves(max_len, 12)
   var parsed := JSON.parse_string(json)
   if parsed == null:
-    return
+	return
   move_list.clear()
   for entry in parsed:
-    var word := entry.get("word", "")
-    var score := int(entry.get("score", 0))
-    move_list.add_item("%s (%d)" % [word, score])
+	var word := entry.get("word", "")
+	var score := int(entry.get("score", 0))
+	move_list.add_item("%s (%d)" % [word, score])
