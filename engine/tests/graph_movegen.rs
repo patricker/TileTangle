@@ -186,8 +186,19 @@ fn triangle_graph_generate_moves_returns_candidates() {
         !moves.is_empty(),
         "expected at least one move for triangular graph board"
     );
-    // Ensure the best-move path still succeeds.
-    let best = best_move(&state, &rules, AiDifficulty::Easy);
+    // Ensure the best-move path still succeeds. Give the player a rack that can play.
+    let mut state2 = state.clone();
+    state2.players[0].rack.tiles.clear();
+    state2.players[0].rack.tiles.extend([
+        Tile { kind_id: "B".into(), mark: None },
+        Tile { kind_id: "C".into(), mark: None },
+        Tile { kind_id: "A".into(), mark: None },
+        Tile { kind_id: "A".into(), mark: None },
+        Tile { kind_id: "A".into(), mark: None },
+        Tile { kind_id: "A".into(), mark: None },
+        Tile { kind_id: "A".into(), mark: None },
+    ]);
+    let best = best_move(&state2, &rules, AiDifficulty::Easy);
     assert!(best.is_some(), "expected best move for triangular graph board");
 }
 

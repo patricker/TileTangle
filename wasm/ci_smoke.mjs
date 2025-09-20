@@ -1,16 +1,15 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const pkgDir = path.join(__dirname, 'pkg');
-const modPath = pathToFileURL(path.join(pkgDir, 'tiletangle_wasm.js')).href;
-const mod = await import(modPath);
-const wasmBytes = await fs.readFile(path.join(pkgDir, 'tiletangle_wasm_bg.wasm'));
-await mod.default({ module_or_path: wasmBytes });
+// For Node target, the wasm-pack module is CommonJS; use require for compatibility
+const require = createRequire(import.meta.url);
+const mod = require(path.join(pkgDir, 'tiletangle_wasm.js'));
 
 const cfg = {
   tileset: { tile_kinds: [{ id: 'A', symbol: 'A', score: 1 }] },
