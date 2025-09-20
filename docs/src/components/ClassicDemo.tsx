@@ -12,6 +12,7 @@ import {StackingControls} from './playground/panels';
 import type {BoardJson} from './playground/types';
 import styles from './PlaygroundLayout.module.css';
 import {useWorkerMessenger} from './playground/useWorkerMessenger';
+import {randomSeed} from './playground/random';
 
 type Placement = {x: number; y: number; kind_id: string; mark?: string | null};
 type Hint = {placements: Placement[]; score: number; word: string};
@@ -69,7 +70,7 @@ export default function ClassicDemo(): JSX.Element {
     board_layout: {width: BOARD_WIDTH, height: BOARD_HEIGHT},
     ruleset_id: 'cross',
     dictionary_id: 'en',
-    rng_seed: 42,
+    rng_seed: 1,
     tile_counts: classic.tile_counts,
     free_word_mode: !useDict,
   }) as any,
@@ -157,7 +158,9 @@ export default function ClassicDemo(): JSX.Element {
       try {
         setErrorMessage(null);
         setInfoMessage('Initialising classic demo…');
-        await call('new_game', {config: cfg, players: 2});
+        const nextSeed = randomSeed();
+        const config = {...cfg, rng_seed: nextSeed || 1};
+        await call('new_game', {config, players: 2});
         await call('set_bonuses', bonusLayout);
         await call('set_reading_direction', {rtl});
         await call('set_stacking', {

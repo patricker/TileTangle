@@ -281,6 +281,7 @@ Below is a **ready‑to‑drop‑in `TODO.md`** for the repo. It’s structured 
 * [x] Add per-shape presets (true hex mask, diamond/cross defaults) so graph boards feel native without manual tweaking.
 * [x] Polish Playground layout with dedicated panels, quick presets, and themed controls to encourage experimentation.
 * [x] Extract shared hero, alert, rack, move-list, and control button primitives so Playground and Classic demo reuse the same UI building blocks.
+* [x] Randomise initial racks across Playground surfaces so each load feels fresh.
 
 ### Exit Criteria
 
@@ -847,6 +848,11 @@ edges = [{a=0,b=1,dir="E"}, {a=0,b=2,dir="SE"}, {a=1,b=2,dir="SW"}]
 * Create shared JSON fixtures under `test_data/` and drive them through every binding (WASM tests, PyO3 pytest, C ABI harness, Godot headless test). Compare outputs to common snapshots.
 * Wire automated CI jobs: `wasm-pack test`, `pytest` for PyO3, `cargo test -p tiletangle-ffi` (C), `godot --headless --run-tests`, and a P/Invoke smoke test for Unity/C#.
 * Schedule nightly binding smoke tests that build each artifact (WASM bundle, Python wheel, C library, Godot GDExtension) and run the cross-binding fixture suite.
+
+### Godot Playground Parity
+
+- [x] Build a dedicated Godot Playground scene that mirrors the web controls (board presets, adjacency modes, automation, hints, snapshots).
+- [x] Document build/run steps and asset placement for the Godot Playground so the team can launch it locally.
 
 ---
 

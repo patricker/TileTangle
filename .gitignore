@@ -8,3 +8,6 @@ wasm/node_modules
 dist
 docs/test-results
 docs/playwright-report
+bindings/godot/examples/.godot/
+bindings/godot/examples/**/*.gd.uid
+bindings/godot/examples/**/*.uid

@@ -1,7 +1,7 @@
 extends Control
 
 @onready var grid := GridContainer.new()
-var eng := WordEngine.new()
+var eng
 var width := 5
 var height := 5
 var use_hex := true
@@ -19,6 +19,10 @@ var cpu_auto_pending := false
 var score_summary_label : Label
 
 func _ready():
+    eng = _instantiate_engine()
+    if eng == null:
+        push_error("WordEngine extension missing")
+        return
     # Top bar with toggles
     var bar := HBoxContainer.new()
     bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -96,15 +100,20 @@ func _ready():
     _new_game_and_rebuild_grid()
     _refresh_rack()
 
+func _instantiate_engine():
+    if not ClassDB.class_exists("WordEngine"):
+        return null
+    return ClassDB.instantiate("WordEngine")
+
 func _new_game_and_rebuild_grid():
     # Clear grid
     while grid.get_child_count() > 0:
-        var c = grid.get_child(0)
+        var c: Node = grid.get_child(0)
         grid.remove_child(c)
         c.queue_free()
 
     # Build config
-    var base = {
+    var base: Dictionary = {
         "tileset": {"tile_kinds": [
             {"id": "A", "symbol": "A", "score": 1},
             {"id": "B", "symbol": "B", "score": 3}
@@ -116,35 +125,36 @@ func _new_game_and_rebuild_grid():
         "tile_counts": {"A": 10, "B": 10},
         "free_word_mode": true,
     }
-    var cfg := base.duplicate(true)
+    var cfg: Dictionary = base.duplicate(true)
     if use_hex:
-        var nodes := []
-        for y in height:
-            for x in width:
+        var nodes: Array = []
+        for y in range(height):
+            for x in range(width):
                 nodes.append({"x": x, "y": y})
         func idx(x:int,y:int)->int: return y*width + x
-        var edges := []
+        var edges: Array = []
         func try_edge(x1:int,y1:int,x2:int,y2:int,dir:String):
             if x2<0 or x2>=width or y2<0 or y2>=height: return
             edges.append({"a": idx(x1,y1), "b": idx(x2,y2), "dir": dir})
-        for y in height:
-            for x in width:
+        for y in range(height):
+            for x in range(width):
                 var even := (y % 2) == 0
+                var offset := 0 if even else 1
                 try_edge(x,y,x+1,y,"E")
-                try_edge(x,y,x + (even?0:1), y-1, "NE")
-                try_edge(x,y,x + (even?0:1), y+1, "SE")
+                try_edge(x,y,x + offset, y-1, "NE")
+                try_edge(x,y,x + offset, y+1, "SE")
         cfg["board_layout"] = {"width": width, "height": height, "type":"graph", "nodes": nodes, "edges": edges}
     else:
         cfg["board_layout"] = {"width": width, "height": height}
 
-    var ok = eng.new_game(JSON.stringify(cfg), 2)
+    var ok: bool = eng.new_game(JSON.stringify(cfg), 2)
     if not ok:
         push_error("Failed to create game")
         return
 
     # Build grid buttons
-    for y in height:
-        for x in width:
+    for y in range(height):
+        for x in range(width):
             var btn := Button.new()
             btn.text = ""
             btn.pressed.connect(func(): _on_cell_pressed(x, y))
@@ -159,8 +169,8 @@ func _new_game_and_rebuild_grid():
 
 func _on_cell_pressed(x:int, y:int):
     var kid := selected_kind_id if selected_kind_id != "" else "A"
-    var placements = [{"x": x, "y": y, "kind_id": kid}]
-    var res = eng.play_move(JSON.stringify(placements))
+    var placements: Array = [{"x": x, "y": y, "kind_id": kid}]
+    var res: String = eng.play_move(JSON.stringify(placements))
     if res == "":
         push_error("play_move failed")
     else:
@@ -169,15 +179,15 @@ func _on_cell_pressed(x:int, y:int):
     _refresh_rack()
 
 func _refresh_board():
-    var board_json = eng.get_board_json()
+    var board_json: String = eng.get_board_json()
     if board_json == "":
         return
-    var parsed = JSON.parse_string(board_json)
+    var parsed := JSON.parse_string(board_json)
     if parsed == null:
         return
     var idx := 0
-    for y in height:
-        for x in width:
+    for y in range(height):
+        for x in range(width):
             var node := grid.get_child(idx)
             if node is Button:
                 var symbol := parsed["rows"][y][x]
@@ -243,7 +253,7 @@ func _apply_highlight_vectors(main_arr, cross_arr):
                 if node is Button: node.modulate = Color(0.95, 1.0, 0.8)
 
 func _update_score_summary() -> int:
-    var json := eng.get_scores_json()
+    var json: String = eng.get_scores_json()
     if json == "":
         if score_summary_label:
             score_summary_label.text = "Scores unavailable"
@@ -302,7 +312,7 @@ func _auto_cpu_move() -> void:
 func _preview_json():
     if staged.is_empty():
         return null
-    var res := eng.preview_move(JSON.stringify(staged))
+    var res: String = eng.preview_move(JSON.stringify(staged))
     if res == "":
         return null
     var parsed := JSON.parse_string(res)
@@ -327,7 +337,7 @@ func _refresh_rack():
     if old:
         remove_child(old)
         old.queue_free()
-    var rack_json := eng.get_rack_json()
+    var rack_json: String = eng.get_rack_json()
     if rack_json == "":
         return
     var parsed = JSON.parse_string(rack_json)
@@ -389,7 +399,7 @@ func _commit_staged():
     if preview != null:
         last_main = preview.get("main_cells", [])
         last_cross = preview.get("cross_cells", [])
-    var res = eng.play_move(JSON.stringify(staged))
+    var res: String = eng.play_move(JSON.stringify(staged))
     if res == "":
         push_error("play_move failed")
     else:
@@ -421,7 +431,7 @@ func _play_cpu_move():
     cpu_busy = true
     if cpu_button:
         cpu_button.disabled = true
-    var best_json := eng.best_move(cpu_difficulty, 42)
+    var best_json: String = eng.best_move(cpu_difficulty, 42)
     if best_json == "":
         push_warning("best_move returned empty result")
         _reset_cpu_button()
@@ -452,13 +462,13 @@ func _play_cpu_move():
         _reset_cpu_button()
         return
     var placements_json := JSON.stringify(placements)
-    var preview_json := eng.preview_move(placements_json)
+    var preview_json: String = eng.preview_move(placements_json)
     if preview_json != "":
         var preview = JSON.parse_string(preview_json)
         if preview != null:
             last_main = preview.get("main_cells", [])
             last_cross = preview.get("cross_cells", [])
-    var res := eng.play_move(placements_json)
+    var res: String = eng.play_move(placements_json)
     if res == "":
         push_error("play_move failed for CPU move")
     else:

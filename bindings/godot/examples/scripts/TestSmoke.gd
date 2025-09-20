@@ -1,7 +1,10 @@
 extends Node
 
 func run_tests():
-    var e := WordEngine.new()
+    if not ClassDB.class_exists("WordEngine"):
+        push_error("WordEngine missing")
+        return
+    var e = ClassDB.instantiate("WordEngine")
     var cfg = {
         "tileset": {"tile_kinds": [
             {"id": "A", "symbol": "A", "score": 1}
@@ -20,4 +23,3 @@ func run_tests():
     var board := e.get_board_json()
     assert(board != "")
     print("Godot smoke tests passed")
-

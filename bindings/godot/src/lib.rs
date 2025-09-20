@@ -1,6 +1,7 @@
 use engine::{BoardGeometry, Rules};
 use godot::prelude::*;
 use serde::Deserialize;
+use std::collections::{BTreeSet, HashSet};
 use std::convert::TryFrom;
 
 #[derive(GodotClass)]
@@ -86,6 +87,18 @@ struct JsPlacement {
     x: i32,
     y: i32,
     kind_id: String,
+}
+
+#[derive(Deserialize)]
+struct JsBonus {
+    x: i32,
+    y: i32,
+    #[serde(default)]
+    letter_mul: i8,
+    #[serde(default)]
+    word_mul: i8,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 #[godot_api]
@@ -327,6 +340,54 @@ impl WordEngine {
         GString::from(serde_json::to_string(&json).unwrap())
     }
 
+    /// Detailed board snapshot including full stacks and presence mask.
+    #[func]
+    pub fn get_board_cells_json(&self) -> GString {
+        let st = match self.state.as_ref() {
+            Some(s) => s,
+            None => return GString::from(""),
+        };
+        let w = st.board.geom.width as i32;
+        let h = st.board.geom.height as i32;
+        let mut cells: Vec<serde_json::Value> = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let coord = engine::Coord2D { x, y };
+                if let Some(id) = st.board.geom.to_cell_id(coord) {
+                    let cell = &st.board.cells[id.0 as usize];
+                    let top = cell.stack.last().map(|t| {
+                        serde_json::json!({
+                            "kind_id": t.kind_id.clone(),
+                            "mark": t.mark.clone(),
+                        })
+                    });
+                    let mut stack_vec: Vec<serde_json::Value> = Vec::new();
+                    for tile in &cell.stack {
+                        stack_vec.push(serde_json::json!({
+                            "kind_id": tile.kind_id.clone(),
+                            "mark": tile.mark.clone(),
+                        }));
+                    }
+                    cells.push(serde_json::json!({
+                        "x": x,
+                        "y": y,
+                        "present": true,
+                        "stack_height": cell.stack.len(),
+                        "top": top,
+                        "stack": stack_vec,
+                    }));
+                }
+            }
+        }
+        let json = serde_json::json!({
+            "width": w,
+            "height": h,
+            "graph": st.board.geom.has_graph(),
+            "cells": cells,
+        });
+        GString::from(serde_json::to_string(&json).unwrap())
+    }
+
     /// Toggle free-word mode for testing without a dictionary.
     #[func]
     pub fn set_free_word_mode(&mut self, on: bool) {
@@ -371,6 +432,209 @@ impl WordEngine {
             .collect();
         let val = serde_json::json!({"players": players, "to_move": st.to_move.0});
         GString::from(serde_json::to_string(&val).unwrap())
+    }
+
+    /// Replace board bonuses from a JSON array.
+    #[func]
+    pub fn set_bonuses(&mut self, bonuses_json: GString) -> bool {
+        let st = match self.state.as_mut() {
+            Some(s) => s,
+            None => return false,
+        };
+        let parsed: Vec<JsBonus> = match serde_json::from_str(&bonuses_json.to_string()) {
+            Ok(v) => v,
+            Err(e) => {
+                godot_error!("bonus parse error: {}", e);
+                return false;
+            }
+        };
+        st.board.bonuses.clear();
+        for b in parsed {
+            let coord = engine::Coord2D { x: b.x, y: b.y };
+            let Some(id) = st.board.geom.to_cell_id(coord) else {
+                godot_error!("invalid bonus coord: ({}, {})", b.x, b.y);
+                return false;
+            };
+            let mut tags = BTreeSet::new();
+            for t in b.tags {
+                tags.insert(t);
+            }
+            st.board.bonuses.insert(
+                id,
+                engine::Bonus {
+                    letter_mul: if b.letter_mul == 0 { 1 } else { b.letter_mul },
+                    word_mul: if b.word_mul == 0 { 1 } else { b.word_mul },
+                    tags,
+                },
+            );
+        }
+        true
+    }
+
+    /// Return the active bonus layout as JSON array.
+    #[func]
+    pub fn get_bonuses_json(&self) -> GString {
+        let st = match self.state.as_ref() {
+            Some(s) => s,
+            None => return GString::from(""),
+        };
+        let mut out: Vec<serde_json::Value> = Vec::new();
+        for (id, bonus) in &st.board.bonuses {
+            if let Some(coord) = st.board.geom.from_cell_id(*id) {
+                let tags: Vec<String> = bonus.tags.iter().cloned().collect();
+                out.push(serde_json::json!({
+                    "x": coord.x,
+                    "y": coord.y,
+                    "letter_mul": bonus.letter_mul,
+                    "word_mul": bonus.word_mul,
+                    "tags": tags,
+                }));
+            }
+        }
+        GString::from(serde_json::to_string(&out).unwrap())
+    }
+
+    /// Generate candidate moves for the current rack.
+    #[func]
+    pub fn generate_moves(&self, max_len: i64, limit: i64) -> GString {
+        let st = match self.state.as_ref() {
+            Some(s) => s,
+            None => return GString::from("[]"),
+        };
+        let pid = st.to_move.0;
+        if pid >= st.players.len() {
+            return GString::from("[]");
+        }
+        let rack: Vec<String> = st.players[pid]
+            .rack
+            .tiles
+            .iter()
+            .map(|t| t.kind_id.clone())
+            .collect();
+        let rack_default = rack.len().max(1);
+        let max_len = if max_len <= 0 {
+            rack_default
+        } else {
+            max_len as usize
+        };
+        let limit = if limit <= 0 { 50 } else { limit as usize };
+        let candidates = engine::generate_moves(st, &self.rules, &rack, max_len);
+        let mut out: Vec<serde_json::Value> = Vec::new();
+        for cand in candidates.into_iter().take(limit) {
+            let mut placements = Vec::new();
+            for (cid, tile) in &cand.placements {
+                if let Some(coord) = st.board.geom.from_cell_id(*cid) {
+                    placements.push(serde_json::json!({
+                        "x": coord.x,
+                        "y": coord.y,
+                        "kind_id": tile.kind_id.clone(),
+                        "mark": tile.mark.clone(),
+                    }));
+                }
+            }
+            out.push(serde_json::json!({
+                "word": cand.word,
+                "score": cand.score,
+                "placements": placements,
+            }));
+        }
+        GString::from(serde_json::to_string(&out).unwrap())
+    }
+
+    /// Return recent event log entries in reverse chronological order.
+    #[func]
+    pub fn get_event_log_json(&self, limit: i64) -> GString {
+        let st = match self.state.as_ref() {
+            Some(s) => s,
+            None => return GString::from("[]"),
+        };
+        let limit = if limit <= 0 { 32 } else { limit as usize };
+        let mut out: Vec<serde_json::Value> = Vec::new();
+        for ev in st.event_log.iter().rev().take(limit) {
+            let base = serde_json::json!({
+                "turn": ev.turn,
+                "player": ev.player,
+                "position_hash": ev.position_hash,
+            });
+            let entry = match &ev.kind {
+                engine::GameEventKind::Play {
+                    placements,
+                    score,
+                    total,
+                } => {
+                    let mut list = Vec::new();
+                    for (cid, tile) in placements {
+                        if let Some(coord) = st.board.geom.from_cell_id(*cid) {
+                            list.push(serde_json::json!({
+                                "x": coord.x,
+                                "y": coord.y,
+                                "kind_id": tile.kind_id.clone(),
+                                "mark": tile.mark.clone(),
+                            }));
+                        }
+                    }
+                    serde_json::json!({
+                        "type": "play",
+                        "score": score,
+                        "total": total,
+                        "placements": list,
+                    })
+                }
+                engine::GameEventKind::Draw { tiles } => serde_json::json!({
+                    "type": "draw",
+                    "tiles": tiles,
+                }),
+                engine::GameEventKind::Exchange { give, take } => serde_json::json!({
+                    "type": "exchange",
+                    "give": give,
+                    "take": take,
+                }),
+                engine::GameEventKind::Pass => serde_json::json!({
+                    "type": "pass",
+                }),
+            };
+            out.push(merge_json_objects(base, entry));
+        }
+        GString::from(serde_json::to_string(&out).unwrap())
+    }
+
+    /// Serialize the current game state as JSON snapshot.
+    #[func]
+    pub fn snapshot_json(&self) -> GString {
+        let st = match self.state.as_ref() {
+            Some(s) => s,
+            None => return GString::from(""),
+        };
+        match st.snapshot_json() {
+            Ok(json) => GString::from(json),
+            Err(e) => {
+                godot_error!("snapshot error: {}", e);
+                GString::from("")
+            }
+        }
+    }
+
+    /// Configure stacking/overlay rules.
+    #[func]
+    pub fn set_stacking(
+        &mut self,
+        enabled: bool,
+        max_height: i64,
+        forbid_same_symbol: bool,
+        sum_stack_scoring: bool,
+    ) {
+        self.rules.stacking_enabled = enabled;
+        self.rules.stacking_max_height = if max_height <= 0 {
+            1
+        } else {
+            max_height as usize
+        };
+        self.rules.forbid_same_symbol_overlay = forbid_same_symbol;
+        self.rules.stacking_scoring = if sum_stack_scoring {
+            engine::StackScoring::SumStack
+        } else {
+            engine::StackScoring::TopOnly
+        };
     }
 
     #[func]
@@ -599,7 +863,6 @@ impl WordEngine {
 }
 
 // Helpers duplicated from engine for GDExt preview
-use std::collections::HashSet;
 fn collect_line_on_dir(
     board: &engine::Board<engine::RectGridGeometry>,
     center: engine::CellId,
@@ -709,6 +972,18 @@ fn graph_find_main_path(
         }
     }
     None
+}
+
+fn merge_json_objects(base: serde_json::Value, extra: serde_json::Value) -> serde_json::Value {
+    match (base, extra) {
+        (serde_json::Value::Object(mut a), serde_json::Value::Object(b)) => {
+            for (k, v) in b {
+                a.insert(k, v);
+            }
+            serde_json::Value::Object(a)
+        }
+        (_, other) => other,
+    }
 }
 
 struct TileTangleExtension;

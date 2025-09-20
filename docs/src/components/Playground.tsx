@@ -12,6 +12,7 @@ import {BoardSetupPanel, LanguagePanel, StackingPanel} from './playground/panels
 import {ButtonRow, type ButtonConfig, CpuHintSummary, MoveList, Panel, PlayerList, RackRow, ToggleField, type RackRowTile, SegmentedControl, type SegmentedOption} from './playground/ui';
 import {buildThemeVars, getPlaygroundPalette} from './playground/theme';
 import {useWorkerMessenger} from './playground/useWorkerMessenger';
+import {randomSeed} from './playground/random';
 import styles from './PlaygroundLayout.module.css';
 
 const fallbackDictionaryWords = [
@@ -795,7 +796,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           const worker = ensureWorker();
           if (!worker) return;
           const call = callWorker;
-          const cfg2 = {...cfg, free_word_mode: !useDict};
+          const cfg2 = {...cfg, free_word_mode: !useDict, rng_seed: randomSeed()};
           await call('new_game', {config: cfg2, players: 2});
           await call('set_bonuses', bonusCells);
           if (cancelled) return;
@@ -834,7 +835,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
         } else {
           terminateWorker();
           const mod = await ensureWasmModule();
-          const cfg2 = {...cfg, free_word_mode: !useDict};
+          const cfg2 = {...cfg, free_word_mode: !useDict, rng_seed: randomSeed()};
           const g = mod.new_game(JSON.stringify(cfg2), 2);
           mod.set_bonuses(g, JSON.stringify(bonusCells));
           mod.set_reading_direction(g, rtl);
