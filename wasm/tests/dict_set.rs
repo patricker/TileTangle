@@ -1,3 +1,4 @@
+#![cfg(target_arch = "wasm32")]
 use tiletangle_wasm::{new_game, play_move, set_dictionary_from_text};
 use wasm_bindgen_test::*;
 
@@ -5,7 +6,6 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 #[wasm_bindgen_test]
 fn set_dict_and_reject_invalid() {
-    use wasm_bindgen::JsValue;
     let cfg = serde_json::json!({
         "tileset": {"tile_kinds": [
             {"id": "A", "symbol": "A", "score": 1},

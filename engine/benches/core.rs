@@ -48,7 +48,7 @@ fn sample_config() -> eng::GameConfig {
 }
 
 fn benchmark_dictionary(c: &mut Criterion) {
-    let words = vec!["AB", "ABE", "BA", "BEE", "BE", "CAB", "ACE"];
+    let words = ["AB", "ABE", "BA", "BEE", "BE", "CAB", "ACE"];
     let dict = eng::FstDictionary::from_words(words.iter().map(|w| w.to_string()), true);
     c.bench_function("dictionary_contains", |b| {
         b.iter(|| {
@@ -152,8 +152,10 @@ fn benchmark_ai(c: &mut Criterion) {
                     free_word_mode: true,
                     ..Default::default()
                 };
-                let mut cfg = eng::AiConfig::default();
-                cfg.parallel_eval = cfg!(feature = "parallel");
+                let cfg = eng::AiConfig {
+                    parallel_eval: cfg!(feature = "parallel"),
+                    ..Default::default()
+                };
                 (state, rules, cfg)
             },
             |(state, rules, cfg)| {
@@ -171,8 +173,10 @@ fn benchmark_ai(c: &mut Criterion) {
                     free_word_mode: true,
                     ..Default::default()
                 };
-                let mut cfg = eng::AiConfig::default();
-                cfg.lookahead_depth = 1;
+                let cfg = eng::AiConfig {
+                    lookahead_depth: 1,
+                    ..Default::default()
+                };
                 (state, rules, cfg)
             },
             |(state, rules, cfg)| {

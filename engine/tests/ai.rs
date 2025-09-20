@@ -82,10 +82,12 @@ fn ai_prefers_better_leave() {
         ..Default::default()
     };
 
-    let mut config = AiConfig::default();
+    let mut config = AiConfig {
+        max_move_len: 7,
+        ..Default::default()
+    };
     config.rack_leave.insert("O".into(), 5);
     config.rack_leave.insert("A".into(), 0);
-    config.max_move_len = 7;
 
     let eval = eng::best_move_greedy(&st, &rules, &config).expect("should find a move");
     assert_eq!(eval.candidate.word, "AT");
@@ -102,10 +104,12 @@ fn ai_deterministic_with_seed() {
         ..Default::default()
     };
 
-    let mut config = AiConfig::default();
+    let mut config = AiConfig {
+        max_move_len: 7,
+        randomness: Some(42),
+        ..Default::default()
+    };
     config.rack_leave.clear(); // tie on leave
-    config.max_move_len = 7;
-    config.randomness = Some(42);
 
     let first = eng::best_move_greedy(&st, &rules, &config).unwrap();
     let second = eng::best_move_greedy(&st, &rules, &config).unwrap();
@@ -141,10 +145,12 @@ fn ai_lookahead_considers_opponent_reply() {
         kind_id: "O".into(),
         mark: None,
     });
-    let mut config = AiConfig::default();
+    let mut config = AiConfig {
+        max_move_len: 7,
+        lookahead_depth: 1,
+        ..Default::default()
+    };
     config.rack_leave.clear();
-    config.max_move_len = 7;
-    config.lookahead_depth = 1;
     let result = eng::best_move_greedy(&st, &free_rules, &config).unwrap();
     assert!(result.total < result.candidate.score + result.rack_leave + result.board_equity);
 }
@@ -181,9 +187,11 @@ fn ai_hint_is_legal_under_strict_budget() {
         free_word_mode: false,
         ..Default::default()
     };
-    let mut cfg = AiConfig::default();
-    cfg.max_nodes = Some(1);
-    cfg.max_duration = Some(Duration::from_millis(0));
+    let cfg = AiConfig {
+        max_nodes: Some(1),
+        max_duration: Some(Duration::from_millis(0)),
+        ..Default::default()
+    };
     let eval = eng::best_move_greedy(&st, &rules, &cfg).expect("hint available");
     let draft = eng::MoveDraft {
         placements: eval.candidate.placements.clone(),

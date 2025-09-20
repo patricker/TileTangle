@@ -49,7 +49,7 @@ impl engine::RulePlugin for RejectFarPlacementsPlugin {
     }
     fn validate(
         &self,
-        state: &engine::GameState,
+        _state: &engine::GameState,
         mv: &engine::UserMove,
     ) -> Result<(), engine::EngineError> {
         // Gather coordinates from actions (only Place/Stack considered)

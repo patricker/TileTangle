@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use engine::{self, AiConfig, AiDifficulty, BoardGeometry, GameState, Rules};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -292,6 +293,7 @@ impl Game {
     }
 
     #[pyo3(signature = (max_len=None, lookahead_depth=None, seed=None, node_limit=None, time_limit_ms=None, difficulty=None, noise_range=None, candidate_limit=None, reply_limit=None, parallel_eval=None))]
+    #[allow(clippy::too_many_arguments)]
     fn best_move_greedy(
         &self,
         max_len: Option<usize>,

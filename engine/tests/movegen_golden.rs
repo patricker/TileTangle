@@ -41,6 +41,8 @@ fn golden_moves_ab() {
         free_word_mode: bool,
     }
     let cfg: JsCfg = serde_json::from_str(&cfg_json).unwrap();
+    // Capture the config-specified free-word mode so the field is used
+    let cfg_free_word_mode = cfg.free_word_mode;
     let tileset = eng::Tileset {
         tile_kinds: cfg
             .tileset
@@ -69,7 +71,7 @@ fn golden_moves_ab() {
     };
     let mut state = eng::GameState::new(&ecfg, 2).unwrap();
     let mut rules = eng::CrosswordRules {
-        free_word_mode: true,
+        free_word_mode: cfg_free_word_mode,
         ..Default::default()
     };
 

@@ -138,6 +138,13 @@ namespace TileTangle.Examples
             var zInc = CreateButton(bar.transform, "Z+");
             zInc.onClick.AddListener(() => { SetZLayer(zLayer + 1); });
 
+            var dictBtn = CreateButton(bar.transform, $"Dict: {dictEngine.ToUpper()}");
+            dictBtn.onClick.AddListener(() => { CycleDict(dictBtn); });
+            useDictToggle = CreateToggle(bar.transform, "Use Dict", false);
+            useDictToggle.onValueChanged.AddListener(SetUseDict);
+            var loadDictBtn = CreateButton(bar.transform, "Load Demo Dict");
+            loadDictBtn.onClick.AddListener(ApplyDemoDictionary);
+
             // Score label
             var scoreGo = new GameObject("Score", typeof(RectTransform), typeof(Text));
             scoreGo.transform.SetParent(bar.transform, false);
@@ -1000,6 +1007,68 @@ namespace TileTangle.Examples
             catch (Exception e)
             {
                 Debug.LogWarning($"Failed to set bonuses: {e.Message}");
+            }
+        }
+
+        private void CycleDict(Button labelBtn)
+        {
+            dictEngine = dictEngine switch
+            {
+                "off" => "set",
+                "set" => "dawg",
+                "dawg" => "gaddag",
+                "gaddag" => "fst",
+                _ => "off",
+            };
+            labelBtn.GetComponentInChildren<Text>().text = $"Dict: {dictEngine.ToUpper()}";
+        }
+
+        private void SetUseDict(bool on)
+        {
+            if (on)
+            {
+                ApplyDemoDictionary();
+            }
+            else
+            {
+                engine.SetFreeWordMode(true);
+                freeWordMode = true;
+                statusDetail = "Dictionary disabled (free-word mode)";
+                RenderStatus();
+            }
+        }
+
+        private void ApplyDemoDictionary()
+        {
+            try
+            {
+                var words = new [] { "AB", "BA", "BEE", "ACE", "CAB", "BAR", "ARC", "CAR", "CAT", "DOG" };
+                var text = string.Join("\n", words);
+                var kind = dictEngine;
+                if (kind == "off")
+                {
+                    engine.SetFreeWordMode(true);
+                    freeWordMode = true;
+                    statusDetail = "Dictionary OFF";
+                    RenderStatus();
+                    return;
+                }
+                var ok = engine.SetDictionaryFromText(kind, text, true);
+                if (!ok)
+                {
+                    Debug.LogWarning($"SetDictionaryFromText failed: {Engine.LastError()}");
+                    statusDetail = "Dictionary load failed; staying in free-word";
+                    RenderStatus();
+                    return;
+                }
+                engine.SetFreeWordMode(false);
+                freeWordMode = false;
+                statusDetail = $"Dictionary loaded ({kind})";
+                RenderStatus();
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"ApplyDemoDictionary exception: {e.Message}");
             }
         }
 

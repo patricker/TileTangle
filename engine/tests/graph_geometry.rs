@@ -213,8 +213,7 @@ fn playground_diamond_overlay_is_valid() {
     st.apply_graph_overlay(eng::GraphOverlay { nodes, edges })
         .unwrap();
 
-    let mut rules = eng::CrosswordRules::default();
-    rules.free_word_mode = false;
+    // Rules are not needed for this rack sizing assertion
     for pid in 0..st.players.len() {
         loop {
             if st.players[pid].rack.tiles.len() >= cfg.rack_size {

@@ -4,6 +4,8 @@ build:
 	cargo build --workspace
 
 test:
+	# Lint engine tests strictly before running full workspace tests
+	cargo clippy -p tiletangle-engine --tests -- -D warnings
 	cargo test --workspace --all-features
 
 fmt:
@@ -11,6 +13,10 @@ fmt:
 
 lint:
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+.PHONY: lint-core
+lint-core:
+	cargo clippy -p tiletangle-engine -p tiletangle-engine-ffi --all-targets --all-features -- -D warnings
 
 check: fmt lint test
 
