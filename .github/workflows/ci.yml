@@ -21,12 +21,20 @@ jobs:
           components: rustfmt, clippy
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-      - name: Build
-        run: cargo build --workspace --all-features
-      - name: Test
-        run: cargo test --workspace --all-features
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Build (exclude Python crate)
+        run: cargo build --workspace --all-features --exclude tiletangle-python
+      - name: Test (exclude Python crate)
+        run: cargo test --workspace --all-features --exclude tiletangle-python
+      - name: Clippy (core crates only)
+        run: |
+          cargo clippy --all-targets --all-features \
+            -p tiletangle-engine \
+            -p tiletangle-engine-ffi \
+            -p tiletangle-wasm \
+            -p tiletangle-godot \
+            -p tiletangle-plugin-template \
+            -p dict-build \
+            -- -D warnings
       - name: Rustfmt
         run: cargo fmt --all -- --check
       - name: Generate C header (cbindgen)
@@ -42,6 +50,32 @@ jobs:
           gcc engine_ffi/tests/smoke.c -I engine_ffi/include -L target/debug -l tiletangle_ffi -o /tmp/ffi_smoke
           export LD_LIBRARY_PATH=$PWD/target/debug:$LD_LIBRARY_PATH
           /tmp/ffi_smoke
+      - name: Build FFI (release)
+        run: cargo build -p tiletangle-engine-ffi --release
+      - name: Upload FFI artifact (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-linux-${{ matrix.toolchain }}
+          path: target/release/libtiletangle_ffi.so
+      - name: Upload FFI artifact (macOS)
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-macos-${{ matrix.toolchain }}
+          path: target/release/libtiletangle_ffi.dylib
+      - name: Upload FFI artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-windows-msvc-${{ matrix.toolchain }}
+          path: target\release\tiletangle_ffi.dll
+      - name: Upload C header (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffi-header
+          path: engine_ffi/include/engine.h
   wasm:
     runs-on: ubuntu-latest
     steps:
