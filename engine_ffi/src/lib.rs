@@ -906,7 +906,10 @@ pub extern "C" fn tt_snapshot_state_json(game: *const GameHandle) -> *mut c_char
 /// Restore game state from a JSON snapshot. Returns 1 on success, 0 on error.
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub extern "C" fn tt_restore_state_json(game: *mut GameHandle, snapshot_json: *const c_char) -> c_uint {
+pub extern "C" fn tt_restore_state_json(
+    game: *mut GameHandle,
+    snapshot_json: *const c_char,
+) -> c_uint {
     LAST_ERROR.with(|e| *e.borrow_mut() = None);
     if game.is_null() {
         set_error("game is null");
@@ -946,7 +949,9 @@ pub extern "C" fn tt_string_free(ptr: *mut c_char) {
     if ptr.is_null() {
         return;
     }
-    unsafe { let _ = CString::from_raw(ptr); }
+    unsafe {
+        let _ = CString::from_raw(ptr);
+    }
 }
 
 /// Return the last error message for the current thread (pointer is valid until next call).
@@ -1137,7 +1142,9 @@ pub extern "C" fn tt_generate_moves(
                 serde_json::json!({ "x": c.x, "y": c.y, "kind_id": t.kind_id, "mark": t.mark })
             })
             .collect();
-        out.push(serde_json::json!({ "word": cm.word, "score": cm.score, "placements": placements }));
+        out.push(
+            serde_json::json!({ "word": cm.word, "score": cm.score, "placements": placements }),
+        );
     }
     take_cstring(serde_json::to_string(&out).unwrap())
 }

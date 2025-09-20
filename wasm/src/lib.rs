@@ -141,7 +141,10 @@ fn js_get_string(opts: &JsValue, key: &str) -> Result<Option<String>, JsValue> {
 
 fn js_get_u32(opts: &JsValue, key: &str) -> Result<Option<u32>, JsValue> {
     if let Some(val) = js_get(opts, key)? {
-        if let Some(n) = val.as_f64() && n.is_finite() && n >= 0.0 {
+        if let Some(n) = val.as_f64()
+            && n.is_finite()
+            && n >= 0.0
+        {
             return Ok(Some(n as u32));
         }
         return Err(to_js_err(format!(
@@ -153,7 +156,9 @@ fn js_get_u32(opts: &JsValue, key: &str) -> Result<Option<u32>, JsValue> {
 
 fn js_get_i32(opts: &JsValue, key: &str) -> Result<Option<i32>, JsValue> {
     if let Some(val) = js_get(opts, key)? {
-        if let Some(n) = val.as_f64() && n.is_finite() {
+        if let Some(n) = val.as_f64()
+            && n.is_finite()
+        {
             return Ok(Some(n as i32));
         }
         return Err(to_js_err(format!("expected number for '{key}'")));
@@ -163,7 +168,10 @@ fn js_get_i32(opts: &JsValue, key: &str) -> Result<Option<i32>, JsValue> {
 
 fn js_get_u64(opts: &JsValue, key: &str) -> Result<Option<u64>, JsValue> {
     if let Some(val) = js_get(opts, key)? {
-        if let Some(n) = val.as_f64() && n.is_finite() && n >= 0.0 {
+        if let Some(n) = val.as_f64()
+            && n.is_finite()
+            && n >= 0.0
+        {
             return Ok(Some(n as u64));
         }
         return Err(to_js_err(format!(
@@ -227,7 +235,8 @@ pub fn new_game(config_json: &str, players: usize) -> Result<JsGame, JsValue> {
     let mut state = engine::GameState::new(&eng_cfg, players).map_err(to_js_err)?;
     if cfg.board_layout.r#type.as_deref() == Some("3d") {
         let w = i32::try_from(width).map_err(|_| to_js_err("board width too large for 3D"))?;
-        let h = i32::try_from(layer_height).map_err(|_| to_js_err("board height too large for 3D"))?;
+        let h =
+            i32::try_from(layer_height).map_err(|_| to_js_err("board height too large for 3D"))?;
         let d = i32::try_from(depth).map_err(|_| to_js_err("board depth too large for 3D"))?;
         let mut nodes: Vec<engine::Coord2D> = Vec::new();
         for z in 0..d {
@@ -395,15 +404,10 @@ fn snapshot_json(game: &JsGame) -> String {
     for y in 0..h {
         let mut row: Vec<Vec<serde_json::Value>> = Vec::new();
         for x in 0..w {
-            let stack = if let Some(id) = game
-                .state
-                .board
-                .geom
-                .to_cell_id(engine::Coord2D { x, y })
+            let stack = if let Some(id) = game.state.board.geom.to_cell_id(engine::Coord2D { x, y })
             {
                 let cell = &game.state.board.cells[id.0 as usize];
-                cell
-                    .stack
+                cell.stack
                     .iter()
                     .map(|t| json!({"kind_id": t.kind_id, "mark": t.mark }))
                     .collect()
@@ -565,8 +569,7 @@ fn restore_from_json(game: &mut JsGame, snapshot: &str) -> Result<(), JsValue> {
             if let (Some(kid), Some(cnt)) = (
                 e.get("kind_id").and_then(|s| s.as_str()),
                 e.get("count").and_then(|u| u.as_u64()),
-            )
-                && let Some(tk) = game.state.tileset.tile_kinds.iter().find(|tk| tk.id == kid)
+            ) && let Some(tk) = game.state.tileset.tile_kinds.iter().find(|tk| tk.id == kid)
             {
                 *game.state.bag.counts.entry(tk.clone()).or_insert(0) = cnt as u32;
             }

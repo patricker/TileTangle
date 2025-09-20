@@ -1,7 +1,7 @@
 use engine::{self, AiConfig, AiDifficulty, BoardGeometry, GameState, Rules};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyAny};
+use pyo3::types::{PyAny, PyBytes, PyDict, PyList, PyModule};
 use serde::Deserialize;
 use std::time::Duration;
 

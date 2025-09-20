@@ -654,7 +654,10 @@ impl WordEngine {
             }
         };
         let mut cfg = engine::AiConfig::for_difficulty(level);
-        if !seed.is_nil() && let Ok(v) = seed.try_to::<i64>() && v >= 0 {
+        if !seed.is_nil()
+            && let Ok(v) = seed.try_to::<i64>()
+            && v >= 0
+        {
             cfg.randomness = Some(v as u64);
         }
         let Some(eval) = engine::best_move_greedy(state, &self.rules, &cfg) else {

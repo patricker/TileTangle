@@ -1,31 +1,48 @@
 use engine::{
-    best_move, generate_moves, AiDifficulty, BoardGeometry, Coord2D, CrosswordRules, GameConfig,
-    GameState, GraphOverlay, RectBoardLayout, Tile, TileKind, Tileset,
+    AiDifficulty, BoardGeometry, Coord2D, CrosswordRules, GameConfig, GameState, GraphOverlay,
+    RectBoardLayout, Tile, TileKind, Tileset, best_move, generate_moves,
 };
 use std::collections::HashMap;
 
 fn hex_state_with_center_tile() -> GameState {
     let tileset = Tileset {
         tile_kinds: vec![
-            TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
-            TileKind { id: "B".into(), symbol: "B".into(), score: 3, is_blank: false, aliases: vec![] },
-            TileKind { id: "C".into(), symbol: "C".into(), score: 3, is_blank: false, aliases: vec![] },
+            TileKind {
+                id: "A".into(),
+                symbol: "A".into(),
+                score: 1,
+                is_blank: false,
+                aliases: vec![],
+            },
+            TileKind {
+                id: "B".into(),
+                symbol: "B".into(),
+                score: 3,
+                is_blank: false,
+                aliases: vec![],
+            },
+            TileKind {
+                id: "C".into(),
+                symbol: "C".into(),
+                score: 3,
+                is_blank: false,
+                aliases: vec![],
+            },
         ],
     };
     let cfg = GameConfig {
         tileset,
         rack_size: 7,
-        board_layout: RectBoardLayout { width: 5, height: 5 },
+        board_layout: RectBoardLayout {
+            width: 5,
+            height: 5,
+        },
         ruleset_id: "cross".into(),
         dictionary_id: "en".into(),
         rng_seed: 1,
-        tile_counts: vec![
-            ("A".into(), 30),
-            ("B".into(), 30),
-            ("C".into(), 30),
-        ]
-        .into_iter()
-        .collect(),
+        tile_counts: vec![("A".into(), 30), ("B".into(), 30), ("C".into(), 30)]
+            .into_iter()
+            .collect(),
     };
     let mut state = GameState::new(&cfg, 2).unwrap();
     let width = 5_i32;
@@ -90,12 +107,7 @@ where
     }
 
     let mut edges = Vec::new();
-    let directions = [
-        (1, 0, "E"),
-        (-1, 0, "W"),
-        (0, -1, "N"),
-        (0, 1, "S"),
-    ];
+    let directions = [(1, 0, "E"), (-1, 0, "W"), (0, -1, "N"), (0, 1, "S")];
 
     for (&(x, y), &from_idx) in &index {
         for (dx, dy, dir) in directions {
@@ -119,9 +131,27 @@ where
 {
     let tileset = Tileset {
         tile_kinds: vec![
-            TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
-            TileKind { id: "B".into(), symbol: "B".into(), score: 3, is_blank: false, aliases: vec![] },
-            TileKind { id: "C".into(), symbol: "C".into(), score: 3, is_blank: false, aliases: vec![] },
+            TileKind {
+                id: "A".into(),
+                symbol: "A".into(),
+                score: 1,
+                is_blank: false,
+                aliases: vec![],
+            },
+            TileKind {
+                id: "B".into(),
+                symbol: "B".into(),
+                score: 3,
+                is_blank: false,
+                aliases: vec![],
+            },
+            TileKind {
+                id: "C".into(),
+                symbol: "C".into(),
+                score: 3,
+                is_blank: false,
+                aliases: vec![],
+            },
         ],
     };
     let cfg = GameConfig {
@@ -134,13 +164,9 @@ where
         ruleset_id: "cross".into(),
         dictionary_id: "en".into(),
         rng_seed: 1,
-        tile_counts: vec![
-            ("A".into(), 30),
-            ("B".into(), 30),
-            ("C".into(), 30),
-        ]
-        .into_iter()
-        .collect(),
+        tile_counts: vec![("A".into(), 30), ("B".into(), 30), ("C".into(), 30)]
+            .into_iter()
+            .collect(),
     };
     let mut state = GameState::new(&cfg, 2).unwrap();
     let overlay = overlay_from_mask(width, height, is_active);
@@ -165,7 +191,10 @@ fn graph_generate_moves_returns_candidates() {
         ..Default::default()
     };
     let moves = generate_moves(&state, &rules, &["B".into(), "C".into(), "A".into()], 7);
-    assert!(!moves.is_empty(), "expected at least one move for graph board");
+    assert!(
+        !moves.is_empty(),
+        "expected at least one move for graph board"
+    );
 }
 
 #[test]
@@ -185,16 +214,40 @@ fn triangle_graph_generate_moves_returns_candidates() {
     let mut state2 = state.clone();
     state2.players[0].rack.tiles.clear();
     state2.players[0].rack.tiles.extend([
-        Tile { kind_id: "B".into(), mark: None },
-        Tile { kind_id: "C".into(), mark: None },
-        Tile { kind_id: "A".into(), mark: None },
-        Tile { kind_id: "A".into(), mark: None },
-        Tile { kind_id: "A".into(), mark: None },
-        Tile { kind_id: "A".into(), mark: None },
-        Tile { kind_id: "A".into(), mark: None },
+        Tile {
+            kind_id: "B".into(),
+            mark: None,
+        },
+        Tile {
+            kind_id: "C".into(),
+            mark: None,
+        },
+        Tile {
+            kind_id: "A".into(),
+            mark: None,
+        },
+        Tile {
+            kind_id: "A".into(),
+            mark: None,
+        },
+        Tile {
+            kind_id: "A".into(),
+            mark: None,
+        },
+        Tile {
+            kind_id: "A".into(),
+            mark: None,
+        },
+        Tile {
+            kind_id: "A".into(),
+            mark: None,
+        },
     ]);
     let best = best_move(&state2, &rules, AiDifficulty::Easy);
-    assert!(best.is_some(), "expected best move for triangular graph board");
+    assert!(
+        best.is_some(),
+        "expected best move for triangular graph board"
+    );
 }
 
 #[test]
@@ -306,5 +359,8 @@ fn graph_best_move_produces_result() {
         ..Default::default()
     };
     let best = best_move(&state, &rules, AiDifficulty::Easy);
-    assert!(best.is_some(), "expected non-empty best move for graph board");
+    assert!(
+        best.is_some(),
+        "expected non-empty best move for graph board"
+    );
 }

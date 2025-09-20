@@ -96,10 +96,7 @@ mod serde_cell_adj {
     type RawAdjOpt = Option<Vec<RawAdjEntry>>;
     type CellAdj = Option<HashMap<CellId, Vec<(CellId, String)>>>;
 
-    pub fn serialize<S>(
-        value: &CellAdj,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(value: &CellAdj, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -478,7 +475,9 @@ impl BoardGeometry for RectGridGeometry {
 
     fn to_cell_id(&self, c: Coord2D) -> Option<CellId> {
         let id = self.index(c).map(CellId)?;
-        if let Some(p) = &self.present && !p.contains(&id) {
+        if let Some(p) = &self.present
+            && !p.contains(&id)
+        {
             return None;
         }
         Some(id)
@@ -1118,10 +1117,7 @@ impl CrosswordRules {
     }
 
     fn tileset_lookup_kind<'a>(tileset: &'a Tileset, kind_id: &str) -> Option<&'a TileKind> {
-        tileset
-            .tile_kinds
-            .iter()
-            .find(|tk| tk.id == kind_id)
+        tileset.tile_kinds.iter().find(|tk| tk.id == kind_id)
     }
 
     fn tile_symbol_and_score(tileset: &Tileset, tile: &Tile) -> (i16, String) {
@@ -2177,7 +2173,9 @@ fn leftover_counts_from_rack(
         *counts.entry(kid.clone()).or_default() += 1;
     }
     for (_, tile) in placements {
-        if let Some(entry) = counts.get_mut(&tile.kind_id) && *entry > 0 {
+        if let Some(entry) = counts.get_mut(&tile.kind_id)
+            && *entry > 0
+        {
             *entry -= 1;
         }
     }
