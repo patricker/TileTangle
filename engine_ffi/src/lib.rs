@@ -8,7 +8,7 @@ use std::os::raw::{c_char, c_uint};
 use std::slice;
 
 thread_local! {
-    static LAST_ERROR: RefCell<Option<String>> = RefCell::new(None);
+    static LAST_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 fn set_error(msg: impl ToString) {
@@ -119,6 +119,7 @@ struct JsBonusCell {
 
 /// Returns null on error; call `tt_last_error_message()` to retrieve the error string.
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn tt_new_game(config_json: *const c_char, players: c_uint) -> *mut GameHandle {
     LAST_ERROR.with(|e| *e.borrow_mut() = None);
     if config_json.is_null() {
@@ -284,6 +285,7 @@ pub extern "C" fn tt_free_game(game: *mut GameHandle) {
 /// On success, returns a newly-allocated C string containing a JSON score object.
 /// On error, returns null; use `tt_last_error_message()` for details.
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn tt_play_move(
     game: *mut GameHandle,
     placements_json: *const c_char,
@@ -425,6 +427,7 @@ pub extern "C" fn tt_get_rack(game: *const GameHandle) -> *mut c_char {
 /// Set board bonuses from JSON array of cells: [{x,y,letter_mul?,word_mul?,tags?}]
 /// Returns 1 on success, 0 on error (see tt_last_error_message()).
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn tt_set_bonuses(game: *mut GameHandle, bonuses_json: *const c_char) -> c_uint {
     LAST_ERROR.with(|e| *e.borrow_mut() = None);
     if game.is_null() {
@@ -511,7 +514,7 @@ fn ffi_collect_line_on_dir(
         .map(|(n, _)| n)
         .collect();
     let mut back = center;
-    if let Some(nb) = neighs.get(0) {
+    if let Some(nb) = neighs.first() {
         let mut prev = center;
         let mut cur = *nb;
         loop {
@@ -568,7 +571,7 @@ fn ffi_graph_find_main_path(
         let tag = board
             .geom
             .neighbors_with_tags(id)
-            .get(0)
+            .first()
             .map(|(_, t)| t.to_string())
             .unwrap_or_else(|| "E".into());
         return Some((tag, vec![id]));
@@ -597,7 +600,7 @@ fn ffi_graph_find_main_path(
             }
         }
         let start = starts
-            .get(0)
+            .first()
             .copied()
             .or_else(|| placed.iter().next().copied());
         if let Some(s) = start {
@@ -615,6 +618,7 @@ fn ffi_graph_find_main_path(
 /// Preview a move from placements JSON. Returns JSON with validity, score, and highlight cells.
 /// Schema: { valid: bool, total, main_word, main_score, cross_words, bingo, main_cells:[[x,y],...], cross_cells:[[[x,y],...],...] }
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn tt_preview_move(
     game: *const GameHandle,
     placements_json: *const c_char,
@@ -813,6 +817,7 @@ pub extern "C" fn tt_preview_move(
 /// If `seed_is_some` is non-zero, the `seed` value is used for deterministic randomness; otherwise RNG is disabled.
 /// Returns a JSON blob describing the evaluated move or the string "null" if no moves are available.
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn tt_best_move(
     game: *mut GameHandle,
     difficulty: *const c_char,
@@ -900,6 +905,7 @@ pub extern "C" fn tt_snapshot_state_json(game: *const GameHandle) -> *mut c_char
 
 /// Restore game state from a JSON snapshot. Returns 1 on success, 0 on error.
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn tt_restore_state_json(game: *mut GameHandle, snapshot_json: *const c_char) -> c_uint {
     LAST_ERROR.with(|e| *e.borrow_mut() = None);
     if game.is_null() {
@@ -935,13 +941,12 @@ pub extern "C" fn tt_restore_state_json(game: *mut GameHandle, snapshot_json: *c
 
 /// Free a C string previously returned by this library.
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn tt_string_free(ptr: *mut c_char) {
     if ptr.is_null() {
         return;
     }
-    unsafe {
-        let _ = CString::from_raw(ptr);
-    }
+    unsafe { let _ = CString::from_raw(ptr); }
 }
 
 /// Return the last error message for the current thread (pointer is valid until next call).
@@ -1014,6 +1019,7 @@ pub extern "C" fn tt_set_stacking(
 /// Set dictionary from text (newline-separated words). `kind` in {"fst","set","dawg","gaddag"}.
 /// `case_fold` non-zero enables case-folding.
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn tt_set_dictionary_from_text(
     game: *mut GameHandle,
     kind: *const c_char,
@@ -1071,6 +1077,7 @@ pub extern "C" fn tt_set_dictionary_from_text(
 
 /// Set dictionary from FST bytes buffer.
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn tt_set_dictionary_from_fst_bytes(
     game: *mut GameHandle,
     bytes: *const u8,
@@ -1112,7 +1119,7 @@ pub extern "C" fn tt_generate_moves(
         return std::ptr::null_mut();
     }
     let g = unsafe { &*(game as *const FfiGame) };
-    let pid = g.state.to_move.0 as usize;
+    let pid = g.state.to_move.0;
     let rack_kinds: Vec<String> = g.state.players[pid]
         .rack
         .tiles
@@ -1167,7 +1174,7 @@ mod tests {
         });
         let b = tt_get_board(game);
         assert!(!b.is_null());
-        unsafe { tt_string_free(b) };
+        tt_string_free(b);
         // place A at center then B to the right
         let placements = serde_json::json!([
             {"x": 2, "y": 2, "kind_id": "A"},
@@ -1184,7 +1191,7 @@ mod tests {
                 CStr::from_ptr(e).to_string_lossy().into_owned()
             }
         });
-        unsafe { tt_string_free(res) };
+        tt_string_free(res);
         tt_free_game(game);
     }
 }

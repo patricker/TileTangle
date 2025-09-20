@@ -4,7 +4,7 @@
 //! - `ScoreBonusPlugin` adds a fixed bonus to every scored move.
 //! - `RejectFarPlacementsPlugin` rejects moves where any two placed tiles are more than N cells apart (Manhattan).
 
-use engine;
+// use of `engine` root import not needed
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

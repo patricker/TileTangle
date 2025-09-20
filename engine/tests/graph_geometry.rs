@@ -53,7 +53,7 @@ fn hex_neighbors_counts() {
     let mut edges: Vec<(usize, usize, String)> = Vec::new();
     let try_edge =
         |edges: &mut Vec<(usize, usize, String)>, x1: i32, y1: i32, x2: i32, y2: i32, dir: &str| {
-            if x2 < 0 || x2 >= 7 || y2 < 0 || y2 >= 7 {
+            if !(0..7).contains(&x2) || !(0..7).contains(&y2) {
                 return;
             }
             edges.push((idx(x1, y1), idx(x2, y2), dir.to_string()));

@@ -775,28 +775,26 @@ impl WordEngine {
                         x: c.x - dir.0,
                         y: c.y - dir.1,
                     };
-                    if let Some(id) = temp_board.geom.to_cell_id(prev) {
-                        if placed_ids.contains(&id)
-                            || !temp_board.cells[id.0 as usize].stack.is_empty()
-                        {
-                            c = prev;
-                            continue;
-                        }
+                    if let Some(id) = temp_board.geom.to_cell_id(prev)
+                        && (placed_ids.contains(&id)
+                            || !temp_board.cells[id.0 as usize].stack.is_empty())
+                    {
+                        c = prev;
+                        continue;
                     }
                     break;
                 }
                 loop {
-                    if let Some(id) = temp_board.geom.to_cell_id(c) {
-                        if placed_ids.contains(&id)
-                            || !temp_board.cells[id.0 as usize].stack.is_empty()
-                        {
-                            main_cells.push((c.x, c.y));
-                            c = engine::Coord2D {
-                                x: c.x + dir.0,
-                                y: c.y + dir.1,
-                            };
-                            continue;
-                        }
+                    if let Some(id) = temp_board.geom.to_cell_id(c)
+                        && (placed_ids.contains(&id)
+                            || !temp_board.cells[id.0 as usize].stack.is_empty())
+                    {
+                        main_cells.push((c.x, c.y));
+                        c = engine::Coord2D {
+                            x: c.x + dir.0,
+                            y: c.y + dir.1,
+                        };
+                        continue;
                     }
                     break;
                 }
@@ -814,30 +812,28 @@ impl WordEngine {
                         x: back.x - pdir.0,
                         y: back.y - pdir.1,
                     };
-                    if let Some(id) = temp_board.geom.to_cell_id(prev) {
-                        if placed_ids.contains(&id)
-                            || !temp_board.cells[id.0 as usize].stack.is_empty()
-                        {
-                            back = prev;
-                            continue;
-                        }
+                    if let Some(id) = temp_board.geom.to_cell_id(prev)
+                        && (placed_ids.contains(&id)
+                            || !temp_board.cells[id.0 as usize].stack.is_empty())
+                    {
+                        back = prev;
+                        continue;
                     }
                     break;
                 }
                 let mut vecxy = Vec::new();
                 let mut cur = back;
                 loop {
-                    if let Some(id) = temp_board.geom.to_cell_id(cur) {
-                        if placed_ids.contains(&id)
-                            || !temp_board.cells[id.0 as usize].stack.is_empty()
-                        {
-                            vecxy.push((cur.x, cur.y));
-                            cur = engine::Coord2D {
-                                x: cur.x + pdir.0,
-                                y: cur.y + pdir.1,
-                            };
-                            continue;
-                        }
+                    if let Some(id) = temp_board.geom.to_cell_id(cur)
+                        && (placed_ids.contains(&id)
+                            || !temp_board.cells[id.0 as usize].stack.is_empty())
+                    {
+                        vecxy.push((cur.x, cur.y));
+                        cur = engine::Coord2D {
+                            x: cur.x + pdir.0,
+                            y: cur.y + pdir.1,
+                        };
+                        continue;
                     }
                     break;
                 }
@@ -877,7 +873,7 @@ fn collect_line_on_dir(
         .map(|(n, _)| n)
         .collect();
     let mut back = center;
-    if let Some(nb) = neighs.get(0) {
+    if let Some(nb) = neighs.first() {
         let mut prev = center;
         let mut cur = *nb;
         loop {
@@ -934,7 +930,7 @@ fn graph_find_main_path(
         let tag = board
             .geom
             .neighbors_with_tags(id)
-            .get(0)
+            .first()
             .map(|(_, t)| t.to_string())
             .unwrap_or_else(|| "E".into());
         return Some((tag, vec![id]));
@@ -961,7 +957,7 @@ fn graph_find_main_path(
             }
         }
         let start = starts
-            .get(0)
+            .first()
             .copied()
             .or_else(|| placed.iter().next().copied());
         if let Some(s) = start {

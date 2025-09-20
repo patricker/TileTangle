@@ -83,7 +83,7 @@ mod serde_cell_set {
         D: Deserializer<'de>,
     {
         let opt = Option::<Vec<u32>>::deserialize(deserializer)?;
-        Ok(opt.map(|vec| vec.into_iter().map(|id| CellId(id)).collect()))
+        Ok(opt.map(|vec| vec.into_iter().map(CellId).collect()))
     }
 }
 
@@ -92,15 +92,19 @@ mod serde_cell_adj {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::collections::HashMap;
 
+    type RawAdjEntry = (u32, Vec<(u32, String)>);
+    type RawAdjOpt = Option<Vec<RawAdjEntry>>;
+    type CellAdj = Option<HashMap<CellId, Vec<(CellId, String)>>>;
+
     pub fn serialize<S>(
-        value: &Option<HashMap<CellId, Vec<(CellId, String)>>>,
+        value: &CellAdj,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let opt: Option<Vec<(u32, Vec<(u32, String)>)>> = value.as_ref().map(|map| {
-            let mut entries: Vec<(u32, Vec<(u32, String)>)> = map
+        let opt: RawAdjOpt = value.as_ref().map(|map| {
+            let mut entries: Vec<RawAdjEntry> = map
                 .iter()
                 .map(|(cid, vec)| {
                     let inner = vec
@@ -116,13 +120,11 @@ mod serde_cell_adj {
         opt.serialize(serializer)
     }
 
-    pub fn deserialize<'de, D>(
-        deserializer: D,
-    ) -> Result<Option<HashMap<CellId, Vec<(CellId, String)>>>, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<CellAdj, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let opt = Option::<Vec<(u32, Vec<(u32, String)>)>>::deserialize(deserializer)?;
+        let opt = RawAdjOpt::deserialize(deserializer)?;
         Ok(opt.map(|entries| {
             entries
                 .into_iter()
@@ -206,16 +208,11 @@ pub fn nfc<S: AsRef<str>>(s: S) -> Symbol {
     s.as_ref().nfc().collect()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NormalizationMode {
+    #[default]
     NFC,
     NFKC,
-}
-
-impl Default for NormalizationMode {
-    fn default() -> Self {
-        NormalizationMode::NFC
-    }
 }
 
 fn normalize_with_mode<S: AsRef<str>>(s: S, mode: NormalizationMode) -> String {
@@ -226,7 +223,7 @@ fn normalize_with_mode<S: AsRef<str>>(s: S, mode: NormalizationMode) -> String {
 }
 
 pub trait Tokenizer: Send + Sync {
-    fn segment<'a>(&self, text: &'a str) -> Vec<String>;
+    fn segment(&self, text: &str) -> Vec<String>;
 }
 
 #[derive(Clone)]
@@ -267,7 +264,7 @@ impl Default for TokenizerRef {
 struct GraphemeTokenizer;
 
 impl Tokenizer for GraphemeTokenizer {
-    fn segment<'a>(&self, text: &'a str) -> Vec<String> {
+    fn segment(&self, text: &str) -> Vec<String> {
         text.graphemes(true).map(|g| g.to_string()).collect()
     }
 }
@@ -275,7 +272,7 @@ impl Tokenizer for GraphemeTokenizer {
 struct CharacterTokenizer;
 
 impl Tokenizer for CharacterTokenizer {
-    fn segment<'a>(&self, text: &'a str) -> Vec<String> {
+    fn segment(&self, text: &str) -> Vec<String> {
         text.chars().map(|c| c.to_string()).collect()
     }
 }
@@ -387,7 +384,7 @@ impl RectGridGeometry {
         Ok(())
     }
 
-    pub fn neighbors_with_tags<'a>(&'a self, id: CellId) -> SmallVec<[(CellId, &'a str); 8]> {
+    pub fn neighbors_with_tags(&self, id: CellId) -> SmallVec<[(CellId, &str); 8]> {
         let mut out: SmallVec<[(CellId, &str); 8]> = SmallVec::new();
         if let Some(adj) = &self.adj {
             if let Some(v) = adj.get(&id) {
@@ -481,10 +478,8 @@ impl BoardGeometry for RectGridGeometry {
 
     fn to_cell_id(&self, c: Coord2D) -> Option<CellId> {
         let id = self.index(c).map(CellId)?;
-        if let Some(p) = &self.present {
-            if !p.contains(&id) {
-                return None;
-            }
+        if let Some(p) = &self.present && !p.contains(&id) {
+            return None;
         }
         Some(id)
     }
@@ -1019,26 +1014,18 @@ pub trait Rules {
     ) -> Result<(), EngineError>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ReadingDirection {
+    #[default]
     LTR,
     RTL,
 }
-impl Default for ReadingDirection {
-    fn default() -> Self {
-        ReadingDirection::LTR
-    }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StackScoring {
+    #[default]
     TopOnly,
     SumStack,
-}
-impl Default for StackScoring {
-    fn default() -> Self {
-        StackScoring::TopOnly
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -1131,12 +1118,10 @@ impl CrosswordRules {
     }
 
     fn tileset_lookup_kind<'a>(tileset: &'a Tileset, kind_id: &str) -> Option<&'a TileKind> {
-        for tk in &tileset.tile_kinds {
-            if tk.id == kind_id {
-                return Some(tk);
-            }
-        }
-        None
+        tileset
+            .tile_kinds
+            .iter()
+            .find(|tk| tk.id == kind_id)
     }
 
     fn tile_symbol_and_score(tileset: &Tileset, tile: &Tile) -> (i16, String) {
@@ -1258,7 +1243,7 @@ impl CrosswordRules {
             let tag = board
                 .geom
                 .neighbors_with_tags(id)
-                .get(0)
+                .first()
                 .map(|(_, t)| t.to_string())
                 .unwrap_or_else(|| "E".into());
             return Some((tag, vec![id]));
@@ -1323,13 +1308,13 @@ impl Rules for CrosswordRules {
                     if cell.stack.len() + 1 > self.stacking_max_height {
                         return Err(EngineError::Config("stack too high"));
                     }
-                    if self.forbid_same_symbol_overlay {
-                        if let Some(top) = cell.stack.last() {
-                            let (_, top_sym) = Self::tile_symbol_and_score(&state.tileset, top);
-                            let (_, new_sym) = Self::tile_symbol_and_score(&state.tileset, tile);
-                            if top_sym == new_sym {
-                                return Err(EngineError::Config("cannot overlay same symbol"));
-                            }
+                    if self.forbid_same_symbol_overlay
+                        && let Some(top) = cell.stack.last()
+                    {
+                        let (_, top_sym) = Self::tile_symbol_and_score(&state.tileset, top);
+                        let (_, new_sym) = Self::tile_symbol_and_score(&state.tileset, tile);
+                        if top_sym == new_sym {
+                            return Err(EngineError::Config("cannot overlay same symbol"));
                         }
                     }
                 }
@@ -1360,13 +1345,13 @@ impl Rules for CrosswordRules {
                 if cell.stack.len() + 1 > self.stacking_max_height {
                     return Err(EngineError::Config("stack too high"));
                 }
-                if self.forbid_same_symbol_overlay {
-                    if let Some(top) = cell.stack.last() {
-                        let (_, top_sym) = Self::tile_symbol_and_score(&state.tileset, top);
-                        let (_, new_sym) = Self::tile_symbol_and_score(&state.tileset, tile);
-                        if top_sym == new_sym {
-                            return Err(EngineError::Config("cannot overlay same symbol"));
-                        }
+                if self.forbid_same_symbol_overlay
+                    && let Some(top) = cell.stack.last()
+                {
+                    let (_, top_sym) = Self::tile_symbol_and_score(&state.tileset, top);
+                    let (_, new_sym) = Self::tile_symbol_and_score(&state.tileset, tile);
+                    if top_sym == new_sym {
+                        return Err(EngineError::Config("cannot overlay same symbol"));
                     }
                 }
             }
@@ -1914,7 +1899,7 @@ fn collect_line_on_dir(
         .collect();
     let mut back = center;
     // choose a backward direction arbitrarily among available
-    if let Some(nb) = neighs.get(0) {
+    if let Some(nb) = neighs.first() {
         let mut prev = center;
         let mut cur = *nb;
         // walk backwards as long as nodes are filled (placed or existing)
@@ -2192,10 +2177,8 @@ fn leftover_counts_from_rack(
         *counts.entry(kid.clone()).or_default() += 1;
     }
     for (_, tile) in placements {
-        if let Some(entry) = counts.get_mut(&tile.kind_id) {
-            if *entry > 0 {
-                *entry -= 1;
-            }
+        if let Some(entry) = counts.get_mut(&tile.kind_id) && *entry > 0 {
+            *entry -= 1;
         }
     }
     counts.retain(|_, v| *v > 0);
@@ -2397,10 +2380,10 @@ fn best_move_inner(
 
     let is_root = depth == ctx.config.lookahead_depth;
     if is_root {
-        if let Some(limit) = ctx.config.candidate_limit {
-            if candidates.len() > limit {
-                candidates.truncate(limit);
-            }
+        if let Some(limit) = ctx.config.candidate_limit
+            && candidates.len() > limit
+        {
+            candidates.truncate(limit);
         }
     } else if ctx.config.reply_move_limit != usize::MAX
         && candidates.len() > ctx.config.reply_move_limit
@@ -2469,12 +2452,11 @@ fn best_move_inner(
             if let Ok(validated) = rules.validate(state, &draft) {
                 let score = rules.score(state, &validated);
                 let mut next_state = state.clone();
-                if rules.commit(&mut next_state, validated, &score).is_ok() {
-                    if let Some(reply) =
+                if rules.commit(&mut next_state, validated, &score).is_ok()
+                    && let Some(reply) =
                         best_move_inner(&next_state, rules, depth.saturating_sub(1), ctx)
-                    {
-                        eval.total -= reply.total;
-                    }
+                {
+                    eval.total -= reply.total;
                 }
             }
         }
@@ -2545,12 +2527,10 @@ pub fn generate_moves(
         None
     }
     fn find_kind_for_symbol<'a>(tileset: &'a Tileset, sym: &str) -> Option<&'a TileKind> {
-        for tk in &tileset.tile_kinds {
-            if !tk.is_blank && tk.symbol == sym {
-                return Some(tk);
-            }
-        }
-        None
+        tileset
+            .tile_kinds
+            .iter()
+            .find(|tk| !tk.is_blank && tk.symbol == sym)
     }
 
     // build helper to read cell including overlay
@@ -2576,26 +2556,26 @@ pub fn generate_moves(
                 x: c.x - dx,
                 y: c.y - dy,
             };
-            if let Some(id) = state.board.geom.to_cell_id(prev) {
-                if ov.get(id, state).is_some() {
-                    c = prev;
-                    continue;
-                }
+            if let Some(id) = state.board.geom.to_cell_id(prev)
+                && ov.get(id, state).is_some()
+            {
+                c = prev;
+                continue;
             }
             break;
         }
         let mut s = String::new();
         loop {
-            if let Some(id) = state.board.geom.to_cell_id(c) {
-                if let Some(tile) = ov.get(id, state) {
-                    let (_, sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, tile);
-                    s.push_str(&sym);
-                    c = Coord2D {
-                        x: c.x + dx,
-                        y: c.y + dy,
-                    };
-                    continue;
-                }
+            if let Some(id) = state.board.geom.to_cell_id(c)
+                && let Some(tile) = ov.get(id, state)
+            {
+                let (_, sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, tile);
+                s.push_str(&sym);
+                c = Coord2D {
+                    x: c.x + dx,
+                    y: c.y + dy,
+                };
+                continue;
             }
             break;
         }
@@ -2678,6 +2658,11 @@ pub fn generate_moves(
     let xchecks_horz = cross_checks(state, (1, 0));
 
     // DFS to the right from anchor only (simplified); ensure anchor included
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::collapsible_if,
+        clippy::manual_retain
+    )]
     fn dfs_right(
         state: &GameState,
         rules: &impl Rules,
@@ -3069,6 +3054,12 @@ pub fn generate_moves(
     }
 
     let mut out: Vec<CandidateMove> = Vec::new();
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::collapsible_if,
+        clippy::collapsible_else_if,
+        clippy::manual_retain
+    )]
     fn dfs_left_then_right(
         state: &GameState,
         rules: &impl Rules,
@@ -3332,11 +3323,11 @@ pub fn generate_moves(
                 x: c.x - dir.0,
                 y: c.y - dir.1,
             };
-            if let Some(id) = state.board.geom.to_cell_id(prev) {
-                if state.board.cells[id.0 as usize].stack.last().is_some() {
-                    c = prev;
-                    continue;
-                }
+            if let Some(id) = state.board.geom.to_cell_id(prev)
+                && state.board.cells[id.0 as usize].stack.last().is_some()
+            {
+                c = prev;
+                continue;
             }
             break;
         }
@@ -3346,16 +3337,16 @@ pub fn generate_moves(
             if c.x == pos.x && c.y == pos.y {
                 break;
             }
-            if let Some(id) = state.board.geom.to_cell_id(c) {
-                if let Some(t) = state.board.cells[id.0 as usize].stack.last() {
-                    let (_, sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, t);
-                    s.push_str(&sym);
-                    c = Coord2D {
-                        x: c.x + dir.0,
-                        y: c.y + dir.1,
-                    };
-                    continue;
-                }
+            if let Some(id) = state.board.geom.to_cell_id(c)
+                && let Some(t) = state.board.cells[id.0 as usize].stack.last()
+            {
+                let (_, sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, t);
+                s.push_str(&sym);
+                c = Coord2D {
+                    x: c.x + dir.0,
+                    y: c.y + dir.1,
+                };
+                continue;
             }
             break;
         }
@@ -3392,10 +3383,10 @@ pub fn generate_moves(
         let h_prefix = context_prefix(state, start, (1, 0));
         // Compute initial GADDAG pre-sep node for left context
         let mut pre: Option<(&GaddagDictionary, usize)> = None;
-        if let Some(gd) = gaddag_pre_seed {
-            if let Some(cur) = GaddagCursor::new(gd, &h_prefix) {
-                pre = Some((gd, cur.pre_node()));
-            }
+        if let Some(gd) = gaddag_pre_seed
+            && let Some(cur) = GaddagCursor::new(gd, &h_prefix)
+        {
+            pre = Some((gd, cur.pre_node()));
         }
         dfs_left_then_right(
             state,
@@ -3416,10 +3407,10 @@ pub fn generate_moves(
         // vertical with up context
         let v_prefix = context_prefix(state, start, (0, 1));
         let mut pre_v: Option<(&GaddagDictionary, usize)> = None;
-        if let Some(gd) = gaddag_pre_seed {
-            if let Some(cur) = GaddagCursor::new(gd, &v_prefix) {
-                pre_v = Some((gd, cur.pre_node()));
-            }
+        if let Some(gd) = gaddag_pre_seed
+            && let Some(cur) = GaddagCursor::new(gd, &v_prefix)
+        {
+            pre_v = Some((gd, cur.pre_node()));
         }
         dfs_left_then_right(
             state,
@@ -3506,17 +3497,21 @@ fn generate_moves_graph_basic(
         deque.into_iter().collect()
     }
 
+    struct ExploreCtx<'a> {
+        state: &'a GameState,
+        rules: &'a dyn Rules,
+        tile_symbols: &'a [(String, String)],
+        blank_ids: &'a [String],
+        seen: &'a mut HashSet<String>,
+        out: &'a mut Vec<CandidateMove>,
+    }
+
     fn explore_segment(
-        state: &GameState,
-        rules: &impl Rules,
         segment: &[CellId],
         idx: usize,
         rack_counts: &mut HashMap<String, usize>,
         placements: &mut Vec<(CellId, Tile)>,
-        tile_symbols: &[(String, String)],
-        blank_ids: &[String],
-        seen: &mut HashSet<String>,
-        out: &mut Vec<CandidateMove>,
+        ctx: &mut ExploreCtx<'_>,
     ) {
         if idx == segment.len() {
             if placements.is_empty() {
@@ -3525,8 +3520,8 @@ fn generate_moves_graph_basic(
             let draft = MoveDraft {
                 placements: placements.clone(),
             };
-            if let Ok(validated) = rules.validate(state, &draft) {
-                let sc = rules.score(state, &validated);
+            if let Ok(validated) = ctx.rules.validate(ctx.state, &draft) {
+                let sc = ctx.rules.score(ctx.state, &validated);
                 if sc.total >= 0 {
                     let mut key_parts: Vec<String> = placements
                         .iter()
@@ -3541,8 +3536,8 @@ fn generate_moves_graph_basic(
                         .collect();
                     key_parts.sort();
                     let key = format!("{}|{}", key_parts.join(";"), sc.main_word);
-                    if seen.insert(key) {
-                        out.push(CandidateMove {
+                    if ctx.seen.insert(key) {
+                        ctx.out.push(CandidateMove {
                             placements: placements.clone(),
                             word: sc.main_word,
                             score: sc.total,
@@ -3554,26 +3549,15 @@ fn generate_moves_graph_basic(
         }
 
         let cid = segment[idx];
-        let cell = &state.board.cells[cid.0 as usize];
+        let cell = &ctx.state.board.cells[cid.0 as usize];
         if let Some(tile) = cell.stack.last() {
-            let (_, _sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, tile);
-            explore_segment(
-                state,
-                rules,
-                segment,
-                idx + 1,
-                rack_counts,
-                placements,
-                tile_symbols,
-                blank_ids,
-                seen,
-                out,
-            );
+            let (_, _sym) = CrosswordRules::tile_symbol_and_score(&ctx.state.tileset, tile);
+            explore_segment(segment, idx + 1, rack_counts, placements, ctx);
             return;
         }
 
         // Try normal tiles
-        for (kind_id, _symbol) in tile_symbols.iter() {
+        for (kind_id, _symbol) in ctx.tile_symbols.iter() {
             let available = rack_counts.get(kind_id).copied().unwrap_or(0);
             if available == 0 {
                 continue;
@@ -3589,18 +3573,7 @@ fn generate_moves_graph_basic(
                     mark: None,
                 },
             ));
-            explore_segment(
-                state,
-                rules,
-                segment,
-                idx + 1,
-                rack_counts,
-                placements,
-                tile_symbols,
-                blank_ids,
-                seen,
-                out,
-            );
+            explore_segment(segment, idx + 1, rack_counts, placements, ctx);
             placements.pop();
             {
                 let entry = rack_counts.get_mut(kind_id).unwrap();
@@ -3609,7 +3582,7 @@ fn generate_moves_graph_basic(
         }
 
         // Try blank tiles
-        for blank_id in blank_ids {
+        for blank_id in ctx.blank_ids {
             let available = rack_counts.get(blank_id).copied().unwrap_or(0);
             if available == 0 {
                 continue;
@@ -3618,7 +3591,7 @@ fn generate_moves_graph_basic(
                 let entry = rack_counts.get_mut(blank_id).unwrap();
                 *entry -= 1;
             }
-            for (_, symbol) in tile_symbols.iter() {
+            for (_, symbol) in ctx.tile_symbols.iter() {
                 placements.push((
                     cid,
                     Tile {
@@ -3626,18 +3599,7 @@ fn generate_moves_graph_basic(
                         mark: Some(symbol.clone()),
                     },
                 ));
-                explore_segment(
-                    state,
-                    rules,
-                    segment,
-                    idx + 1,
-                    rack_counts,
-                    placements,
-                    tile_symbols,
-                    blank_ids,
-                    seen,
-                    out,
-                );
+                explore_segment(segment, idx + 1, rack_counts, placements, ctx);
                 placements.pop();
             }
             {
@@ -3672,6 +3634,14 @@ fn generate_moves_graph_basic(
 
     let mut out = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
+    let mut ctx = ExploreCtx {
+        state,
+        rules: rules as &dyn Rules,
+        tile_symbols: &tile_symbols,
+        blank_ids: &blank_ids,
+        seen: &mut seen,
+        out: &mut out,
+    };
 
     for &anchor in anchors {
         if !state.board.cells[anchor.0 as usize].stack.is_empty() {
@@ -3714,18 +3684,7 @@ fn generate_moves_graph_basic(
 
                     let mut rack_counts = rack_template.clone();
                     let mut placements: Vec<(CellId, Tile)> = Vec::new();
-                    explore_segment(
-                        state,
-                        rules,
-                        segment,
-                        0,
-                        &mut rack_counts,
-                        &mut placements,
-                        &tile_symbols,
-                        &blank_ids,
-                        &mut seen,
-                        &mut out,
-                    );
+                    explore_segment(segment, 0, &mut rack_counts, &mut placements, &mut ctx);
                 }
             }
         }
@@ -4251,7 +4210,8 @@ impl GaddagDictionary {
         let reader = BufReader::new(f);
         let mut words: Vec<String> = Vec::new();
         for line in reader.lines() {
-            let mut s = normalize_with_mode(line?.trim().to_string(), opts.norm);
+            let raw = line?;
+            let mut s = normalize_with_mode(raw.trim(), opts.norm);
             if opts.case_fold {
                 s = s.to_lowercase();
             }
@@ -5106,7 +5066,7 @@ mod tests {
         use std::sync::Arc;
         struct QuTokenizer;
         impl Tokenizer for QuTokenizer {
-            fn segment<'a>(&self, text: &'a str) -> Vec<String> {
+            fn segment(&self, text: &str) -> Vec<String> {
                 let mut out = Vec::new();
                 let mut chars = text.chars().peekable();
                 while let Some(ch) = chars.next() {
@@ -5181,7 +5141,7 @@ mod tests {
         let rules = PluginRules::new(
             base,
             vec![
-                Box::new(BasicActionsPlugin::default()),
+                Box::new(BasicActionsPlugin),
                 Box::new(ScoreBonusPlugin { bonus: 5 }),
             ],
         );
@@ -5235,7 +5195,7 @@ mod tests {
         };
         let st = GameState::new(&cfg, 2).unwrap();
         let base = CrosswordRules::default();
-        let rules = PluginRules::new(base, vec![Box::new(BasicActionsPlugin::default())]);
+        let rules = PluginRules::new(base, vec![Box::new(BasicActionsPlugin)]);
         let mut mv = UserMove::default();
         mv.actions.push(Action::SwapRack {
             give: vec!["A".into()],

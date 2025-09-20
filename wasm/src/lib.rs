@@ -141,10 +141,8 @@ fn js_get_string(opts: &JsValue, key: &str) -> Result<Option<String>, JsValue> {
 
 fn js_get_u32(opts: &JsValue, key: &str) -> Result<Option<u32>, JsValue> {
     if let Some(val) = js_get(opts, key)? {
-        if let Some(n) = val.as_f64() {
-            if n.is_finite() && n >= 0.0 {
-                return Ok(Some(n as u32));
-            }
+        if let Some(n) = val.as_f64() && n.is_finite() && n >= 0.0 {
+            return Ok(Some(n as u32));
         }
         return Err(to_js_err(format!(
             "expected non-negative number for '{key}'"
@@ -155,10 +153,8 @@ fn js_get_u32(opts: &JsValue, key: &str) -> Result<Option<u32>, JsValue> {
 
 fn js_get_i32(opts: &JsValue, key: &str) -> Result<Option<i32>, JsValue> {
     if let Some(val) = js_get(opts, key)? {
-        if let Some(n) = val.as_f64() {
-            if n.is_finite() {
-                return Ok(Some(n as i32));
-            }
+        if let Some(n) = val.as_f64() && n.is_finite() {
+            return Ok(Some(n as i32));
         }
         return Err(to_js_err(format!("expected number for '{key}'")));
     }
@@ -167,10 +163,8 @@ fn js_get_i32(opts: &JsValue, key: &str) -> Result<Option<i32>, JsValue> {
 
 fn js_get_u64(opts: &JsValue, key: &str) -> Result<Option<u64>, JsValue> {
     if let Some(val) = js_get(opts, key)? {
-        if let Some(n) = val.as_f64() {
-            if n.is_finite() && n >= 0.0 {
-                return Ok(Some(n as u64));
-            }
+        if let Some(n) = val.as_f64() && n.is_finite() && n >= 0.0 {
+            return Ok(Some(n as u64));
         }
         return Err(to_js_err(format!(
             "expected non-negative number for '{key}'"
@@ -571,10 +565,10 @@ fn restore_from_json(game: &mut JsGame, snapshot: &str) -> Result<(), JsValue> {
             if let (Some(kid), Some(cnt)) = (
                 e.get("kind_id").and_then(|s| s.as_str()),
                 e.get("count").and_then(|u| u.as_u64()),
-            ) {
-                if let Some(tk) = game.state.tileset.tile_kinds.iter().find(|tk| tk.id == kid) {
-                    *game.state.bag.counts.entry(tk.clone()).or_insert(0) = cnt as u32;
-                }
+            )
+                && let Some(tk) = game.state.tileset.tile_kinds.iter().find(|tk| tk.id == kid)
+            {
+                *game.state.bag.counts.entry(tk.clone()).or_insert(0) = cnt as u32;
             }
         }
     }

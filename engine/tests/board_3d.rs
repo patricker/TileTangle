@@ -73,7 +73,7 @@ fn validate_z_line_and_score() {
     let h = 3;
     let d = 2; // depth 2
     let mut st = eng::GameState::new(&cfg_wh(w, h * d as u32), 2).unwrap();
-    apply_3d_overlay(&mut st, w as i32, h as i32, d as i32);
+    apply_3d_overlay(&mut st, w as i32, h as i32, d);
     let rules = eng::CrosswordRules::default();
     // Place at (1,1,0) and (1,1,1) along Z
     let id0 = st
@@ -118,7 +118,7 @@ fn bonus_applies_in_3d() {
     let h = 3;
     let d = 2;
     let mut st = eng::GameState::new(&cfg_wh(w, h * d as u32), 2).unwrap();
-    apply_3d_overlay(&mut st, w as i32, h as i32, d as i32);
+    apply_3d_overlay(&mut st, w as i32, h as i32, d);
     // Set a double word on the second cell
     let id1 = st
         .board

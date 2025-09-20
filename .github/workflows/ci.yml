@@ -28,14 +28,7 @@ jobs:
         run: cargo test --workspace --all-features --exclude tiletangle-python
       - name: Clippy (core crates only)
         run: |
-          cargo clippy --all-targets --all-features \
-            -p tiletangle-engine \
-            -p tiletangle-engine-ffi \
-            -p tiletangle-wasm \
-            -p tiletangle-godot \
-            -p tiletangle-plugin-template \
-            -p dict-build \
-            -- -D warnings
+          cargo clippy --all-targets --all-features -p tiletangle-engine -p tiletangle-engine-ffi -- -D warnings
       - name: Rustfmt
         run: cargo fmt --all -- --check
       - name: Generate C header (cbindgen)

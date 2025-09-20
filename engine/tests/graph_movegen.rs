@@ -164,12 +164,7 @@ fn graph_generate_moves_returns_candidates() {
         free_word_mode: true,
         ..Default::default()
     };
-    let moves = generate_moves(
-        &state,
-        &rules,
-        &vec!["B".into(), "C".into(), "A".into()],
-        7,
-    );
+    let moves = generate_moves(&state, &rules, &["B".into(), "C".into(), "A".into()], 7);
     assert!(!moves.is_empty(), "expected at least one move for graph board");
 }
 
@@ -215,12 +210,7 @@ fn ring_graph_generate_moves_returns_candidates() {
         free_word_mode: true,
         ..Default::default()
     };
-    let moves = generate_moves(
-        &state,
-        &rules,
-        &vec!["B".into(), "C".into(), "A".into()],
-        7,
-    );
+    let moves = generate_moves(&state, &rules, &["B".into(), "C".into(), "A".into()], 7);
     assert!(
         !moves.is_empty(),
         "expected at least one move for ring graph board"
