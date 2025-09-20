@@ -26,7 +26,10 @@ Copy the file into your Unity project under `Assets/Plugins/<Platform>/` with th
 
 1. Add `Assets/Plugins/<Platform>/libtiletangle_ffi.(so|dylib|dll)`.
 2. Add `TileTangle.cs` to a suitable folder under your `Assets/` (e.g., `Assets/Scripts/TileTangle/`).
-3. (Optional) Drop in the demo scripts `Examples/BoardDemo.cs`, `Examples/RackTileDraggable.cs`, and `Examples/BoardCellDropTarget.cs`. Attach `BoardDemo` to an empty GameObject in a new scene. It creates a Canvas with a grid, a rack bar, and a score overlay. You can toggle Free Word Mode, reading direction (RTL), stacking, board adjacency (Orth/Diag/Hex), shape masks (Rect/Diamond), and 2D vs 3D layers (with Z slice). Pick an AI difficulty and fire the **CPU Move** button to watch the Rust solver respond. Drag tiles from the rack onto board cells, then press “Commit Move” (or cancel). Undo/Redo is supported via client‑side JSON snapshots.
+3. (Optional) Demo scripts:
+   - Full demo: `Examples/BoardDemo.cs`, `Examples/RackTileDraggable.cs`, `Examples/BoardCellDropTarget.cs`.
+   - UPM sample: `Samples~/BoardDemo/BoardDemo.cs` (click‑to‑place minimal sample).
+   Attach `BoardDemo` to an empty GameObject in a new scene. The full demo creates a Canvas with a grid, a rack bar, and a score overlay. You can toggle Free Word Mode, reading direction (RTL), stacking, board adjacency (Orth/Diag/Hex), shape masks (Rect/Diamond), and 2D vs 3D layers (with Z slice). Pick an AI difficulty and fire the **CPU Move** button to watch the Rust solver respond. Drag tiles from the rack onto board cells, then press “Commit Move” (or cancel). Undo/Redo is supported via client‑side JSON snapshots.
 4. Call the wrapper directly, or use the demo script:
 
 ```csharp

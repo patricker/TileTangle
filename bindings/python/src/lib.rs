@@ -1,8 +1,7 @@
-#![allow(deprecated)]
 use engine::{self, AiConfig, AiDifficulty, BoardGeometry, GameState, Rules};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyList};
+use pyo3::types::{PyBytes, PyDict, PyList, PyModule, PyAny};
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -72,7 +71,7 @@ impl Game {
         eval: engine::EvaluatedMove,
         py: Python<'_>,
     ) -> PyResult<PyObject> {
-        let result = PyDict::new(py);
+        let result = PyDict::new_bound(py);
         let candidate = eval.candidate;
         result.set_item("word", &candidate.word)?;
         result.set_item("score", candidate.score)?;
@@ -80,7 +79,7 @@ impl Game {
         result.set_item("board_equity", eval.board_equity)?;
         result.set_item("endgame_penalty", eval.endgame_penalty)?;
         result.set_item("total", eval.total)?;
-        let placements = PyList::empty(py);
+        let placements = PyList::empty_bound(py);
         for (cid, tile) in candidate.placements {
             let coord = self
                 .state
@@ -88,7 +87,7 @@ impl Game {
                 .geom
                 .from_cell_id(cid)
                 .ok_or_else(|| PyValueError::new_err("invalid cell id"))?;
-            let pd = PyDict::new(py);
+            let pd = PyDict::new_bound(py);
             pd.set_item("x", coord.x)?;
             pd.set_item("y", coord.y)?;
             pd.set_item("kind_id", tile.kind_id)?;
@@ -184,7 +183,7 @@ impl Game {
         self.rules
             .commit(&mut self.state, validated, &score)
             .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
-        let dict = pyo3::types::PyDict::new(py);
+        let dict = PyDict::new_bound(py);
         dict.set_item("total", score.total)?;
         dict.set_item("main_word", score.main_word)?;
         dict.set_item("main_score", score.main_score)?;
@@ -266,12 +265,12 @@ impl Game {
         let mut cands = engine::generate_moves(&self.state, &self.rules, &rack, max_len);
         cands.sort_by(|a, b| b.score.cmp(&a.score));
         let limit = limit.min(cands.len());
-        let list = PyList::empty(py);
+        let list = PyList::empty_bound(py);
         for cm in cands.into_iter().take(limit) {
-            let entry = PyDict::new(py);
+            let entry = PyDict::new_bound(py);
             entry.set_item("word", &cm.word)?;
             entry.set_item("score", cm.score)?;
-            let placements = PyList::empty(py);
+            let placements = PyList::empty_bound(py);
             for (cid, tile) in cm.placements {
                 let coord = self
                     .state
@@ -279,7 +278,7 @@ impl Game {
                     .geom
                     .from_cell_id(cid)
                     .ok_or_else(|| PyValueError::new_err("invalid cell id"))?;
-                let pd = PyDict::new(py);
+                let pd = PyDict::new_bound(py);
                 pd.set_item("x", coord.x)?;
                 pd.set_item("y", coord.y)?;
                 pd.set_item("kind_id", &tile.kind_id)?;
@@ -289,7 +288,7 @@ impl Game {
             entry.set_item("placements", placements)?;
             list.append(entry)?;
         }
-        Ok(list.into())
+        Ok(list.into_py(py))
     }
 
     #[pyo3(signature = (max_len=None, lookahead_depth=None, seed=None, node_limit=None, time_limit_ms=None, difficulty=None, noise_range=None, candidate_limit=None, reply_limit=None, parallel_eval=None))]
@@ -371,7 +370,7 @@ impl Game {
             .state
             .snapshot_cbor()
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(PyBytes::new(py, &bytes).into())
+        Ok(PyBytes::new_bound(py, &bytes).into_py(py))
     }
 
     fn load_snapshot_json(&mut self, json: &str) -> PyResult<()> {
@@ -383,8 +382,8 @@ impl Game {
         Ok(())
     }
 
-    fn load_snapshot_cbor(&mut self, data: &PyAny) -> PyResult<()> {
-        let bytes: &PyBytes = data.extract()?;
+    fn load_snapshot_cbor(&mut self, data: &Bound<'_, PyAny>) -> PyResult<()> {
+        let bytes = data.downcast::<PyBytes>()?;
         let dict = self.state.dictionary.take();
         let mut restored = GameState::from_snapshot_cbor(bytes.as_bytes())
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -394,9 +393,9 @@ impl Game {
     }
 
     fn event_log(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let list = PyList::empty(py);
+        let list = PyList::empty_bound(py);
         for ev in &self.state.event_log {
-            let entry = PyDict::new(py);
+            let entry = PyDict::new_bound(py);
             entry.set_item("turn", ev.turn)?;
             entry.set_item("player", ev.player)?;
             entry.set_item("position_hash", ev.position_hash)?;
@@ -409,7 +408,7 @@ impl Game {
                     entry.set_item("type", "play")?;
                     entry.set_item("score", *score)?;
                     entry.set_item("total", *total)?;
-                    let placements_list = PyList::empty(py);
+                    let placements_list = PyList::empty_bound(py);
                     for (cid, tile) in placements {
                         let coord = self
                             .state
@@ -417,7 +416,7 @@ impl Game {
                             .geom
                             .from_cell_id(*cid)
                             .ok_or_else(|| PyValueError::new_err("invalid cell id"))?;
-                        let pd = PyDict::new(py);
+                        let pd = PyDict::new_bound(py);
                         pd.set_item("x", coord.x)?;
                         pd.set_item("y", coord.y)?;
                         pd.set_item("kind_id", tile.kind_id.clone())?;
@@ -441,12 +440,12 @@ impl Game {
             }
             list.append(entry)?;
         }
-        Ok(list.into())
+        Ok(list.into_py(py))
     }
 }
 
 #[pymodule]
-fn tiletangle(_py: Python, m: &PyModule) -> PyResult<()> {
+fn tiletangle(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Game>()?;
     Ok(())
 }

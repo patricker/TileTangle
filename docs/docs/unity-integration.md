@@ -19,6 +19,17 @@ Artifacts:
 
 Copy to your Unity project: `Assets/Plugins/<Platform>/`.
 
+## Single download bundle (CI)
+
+- CI produces a single archive containing:
+  - `com.tiletangle.engine/` — the Unity UPM package with the C# wrapper and samples.
+  - `Plugins/` — prebuilt native libraries for Windows, macOS, and Linux, plus C header.
+- Download artifact: `unity-bundle` from the CI run, then:
+  1. Extract the archive anywhere.
+  2. Copy the appropriate native library from `Plugins/<Platform>/` into `Assets/Plugins/<Platform>/` in your Unity project.
+  3. In Unity → Package Manager → Add package from disk… select the extracted `com.tiletangle.engine` folder.
+  4. Open the sample scene or add `BoardDemo` to an empty scene and press Play.
+
 ## C# wrapper
 
 Use `bindings/unity/Runtime/TileTangle.cs` directly in your project. It exposes:
