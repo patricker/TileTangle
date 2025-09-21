@@ -3,6 +3,7 @@ name = "tiletangle-plugin-template"
 version = "0.2.0"
 edition = "2021"
 publish = false
+license = "MIT OR Apache-2.0"
 
 [lib]
 name = "tiletangle_plugin_template"

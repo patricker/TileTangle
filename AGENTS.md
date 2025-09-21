@@ -2,7 +2,6 @@
 
 ## Project Structure & Module Organization
 - Root contains planning docs: `VISION.md` (north star) and `TODO.md` (execution plan).
-- `OLD/TileTangle/` holds legacy TypeScript for reference only. Do not run or extend it; it will be deleted.
 - New implementation code, when created, should live under a fresh `src/` (and `tests/`).
 
 ## Workflow: TODO‑Driven Phases

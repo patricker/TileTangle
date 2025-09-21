@@ -964,7 +964,10 @@ impl GameState {
     }
 
     pub fn snapshot_cbor(&self) -> Result<Vec<u8>, EngineError> {
-        serde_cbor::to_vec(self).map_err(|e| EngineError::Serialization(e.to_string()))
+        let mut buf = Vec::new();
+        ciborium::ser::into_writer(self, &mut buf)
+            .map_err(|e| EngineError::Serialization(e.to_string()))?;
+        Ok(buf)
     }
 
     pub fn from_snapshot_json(json: &str) -> Result<Self, EngineError> {
@@ -975,8 +978,9 @@ impl GameState {
     }
 
     pub fn from_snapshot_cbor(bytes: &[u8]) -> Result<Self, EngineError> {
+        let cursor = std::io::Cursor::new(bytes);
         let mut state: GameState =
-            serde_cbor::from_slice(bytes).map_err(|e| EngineError::Serialization(e.to_string()))?;
+            ciborium::de::from_reader(cursor).map_err(|e| EngineError::Serialization(e.to_string()))?;
         state.dictionary = None;
         Ok(state)
     }
