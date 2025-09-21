@@ -979,8 +979,8 @@ impl GameState {
 
     pub fn from_snapshot_cbor(bytes: &[u8]) -> Result<Self, EngineError> {
         let cursor = std::io::Cursor::new(bytes);
-        let mut state: GameState =
-            ciborium::de::from_reader(cursor).map_err(|e| EngineError::Serialization(e.to_string()))?;
+        let mut state: GameState = ciborium::de::from_reader(cursor)
+            .map_err(|e| EngineError::Serialization(e.to_string()))?;
         state.dictionary = None;
         Ok(state)
     }
