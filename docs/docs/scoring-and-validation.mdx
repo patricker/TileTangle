@@ -8,6 +8,7 @@ sidebar_position: 5
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 import Link from '@docusaurus/Link';
+import ScoringWidget from '@site/src/components/lite/ScoringWidget';
 
 The engine treats **validation** and **scoring** as two halves of the same pipeline. Validation proves that
 an incoming move is legal for the current geometry and rule set; scoring then walks the validated placements
@@ -16,6 +17,8 @@ and totals every affected word using the active bonuses, stacking mode, and bing
 Use this page together with the <Link to="/docs/animated-move-breakdown">Animated Move Breakdown</Link>
 for a visual walkthrough, and the <Link to="/docs/move-generation">Move Generation</Link> chapter to see
 how the rules feed back into automated search.
+
+<ScoringWidget />
 
 ## Validation pipeline
 
