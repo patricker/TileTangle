@@ -10,4 +10,4 @@ TileTangle targets a Rust core engine with bindings (WASM/JS, Python, Unity, God
 - Bindings expose a JSON-friendly API for config/state and moves.
 - Docs site hosts live WASM demos and language examples.
 
-This page will expand as phases progress.
+This page summarizes core components. See linked pages for deeper dives.

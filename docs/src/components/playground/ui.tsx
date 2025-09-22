@@ -152,11 +152,18 @@ export type MoveCardProps = {
   testId?: string;
   actions?: MoveCardAction[];
   children?: React.ReactNode;
+  onHover?: () => void;
+  onLeave?: () => void;
 };
 
-export function MoveCard({index, word, score, testId, actions, children}: MoveCardProps): JSX.Element {
+export function MoveCard({index, word, score, testId, actions, children, onHover, onLeave}: MoveCardProps): JSX.Element {
   return (
-    <div className={styles.moveCard} data-testid={testId}>
+    <div
+      className={styles.moveCard}
+      data-testid={testId}
+      onMouseEnter={onHover}
+      onMouseLeave={onLeave}
+    >
       <div className={styles.moveHeader}>
         <span>#{index + 1}</span>
         <strong>{word}</strong>
@@ -221,6 +228,8 @@ export type MoveListItem = {
   actions?: MoveCardAction[];
   testId?: string;
   body?: React.ReactNode;
+  onHover?: () => void;
+  onLeave?: () => void;
 };
 
 export type MoveListProps = {

@@ -10,13 +10,13 @@ single difficulty knob, or take full control by tweaking node/time budgets direc
 
 ## Evaluation heuristic
 
-For every candidate returned by `generate_moves` we compute:
+For every candidate returned by `generate_moves` the evaluator computes:
 
 - **Raw score** — the immediate points from `CrosswordRules`.
 - **Rack leave** — a configurable lookup table (default classic crossword–inspired values) that rewards
   keeping balanced vowels/consonants and penalises clunky tiles (`Q`, `Z`, etc.).
 - **Board equity bonus** — a small bonus for opening future anchors (counts fresh neighbours).
-- **Endgame penalty** — when the bag is empty we subtract the face value of tiles left on the rack
+- **Endgame penalty** — when the bag is empty it subtracts the face value of tiles left on the rack
   so the AI actively unloads big tiles.
 
 `AiConfig` lets you override the rack-leave table, limit considered move length, cap explored

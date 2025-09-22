@@ -2,15 +2,20 @@
 title: Boards
 ---
 
-import Playground from '@site/src/components/Playground';
+import GeometryGallery from '@site/src/components/lite/GeometryGallery';
+import OpenInPlaygroundButton from '@site/src/components/lite/OpenInPlaygroundButton';
 
 # Boards
 
 Board geometry decides how tiles connect. TileTangle can render classic 15×15 grids, sparse graphs, or
-layered 3D stacks. Use the playground to toggle the layout modes and observe how the adjacency controls
-change.
+layered 3D stacks. Explore a few shapes below; open the full Playground to tweak everything.
 
-<Playground initial={{ useHex: true }} />
+<GeometryGallery />
+
+<div style={{marginTop: 12}}>
+  <OpenInPlaygroundButton label="Open in Playground" initial={{ useHex: true }} />
+  <span style={{marginLeft: 12, fontSize: 13, opacity: 0.75}}>Starts with hex adjacency enabled.</span>
+  </div>
 
 ## Rectangular layouts
 
@@ -26,7 +31,7 @@ anchor discovery, and cross-checks out of the box. A JSON excerpt:
 }
 ```
 
-Rect boards can later accept a graph overlay to remove cells or add custom edges without rebuilding the
+Rect boards can accept a graph overlay to remove cells or add custom edges without rebuilding the
 whole state.
 
 ## Graph overlays (holes, hex, custom adjacencies)

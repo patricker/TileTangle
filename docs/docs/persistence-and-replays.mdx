@@ -63,8 +63,11 @@ const log = JSON.parse(await worker.call('event_log').then(r => r.log));
 ```
 
 The direct JS bindings expose `snapshot_state_json`, `snapshot_state_cbor`, `load_state_json`,
-`load_state_cbor`, and `get_event_log`. The Docusaurus playground surfaces these controls so you can
-save a position, paste it back later, or inspect the hashed event stream.
+`load_state_cbor`, and `get_event_log`. Try the lite viewer below to paste a snapshot and inspect the log, or use the full Playground for end-to-end save/restore.
+
+import SnapshotViewer from '@site/src/components/lite/SnapshotViewer';
+
+<SnapshotViewer />
 
 ## Event Log Format
 

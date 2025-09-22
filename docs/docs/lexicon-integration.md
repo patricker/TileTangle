@@ -10,7 +10,7 @@ sidebar_position: 6
 
 Included Word List
 
-- We ship an example list at `assets/dictionaries/TWL06.txt`, sourced from https://scrabutility.com/.
+- An example list is included at `assets/dictionaries/TWL06.txt`, sourced from https://scrabutility.com/.
 - A prebuilt `.fst` (finite state transducer) variant is generated at `docs/static/dictionaries/TWL06.fst` by `make wasm` for quick loading in the browser.
 
 Example
@@ -68,7 +68,8 @@ const txt = await (await fetch('/dictionaries/TWL06.txt')).text();
 set_dictionary_from_text_engine(game, txt, 'gaddag', true);
 ```
 
-Note: richer loaders (metadata, compressed formats) can be added later.
+Note: the engine supports loading from text and prebuilt FST blobs. If you need other formats or metadata
+packaging, load your words at runtime and construct the desired dictionary via the public API.
 
 ## Licensing & Packaging Guidance
 

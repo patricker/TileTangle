@@ -30,6 +30,8 @@ type PlaygroundBoardProps = {
   onHoverForMoves: (x: number, y: number) => void;
   palette: BoardPalette;
   tileShape?: 'square' | 'hex';
+  readonly?: boolean;
+  onCellClick?: (x: number, y: number) => void;
   renderOverlay?: (args: {
     x: number;
     viewY: number;
@@ -59,6 +61,8 @@ const PlaygroundBoard: React.FC<PlaygroundBoardProps> = ({
   onHoverForMoves,
   palette,
   tileShape = 'square',
+  readonly = false,
+  onCellClick,
   renderOverlay,
 }) => {
   if (!use3D && tileShape === 'hex') {
@@ -79,6 +83,8 @@ const PlaygroundBoard: React.FC<PlaygroundBoardProps> = ({
         showMoves={showMoves}
         onHoverForMoves={onHoverForMoves}
         palette={palette}
+        readonly={readonly}
+        onCellClick={onCellClick}
         renderOverlay={renderOverlay}
       />
     );
@@ -110,7 +116,9 @@ const PlaygroundBoard: React.FC<PlaygroundBoardProps> = ({
             : 'rgba(148, 163, 184, 0.12)',
         fontWeight: highlighted ? 600 : 500,
         opacity: activeCell ? 1 : 0.55,
-        cursor: activeCell ? 'default' : 'not-allowed',
+        cursor: activeCell
+          ? (onCellClick && !readonly ? 'pointer' : 'default')
+          : 'not-allowed',
         fontSize: tileFontSize,
       };
 
@@ -124,17 +132,20 @@ const PlaygroundBoard: React.FC<PlaygroundBoardProps> = ({
           className={styles.boardCell}
           style={cellStyle}
           onDragOver={event => {
-            if (!activeCell) return;
+            if (!activeCell || readonly) return;
             event.preventDefault();
           }}
           onDrop={event => {
-            if (!activeCell) return;
+            if (!activeCell || readonly) return;
             onDropCell(x, viewRow, event);
           }}
           onMouseEnter={() => {
             if (showMoves) {
               onHoverForMoves(x, globalRow);
             }
+          }}
+          onClick={() => {
+            if (activeCell && onCellClick) onCellClick(x, globalRow);
           }}
         >
           {symbol && <span>{symbol.slice(0, 2)}</span>}
@@ -180,6 +191,8 @@ type HexBoardProps = {
   showMoves: boolean;
   onHoverForMoves: (x: number, y: number) => void;
   palette: BoardPalette;
+  readonly?: boolean;
+  onCellClick?: (x: number, y: number) => void;
   renderOverlay?: PlaygroundBoardProps['renderOverlay'];
 };
 
@@ -201,6 +214,8 @@ function HexBoard({
   showMoves,
   onHoverForMoves,
   palette,
+  readonly = false,
+  onCellClick,
   renderOverlay,
 }: HexBoardProps): JSX.Element {
   const hexWidth = cellSize;
@@ -265,17 +280,20 @@ function HexBoard({
           className={styles.hexCell}
           style={style}
           onDragOver={event => {
-            if (!activeCell) return;
+            if (!activeCell || readonly) return;
             event.preventDefault();
           }}
           onDrop={event => {
-            if (!activeCell) return;
+            if (!activeCell || readonly) return;
             onDropCell(x, viewRow, event);
           }}
           onMouseEnter={() => {
             if (showMoves && activeCell) {
               onHoverForMoves(x, globalRow);
             }
+          }}
+          onClick={() => {
+            if (activeCell && onCellClick) onCellClick(x, globalRow);
           }}
         >
           {symbol && <span className={styles.hexCellLabel}>{symbol.slice(0, 2)}</span>}

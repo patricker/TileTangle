@@ -27,7 +27,7 @@ let opts = DictionaryOptions {
 let dict = FstDictionary::from_words_opts(words, opts);
 ```
 
-With this configuration a tile placed as `"ﾊﾟ"` will match the dictionary entry `"パ"`.
+With this configuration a tile placed as `"ﾊﾟ"` matches the dictionary entry `"パ"`.
 
 ## Reading direction
 

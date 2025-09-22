@@ -25,13 +25,13 @@ so you can opt into NFKC, RTL alphabets, or custom grapheme segmentation.
 
 ## Benchmarks
 
-Below is a small, precomputed snapshot (10k TWL06 words on an Intel Core i9-10850K). Interpret it as directional guidance; your workload will differ.
+Below is a small, precomputed snapshot (10k TWL06 words on an Intel Core i9-10850K). Interpret it as directional guidance; results vary by hardware and workload.
 
 <DictEngineChart />
 
 ### Reproduce benchmarks
 
-Run the dictionary-engine microbenchmarks (10k TWL06 words) locally and update the chart if needed:
+Run the dictionary‑engine microbenchmarks (10k TWL06 words) locally to compare on your machine:
 
 ```bash
 cargo bench -p tiletangle-engine --bench dict_engines
@@ -42,11 +42,11 @@ This runs two groups:
 - Build time: `dict_build_{set,fst,dawg,gaddag}_10k`
 - Lookup time: `dict_lookup_{set,fst,dawg,gaddag}_4k` (2k present + 2k absent queries)
 
-How to refresh the chart numbers:
+Interpretation:
 
-- Convert Criterion means to milliseconds (ns ÷ 1e6), then replace the values in `docs/src/data/dictBench.ts`.
-- Memory figures are approximate and depend on implementation details; if you want to update them, prefer
-  serialized size for FST and node/edge counts for DAWG/GADDAG as a proxy.
+- The chart on this page is a precomputed snapshot. Your timings will differ by hardware and toolchain.
+- Lookup time is the total for a batch of 4k queries (2k present + 2k absent). Build time constructs each
+  structure from a 10k‑word slice. Memory figures are approximate and provided for rough comparison only.
 
 ## Selecting an engine at runtime
 
@@ -63,7 +63,7 @@ let gaddag = GaddagDictionary::from_words_opts(words, opts);
 ```
 
 On the web playground you can now switch engines from the **Dictionary engine** dropdown. When the
-"GADDAG" option is selected the move generator will immediately benefit from the richer structure.
+"GADDAG" option is selected the move generator immediately benefits from the richer structure.
 
 ## WASM helper
 

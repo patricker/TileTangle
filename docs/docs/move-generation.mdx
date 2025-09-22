@@ -12,9 +12,9 @@ integrate it from Rust, WASM, and Python.
 
 1. **Anchor discovery** – find empty (or stack-eligible) cells adjacent to placed tiles. On an empty
    board the generator seeds the centre cell.
-2. **Left/right expansion** – for each anchor we walk left (or "pre" direction on graphs) using the
+2. **Left/right expansion** – for each anchor the generator walks left (or "pre" direction on graphs) using the
    rack multiset and optionally a GADDAG automaton to stitch prefixes in reverse order.
-3. **Rightward DFS** – we extend placements cell-by-cell, pruning using dictionary prefix checks and
+3. **Rightward DFS** – it extends placements cell-by-cell, pruning using dictionary prefix checks and
    pre-computed cross-check sets for perpendicular words.
 4. **Scoring** – candidate moves are scored in-place using the same `CrosswordRules` implementation
    that powers validation, ensuring bonuses, stacking rules, and bingo logic remain consistent.
@@ -40,7 +40,7 @@ anchor discovery and line traversal switch to direction tags instead of the rect
 The new regression test `generate_3d_vertical_move` ensures a word spanning the Z axis is detected
 correctly.
 
-Stacked cells work out of the box: we treat the top tile as the visible symbol while still including
+Stacked cells work out of the box: the generator treats the top tile as the visible symbol while still including
 underlying tiles in score calculations when `StackScoring::SumStack` is enabled. Cross-check logic
 now inspects stacked neighbours so perpendicular words formed against a stack use the visible symbol
 — see the `generate_respects_stacking_cross_checks` test.

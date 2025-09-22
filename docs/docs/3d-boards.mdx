@@ -22,12 +22,16 @@ TileTangle supports multi-layer boards by flattening each slice into the base gr
 - The engine derives a flattened grid internally. Adjacency is defined across X, Y, and Z, enabling straight lines across layers.
 - Bonus cells apply normally; word multipliers multiply the entire word formed along a line.
 
+import SliceViewer3D from '@site/src/components/lite/SliceViewer3D';
+
 ## Playground
 
 - Toggle “3D (layers)” in the Playground controls and set the desired `Depth`.
 - Use the `Slice z` slider to browse layers and drag tiles within the active slice. Placements can span layers as long as they stay contiguous along X/Y/Z.
 
+<SliceViewer3D width={5} height={5} depth={3} />
+
 ## Notes
 
-- 3D is implemented via the general graph layer; future work can add true 3D coordinate helpers.
+- 3D uses the general graph layer; native 3D coordinate helper APIs are not included.
 - Demos can render slice stacks (e.g., Godot 3D) using the same JSON API.

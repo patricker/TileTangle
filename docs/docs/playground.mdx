@@ -14,6 +14,30 @@ Control groups include:
 - **Move Controls & AI Assistant** – commit moves, browse generated candidates, or have the CPU find a play.
 - **Snapshots & Logs** – export/import state blobs and inspect the event log.
 
-import Playground from '@site/src/components/Playground'
+import React from 'react';
+import Playground from '@site/src/components/Playground';
 
-<Playground />
+function decodeParam(param) {
+  try {
+    if (!param) return undefined;
+    const b64 = String(param).replace(/-/g, '+').replace(/_/g, '/');
+    const json = typeof window === 'undefined'
+      // eslint-disable-next-line no-undef
+      ? Buffer.from(b64, 'base64').toString('utf-8')
+      : decodeURIComponent(escape(atob(b64)));
+    return JSON.parse(json);
+  } catch (e) {
+    return undefined;
+  }
+}
+
+function PlaygroundWrapper() {
+  let initial;
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    initial = decodeParam(params.get('initial'));
+  }
+  return <Playground initial={initial} />;
+}
+
+<PlaygroundWrapper />

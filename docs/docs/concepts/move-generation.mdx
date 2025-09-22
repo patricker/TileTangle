@@ -2,13 +2,18 @@
 title: Move Generation
 ---
 
-import Playground from '@site/src/components/Playground';
+import MoveListLite from '@site/src/components/lite/MoveListLite';
+import OpenInPlaygroundButton from '@site/src/components/lite/OpenInPlaygroundButton';
 
 # Move Generation
 
-The engine streams legal moves anchor-by-anchor. Use the playground to request suggestions and inspect cross-checks before submitting a move.
+The engine streams legal moves anchor-by-anchor. Try a quick list of candidates on an empty board, then jump into the full Playground for cross-checks and previews.
 
-<Playground initial={{ useDict: true, useWorker: true }} />
+<MoveListLite />
+
+<div style={{marginTop: 12}}>
+  <OpenInPlaygroundButton label="Open in Playground" initial={{ useDict: true, useWorker: true }} />
+</div>
 
 ## Dive deeper
 

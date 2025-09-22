@@ -2,13 +2,18 @@
 title: AI
 ---
 
-import Playground from '@site/src/components/Playground';
+import CPUHintButton from '@site/src/components/lite/CPUHintButton';
+import OpenInPlaygroundButton from '@site/src/components/lite/OpenInPlaygroundButton';
 
 # AI
 
-AI opponents balance rack leave, board control, and search depth. Let the CPU take a turn to see greedy lookahead in action and compare the metrics reported by the hint overlay.
+AI opponents balance rack leave, board control, and search depth. Try a quick one-click suggestion, then open the full Playground for difficulty and dictionary options.
 
-<Playground initial={{ useDict: true, cpuDifficulty: 'medium', useWorker: true }} />
+<CPUHintButton />
+
+<div style={{marginTop: 12}}>
+  <OpenInPlaygroundButton label="Open in Playground" initial={{ useDict: true, cpuDifficulty: 'medium', useWorker: true }} />
+</div>
 
 ## Dive deeper
 
