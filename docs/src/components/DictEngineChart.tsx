@@ -14,7 +14,7 @@ export default function DictEngineChart(): JSX.Element {
   return (
     <div style={{border: '1px solid var(--ifm-color-emphasis-200)', borderRadius: 8, padding: 16}}>
       <div style={{fontSize: 14, marginBottom: 12, color: 'var(--ifm-color-emphasis-700)'}}>
-        Offline benchmark snapshot (10k words, Apple M1 Pro). Lower lookup/build numbers are better.
+        Offline benchmark snapshot (10k words, Intel Core i9-10850K). Lower lookup/build numbers are better.
       </div>
       <div style={{display: 'grid', gridTemplateColumns: '140px 1fr 1fr 1fr', gap: 12, fontSize: 14}}>
         <div style={{fontWeight: 600}}>Engine</div>

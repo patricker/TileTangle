@@ -4,7 +4,7 @@ sidebar_position: 11
 
 # Custom Geometry
 
-Phase 7 adds support for graph-based boards: you can define present cells and adjacency explicitly (including hex-like neighbors or boards with holes).
+The engine supports graph-based boards: define present cells and their adjacency explicitly (including hex-like neighbors or boards with holes).
 
 ## Config shape
 

@@ -58,7 +58,8 @@ print("Board:", eng.get_board_json())
 
 ## Notes
 
-- The engine uses a JSON configuration (see repo `TODO.md` Appendix A for examples).
+- The engine uses a JSON configuration. See the Classic demo and the Playground’s Snapshot tab for working
+  examples you can copy, or check `bindings/godot/examples/` for sample configs used by the integration.
 - Example project paths:
   - `bindings/godot/examples/scenes/Main.tscn`
   - `bindings/godot/examples/scripts/Board.gd`

@@ -116,7 +116,18 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const palette = useMemo(() => getPlaygroundPalette(colorMode as 'light' | 'dark'), [colorMode]);
 
   const classic = useMemo(() => classicTilesets(), []);
-  const defaultTileKinds = useMemo(() => classic.tile_kinds, [classic]);
+  const defaultTileKinds = useMemo(() => {
+    const base = classic.tile_kinds.slice();
+    const extra = Array.isArray(initialConfig?.tileset?.tile_kinds)
+      ? (initialConfig!.tileset!.tile_kinds as {id: string; symbol: string; score: number; is_blank?: boolean; aliases?: string[]}[])
+      : [];
+    const byId = new Map(base.map(k => [k.id, k] as const));
+    for (const k of extra) {
+      if (!k || typeof k.id !== 'string') continue;
+      byId.set(k.id, {id: k.id, symbol: k.symbol ?? k.id, score: k.score ?? 0, is_blank: !!k.is_blank, aliases: k.aliases ?? []});
+    }
+    return Array.from(byId.values());
+  }, [classic, initialConfig?.tileset?.tile_kinds]);
   const defaultTileCounts = useMemo(() => classic.tile_counts, [classic]);
   const defaultTileScores = useMemo(() => {
     const map: Record<string, number> = {};

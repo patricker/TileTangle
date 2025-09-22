@@ -17,7 +17,7 @@ anagram index to compare lookup costs.
 | --- | --- | --- |
 | `set` | Small demos, rapid prototyping | Loads line-by-line text, O(1) membership, higher memory. |
 | `fst` | Production English-sized lexica | Compact finite-state acceptance with fast prefix tests. |
-| `dawg` | Classic Scrabble move generation | Minimal edges, perfect for cross-checks. |
+| `dawg` | Classic anchor/cross-check move generation | Minimal edges, perfect for cross-checks. |
 | `gaddag` | Power-player move generation & AI | Stores every split permutation; fastest anchors but larger files. |
 
 You can hot-swap engines at runtime through the bindings (`set_dictionary_from_text_engine` or

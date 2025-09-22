@@ -41,6 +41,10 @@ criterion = { version = "0.5", features = ["html_reports"] }
 name = "core"
 harness = false
 
+[[bench]]
+name = "dict_engines"
+harness = false
+
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }

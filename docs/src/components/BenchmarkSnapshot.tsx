@@ -70,7 +70,7 @@ export default function BenchmarkSnapshot(): JSX.Element {
           {status === 'loading' ? 'Loading…' : 'Load snapshot'}
         </button>
         <span style={{fontSize: 14, color: 'var(--ifm-color-emphasis-700)'}}>
-          Pre-recorded run from CI showing baseline vs current Criterion timings.
+          Pre-recorded run showing baseline vs current Criterion timings.
         </span>
       </div>
       {status === 'error' && error && (
@@ -104,7 +104,7 @@ export default function BenchmarkSnapshot(): JSX.Element {
       )}
       {status === 'idle' && (
         <div style={{fontSize: 14, color: 'var(--ifm-color-emphasis-600)'}}>
-          Click the button to fetch a canned run captured from the `perf` CI job.
+          Click the button to fetch a canned benchmark run.
         </div>
       )}
     </div>

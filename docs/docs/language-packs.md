@@ -3,8 +3,8 @@ title: Language Packs & Tokenization
 description: Configure normalization, reading direction, and custom tokenization for multilingual word sets.
 ---
 
-TileTangle treats language behaviour as data. The same engine can validate English Scrabble, Hebrew
-crosswords, emoji anagrams, or half-width Japanese tiles—no code changes required.
+TileTangle treats language behaviour as data. The same engine can validate English crosswords,
+Hebrew crosswords, emoji anagrams, or half-width Japanese tiles—no code changes required.
 
 > **Tip:** Build dictionaries with the Rust API when you need advanced normalization or custom
 > tokenizers, then reuse the compiled artifacts (FST, DAWG, GADDAG) from Python, WASM, Unity, or Godot.

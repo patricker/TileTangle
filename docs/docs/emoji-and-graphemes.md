@@ -11,12 +11,27 @@ digraph tiles). TileTangle stores symbols as grapheme clusters end-to-end: dicti
 validation, scoring, and persistence all work at that granularity.
 
 <Playground initial={{
+  // Demonstrate emoji tiles with stacking, no dictionary required
   stackOn: true,
   stackScoring: 'sum',
   forbidSame: false,
-  useDict: true,
-  dictEngine: 'fst',
-  rack: ['👩‍🚀', '🛰️', '⭐', '😀', '😀', '😀', '😀']
+  useDict: false,
+  // Provide a matching tileset and counts so rack IDs resolve
+  config: {
+    tileset: {
+      tile_kinds: [
+        { id: 'ASTRONAUT', symbol: '👩‍🚀', score: 6 },
+        { id: 'SATELLITE', symbol: '🛰️', score: 5 },
+        { id: 'STAR', symbol: '⭐', score: 4 },
+        { id: 'GRIN', symbol: '😀', score: 1 },
+        { id: 'BLANK', symbol: '?', score: 0, is_blank: true },
+      ],
+    },
+    tile_counts: { ASTRONAUT: 1, SATELLITE: 1, STAR: 4, GRIN: 4, BLANK: 2 },
+    rack_size: 7,
+  },
+  // Rack entries refer to tile IDs; UI renders their emoji symbols
+  rack: ['ASTRONAUT', 'SATELLITE', 'STAR', 'GRIN', 'GRIN', 'GRIN', 'GRIN']
 }} />
 
 ## Defining emoji tiles
@@ -28,10 +43,11 @@ validation, scoring, and persistence all work at that granularity.
       {"id": "ASTRONAUT", "symbol": "👩‍🚀", "score": 6},
       {"id": "SATELLITE", "symbol": "🛰️", "score": 5},
       {"id": "STAR", "symbol": "⭐", "score": 4},
+      {"id": "GRIN", "symbol": "😀", "score": 1},
       {"id": "BLANK", "symbol": "?", "score": 0, "is_blank": true}
     ]
   },
-  "tile_counts": {"ASTRONAUT": 1, "SATELLITE": 1, "STAR": 2, "BLANK": 2}
+  "tile_counts": {"ASTRONAUT": 1, "SATELLITE": 1, "STAR": 4, "GRIN": 4, "BLANK": 2}
 }
 ```
 

@@ -6,8 +6,8 @@ description: Benchmark and fuzz the engine to catch regressions before they ship
 
 import BenchmarkSnapshot from '@site/src/components/BenchmarkSnapshot';
 
-Phase 15 adds a lightweight performance harness so you can keep an eye on hot paths while the engine
-grows. Everything lives in-repo—no external datasets needed.
+The performance toolkit includes a lightweight benchmarking and fuzzing harness so you can keep an eye on
+hot paths as the engine evolves. Everything lives in-repo—no external datasets needed.
 
 ## Criterion benches
 
@@ -79,8 +79,8 @@ Artifacts land in `fuzz/artifacts/`; keep interesting crashes around for regress
   variants expand.
 - Criterion profiles are deterministic; commit the generated summary tables when you need to track a
   specific performance budget over time.
-- CI runs the `perf` job on Linux to compare results against the stored baseline; a 2× regression
-  fails the build. The `fuzz` job exercises both harnesses for 20 seconds with libFuzzer.
+- Example CI gate: compare results against the stored baseline and fail the build on ≥2× regression.
+  A complementary job can exercise the fuzz harnesses for a short, fixed budget with libFuzzer.
 
 ## Memory profiling
 

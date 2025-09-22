@@ -4,10 +4,10 @@ sidebar_position: 19
 description: Snapshot games to JSON or CBOR, restore them later, and audit moves with the event log.
 ---
 
-Phase 14 introduces first-class persistence for TileTangle. Every `GameState` can now be exported to a
-stable snapshot (JSON or CBOR) together with an append-only event log and Zobrist hash of the
-position. Snapshots capture the complete material state (board, racks, bag RNG, scores, turn order)
-so you can resume play, build undo/redo stacks, or ship reproducible fixtures in tests.
+TileTangle provides first-class persistence. Export any `GameState` to a stable snapshot (JSON or CBOR)
+with an append-only event log and a Zobrist hash of the position. Snapshots capture the complete material
+state (board, racks, bag RNG, scores, turn order) so you can resume play, build undo/redo stacks, or ship
+reproducible fixtures in tests.
 
 ## Rust API
 

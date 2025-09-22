@@ -73,7 +73,6 @@ const sidebars: SidebarsConfig = {
           items: ['c-abi', 'python', 'web-wasm-api', 'unity-integration', 'godot-integration'],
         },
         'performance',
-        'contributing',
       ],
     },
     {

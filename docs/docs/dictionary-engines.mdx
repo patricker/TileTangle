@@ -17,7 +17,7 @@ and **additional capabilities** (prefix walks, move generation). All engines sha
   Supports prefix queries, and is the default in the WASM demo.
 - **DawgDictionary** — deterministic acyclic word graph. Slightly heavier build step than FST but
   keeps prefix traversal entirely in-memory and stays Rust-native (no `fst` dependency).
-- **GaddagDictionary** — specialised structure for Scrabble-style move generation. Provides both
+- **GaddagDictionary** — specialised structure for anchor-based move generation. Provides both
   prefix and "reverse+suffix" walks so the generator can extend in both directions.
 
 All engines now respect **tokenization hooks** and **normalization modes** from `DictionaryOptions`,
@@ -25,9 +25,28 @@ so you can opt into NFKC, RTL alphabets, or custom grapheme segmentation.
 
 ## Benchmarks
 
-Below is a small, precomputed snapshot (10k TWL06 words on an M1 Pro). Interpret it as directional guidance; your workload will differ.
+Below is a small, precomputed snapshot (10k TWL06 words on an Intel Core i9-10850K). Interpret it as directional guidance; your workload will differ.
 
 <DictEngineChart />
+
+### Reproduce benchmarks
+
+Run the dictionary-engine microbenchmarks (10k TWL06 words) locally and update the chart if needed:
+
+```bash
+cargo bench -p tiletangle-engine --bench dict_engines
+```
+
+This runs two groups:
+
+- Build time: `dict_build_{set,fst,dawg,gaddag}_10k`
+- Lookup time: `dict_lookup_{set,fst,dawg,gaddag}_4k` (2k present + 2k absent queries)
+
+How to refresh the chart numbers:
+
+- Convert Criterion means to milliseconds (ns ÷ 1e6), then replace the values in `docs/src/data/dictBench.ts`.
+- Memory figures are approximate and depend on implementation details; if you want to update them, prefer
+  serialized size for FST and node/edge counts for DAWG/GADDAG as a proxy.
 
 ## Selecting an engine at runtime
 
