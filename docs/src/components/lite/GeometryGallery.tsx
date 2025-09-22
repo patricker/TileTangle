@@ -4,8 +4,8 @@ import MiniBoard from './MiniBoard';
 import type {BoardJson} from '../playground/types';
 import {buildShapeMask} from '../playground/config';
 import {resolveBonusPreset, type AdjacencyMode, type BonusCell} from '../playground/bonuses';
-import {SegmentedControl} from '../playground/ui';
 import styles from '../PlaygroundLayout.module.css';
+import BonusLegend from './BonusLegend';
 import {getPlaygroundPalette} from '../playground/theme';
 
 type Preset = {
@@ -53,45 +53,59 @@ export default function GeometryGallery({presets = defaultPresets, showBonuses =
   }, [showBonuses, preset]);
 
   return (
-    <div>
-      <div className={styles.modeGroup} style={{marginBottom: 12}}>
+    <div className={styles.galleryLayout}>
+      <div className={styles.gallerySidebar}>
         <div className={styles.modeLabel}>Board Shapes</div>
-        <SegmentedControl
-          name="Board shape"
-          value={String(activeIndex)}
-          options={presets.map((p, i) => ({value: String(i), label: p.label}))}
-          onChange={v => setActiveIndex(Number(v))}
-        />
+        <div
+          className={styles.galleryButtonList}
+          role="radiogroup"
+          aria-label="Board shape"
+        >
+          {presets.map((p, i) => (
+            <button
+              key={p.label}
+              type="button"
+              className={styles.choiceButton}
+              data-active={i === activeIndex ? '1' : '0'}
+              aria-pressed={i === activeIndex}
+              onClick={() => setActiveIndex(i)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className={styles.boardWrapper}>
-        <MiniBoard
-          board={board}
-          tileMeta={() => undefined}
-          tileShape={preset.tileShape ?? 'square'}
-          overlay={({x, y}) => {
-            const active = mask.has(`${x},${y}`);
-            if (!active) {
-              return <div className={styles.hintBadge}>off</div>;
-            }
-            const bonus = bonusMap.get(`${x},${y}`);
-            if (!bonus) return null;
-            const label = bonus.word_mul && bonus.word_mul > 1 ? `${bonus.word_mul}W` : (bonus.letter_mul && bonus.letter_mul > 1 ? `${bonus.letter_mul}L` : '');
-            if (!label) return null;
-            const tone = bonus.word_mul && bonus.word_mul > 1 ? 'word' : 'letter';
-            const cls = tone === 'word' ? styles.bonusChipWord : styles.bonusChipLetter;
-            return <div className={`${styles.bonusChip} ${cls}`}>{label}</div>;
-          }}
-          highlight={new Set<string>()}
-          cellSize={28}
-          cellGap={4}
-        />
-      </div>
-      <div className={styles.helperText} style={{marginTop: 8}}>
-        {preset.tileShape === 'hex'
-          ? 'Hex adjacency uses staggered rows; labels indicate bonus cells.'
-          : 'Inactive cells show as dimmed; labels indicate 2L/3L/2W/3W bonuses.'}
+      <div className={styles.galleryPreview}>
+        <div className={styles.boardWrapper}>
+          <MiniBoard
+            board={board}
+            tileMeta={() => undefined}
+            tileShape={preset.tileShape ?? 'square'}
+            overlay={({x, y}) => {
+              const active = mask.has(`${x},${y}`);
+              if (!active) {
+                return <div className={styles.hintBadge}>off</div>;
+              }
+              const bonus = bonusMap.get(`${x},${y}`);
+              if (!bonus) return null;
+              const label = bonus.word_mul && bonus.word_mul > 1 ? `${bonus.word_mul}W` : (bonus.letter_mul && bonus.letter_mul > 1 ? `${bonus.letter_mul}L` : '');
+              if (!label) return null;
+              const tone = bonus.word_mul && bonus.word_mul > 1 ? 'word' : 'letter';
+              const cls = tone === 'word' ? styles.bonusChipWord : styles.bonusChipLetter;
+              return <div className={`${styles.bonusChip} ${cls}`}>{label}</div>;
+            }}
+            highlight={new Set<string>()}
+            cellSize={28}
+            cellGap={4}
+          />
+        </div>
+        <div className={styles.helperText} style={{marginTop: 8}}>
+          {preset.tileShape === 'hex'
+            ? 'Hex adjacency uses staggered rows; labels indicate bonus cells.'
+            : 'Inactive cells show as dimmed; labels indicate 2L/3L/2W/3W bonuses.'}
+        </div>
+        {showBonuses && <BonusLegend />}
       </div>
     </div>
   );
 }
-

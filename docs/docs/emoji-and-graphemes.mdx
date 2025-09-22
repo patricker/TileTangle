@@ -2,37 +2,42 @@
 sidebar_position: 14
 ---
 
-# Emoji & Graphemes
+import EmojiGraphemeDemo from '@site/src/components/lite/EmojiGraphemeDemo';
+import OpenInPlaygroundButton from '@site/src/components/lite/OpenInPlaygroundButton';
 
-import Playground from '@site/src/components/Playground';
+# Emoji & Graphemes
 
 Tile symbols can be multi-codepoint grapheme clusters (emoji with skin-tone modifiers, ZWJ families, or
 digraph tiles). TileTangle stores symbols as grapheme clusters end-to-end: dictionaries, move
 validation, scoring, and persistence all work at that granularity.
 
-<Playground initial={{
-  // Demonstrate emoji tiles with stacking, no dictionary required
-  stackOn: true,
-  stackScoring: 'sum',
-  forbidSame: false,
-  useDict: false,
-  // Provide a matching tileset and counts so rack IDs resolve
-  config: {
-    tileset: {
-      tile_kinds: [
-        { id: 'ASTRONAUT', symbol: '👩‍🚀', score: 6 },
-        { id: 'SATELLITE', symbol: '🛰️', score: 5 },
-        { id: 'STAR', symbol: '⭐', score: 4 },
-        { id: 'GRIN', symbol: '😀', score: 1 },
-        { id: 'BLANK', symbol: '?', score: 0, is_blank: true },
-      ],
-    },
-    tile_counts: { ASTRONAUT: 1, SATELLITE: 1, STAR: 4, GRIN: 4, BLANK: 2 },
-    rack_size: 7,
-  },
-  // Rack entries refer to tile IDs; UI renders their emoji symbols
-  rack: ['ASTRONAUT', 'SATELLITE', 'STAR', 'GRIN', 'GRIN', 'GRIN', 'GRIN']
-}} />
+<EmojiGraphemeDemo />
+
+<div style={{marginTop: 12}}>
+  <OpenInPlaygroundButton
+    label="Open in Playground"
+    initial={{
+      stackOn: true,
+      stackScoring: 'sum',
+      forbidSame: false,
+      useDict: false,
+      config: {
+        tileset: {
+          tile_kinds: [
+            { id: 'ASTRONAUT', symbol: '👩‍🚀', score: 6 },
+            { id: 'SATELLITE', symbol: '🛰️', score: 5 },
+            { id: 'STAR', symbol: '⭐', score: 4 },
+            { id: 'GRIN', symbol: '😀', score: 1 },
+            { id: 'BLANK', symbol: '?', score: 0, is_blank: true },
+          ],
+        },
+        tile_counts: { ASTRONAUT: 1, SATELLITE: 1, STAR: 4, GRIN: 4, BLANK: 2 },
+        rack_size: 7,
+      },
+      rack: ['ASTRONAUT', 'SATELLITE', 'STAR', 'GRIN', 'GRIN', 'GRIN', 'GRIN']
+    }}
+  />
+</div>
 
 ## Defining emoji tiles
 

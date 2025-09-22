@@ -2,14 +2,19 @@
 title: Tiles
 ---
 
-import Playground from '@site/src/components/Playground';
+import TilesDemoLite from '@site/src/components/lite/TilesDemoLite';
+import OpenInPlaygroundButton from '@site/src/components/lite/OpenInPlaygroundButton';
 
 # Tiles
 
-Tiles can be classic one-letter pieces, emoji graphemes, or multi-character stacks. Try stacking on
-existing tiles to see how the engine maintains per-cell history.
+Tiles can be classic one-letter pieces, emoji graphemes, or multi-character stacks. Below is a light
+visual demo; open the full Playground to experiment interactively.
 
-<Playground initial={{ stackOn: true, stackScoring: 'sum', forbidSame: false }} />
+<TilesDemoLite />
+
+<div style={{marginTop: 12}}>
+  <OpenInPlaygroundButton label="Open in Playground" initial={{ stackOn: true, stackScoring: 'sum', forbidSame: false }} />
+</div>
 
 ## Tile kinds & pools
 

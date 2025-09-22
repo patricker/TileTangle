@@ -2,22 +2,10 @@
 sidebar_position: 8
 ---
 
-# Playground
-
-The interactive playground runs directly inside the docs build—no extra webpack or `make wasm` step is required when you use `npm run start`. Use the control panels to swap geometries, dictionaries, stacking behaviour, and CPU assistance before dragging tiles onto the board.
-
-Control groups include:
-
-- **Runtime & Board Layout** – switch between grids, diagonal graphs, or layered 3D boards.
-- **Dictionary & Language** – toggle validation, pick the engine, and experiment with RTL/anagram helpers.
-- **Stacking Rules** – enable stacked tiles and choose how scores accumulate.
-- **Move Controls & AI Assistant** – commit moves, browse generated candidates, or have the CPU find a play.
-- **Snapshots & Logs** – export/import state blobs and inspect the event log.
-
 import React from 'react';
 import Playground from '@site/src/components/Playground';
 
-function decodeParam(param) {
+export function decodeParam(param) {
   try {
     if (!param) return undefined;
     const b64 = String(param).replace(/-/g, '+').replace(/_/g, '/');
@@ -31,7 +19,7 @@ function decodeParam(param) {
   }
 }
 
-function PlaygroundWrapper() {
+export function PlaygroundWrapper() {
   let initial;
   if (typeof window !== 'undefined') {
     const params = new URLSearchParams(window.location.search);
@@ -39,5 +27,17 @@ function PlaygroundWrapper() {
   }
   return <Playground initial={initial} />;
 }
+
+# Playground
+
+The interactive playground runs directly inside the docs build—no extra webpack or `make wasm` step is required when you use `npm run start`. Use the control panels to swap geometries, dictionaries, stacking behaviour, and CPU assistance before dragging tiles onto the board.
+
+Control groups include:
+
+- **Runtime & Board Layout** – switch between grids, diagonal graphs, or layered 3D boards.
+- **Dictionary & Language** – toggle validation, pick the engine, and experiment with RTL/anagram helpers.
+- **Stacking Rules** – enable stacked tiles and choose how scores accumulate.
+- **Move Controls & AI Assistant** – commit moves, browse generated candidates, or have the CPU find a play.
+- **Snapshots & Logs** – export/import state blobs and inspect the event log.
 
 <PlaygroundWrapper />

@@ -2,15 +2,19 @@
 title: Rules
 ---
 
-import Playground from '@site/src/components/Playground';
+import RulesDemoLite from '@site/src/components/lite/RulesDemoLite';
+import OpenInPlaygroundButton from '@site/src/components/lite/OpenInPlaygroundButton';
 
 # Rules
 
 Rules define what counts as a legal move: connectivity, anchors, cross-checks, stack constraints, and
-scoring bonuses. Experiment with the rule toggles and scoring controls, then dive into the detailed
-guides for customizing validations and plugins.
+scoring bonuses. Use the lightweight visual below, then open the full Playground to try end‑to‑end moves.
 
-<Playground initial={{ useDict: true, forbidSame: true, stackOn: false }} />
+<RulesDemoLite />
+
+<div style={{marginTop: 12}}>
+  <OpenInPlaygroundButton label="Open in Playground" initial={{ useDict: true, forbidSame: true, stackOn: false }} />
+</div>
 
 ## Move pipeline at a glance
 

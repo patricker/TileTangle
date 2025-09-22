@@ -276,6 +276,39 @@
   background: var(--tt-control-hover-bg);
 }
 
+/* Explicit selectable button style used on Boards page */
+.choiceButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--tt-control-border);
+  background: var(--tt-control-bg);
+  color: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.choiceButton:hover {
+  border-color: var(--tt-control-hover-border);
+  background: var(--tt-control-hover-bg);
+}
+
+.choiceButton[data-active='1'] {
+  border-color: var(--tt-segmented-active-border);
+  background: var(--tt-segmented-active-bg);
+}
+
+.choiceButton:focus-visible {
+  outline: none;
+  border-color: var(--tt-control-hover-border);
+  box-shadow: var(--tt-control-focus-shadow);
+}
+
 .fieldStack {
   display: flex;
   flex-direction: column;
@@ -358,6 +391,37 @@
   overflow-y: hidden;
   max-width: 100%;
   padding-bottom: 6px;
+}
+
+/* Boards page: two-column layout with a left list and right preview */
+.galleryLayout {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.gallerySidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.galleryButtonList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.galleryPreview {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 860px) {
+  .galleryLayout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (min-width: 1120px) {
@@ -483,6 +547,22 @@
   justify-content: center;
   font-weight: 600;
   pointer-events: none;
+}
+
+/* Improve contrast for bonus chips and hint badge in dark mode */
+:global([data-theme='dark']) .bonusChipWord {
+  color: #ffffff;
+  background: linear-gradient(135deg, rgba(248, 113, 113, 0.35), rgba(239, 68, 68, 0.5));
+}
+
+:global([data-theme='dark']) .bonusChipLetter {
+  color: #ffffff;
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.35), rgba(37, 99, 235, 0.5));
+}
+
+:global([data-theme='dark']) .hintBadge {
+  background: rgba(251, 191, 36, 0.42);
+  color: #ffffff;
 }
 
 .layerSlider {
