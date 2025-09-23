@@ -1,13 +1,11 @@
 //! TileTangle Engine — Core Model (Phase 1)
 
-use fst::{Automaton, Streamer};
+use fst::Streamer;
 use rand::{Rng, SeedableRng, rngs::StdRng};
-use rand_chacha::ChaCha12Rng;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use std::any::Any;
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeSet, HashMap};
@@ -160,119 +158,17 @@ mod serde_tile_counts {
     }
 }
 
-// -------- Errors --------
+// -------- Error, Version, Text submodules --------
+pub mod error;
+pub use error::EngineError;
 
-#[derive(Debug, Error)]
-pub enum EngineError {
-    #[error("invalid coordinates")]
-    InvalidCoordinates,
-    #[error("invalid cell id")]
-    InvalidCell,
-    #[error("collision at cell {0:?}")]
-    Collision(CellId),
-    #[error("rack capacity exceeded")]
-    RackCapacity,
-    #[error("bag is empty")]
-    BagEmpty,
-    #[error("config error: {0}")]
-    Config(&'static str),
-    #[error("serialization error: {0}")]
-    Serialization(String),
-}
+pub mod version;
+pub use version::{EngineVersion, engine_version};
 
-// -------- Version --------
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EngineVersion {
-    pub major: u32,
-    pub minor: u32,
-    pub patch: u32,
-}
-
-pub fn engine_version() -> EngineVersion {
-    EngineVersion {
-        major: 0,
-        minor: 1,
-        patch: 0,
-    }
-}
+pub mod text;
+pub use text::{Symbol, nfc, NormalizationMode, normalize_with_mode, Tokenizer, TokenizerRef};
 
 // -------- Symbols & Tiles --------
-
-pub type Symbol = String; // NFC-normalized grapheme string
-
-pub fn nfc<S: AsRef<str>>(s: S) -> Symbol {
-    s.as_ref().nfc().collect()
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum NormalizationMode {
-    #[default]
-    NFC,
-    NFKC,
-}
-
-fn normalize_with_mode<S: AsRef<str>>(s: S, mode: NormalizationMode) -> String {
-    match mode {
-        NormalizationMode::NFC => s.as_ref().nfc().collect(),
-        NormalizationMode::NFKC => s.as_ref().nfkc().collect(),
-    }
-}
-
-pub trait Tokenizer: Send + Sync {
-    fn segment(&self, text: &str) -> Vec<String>;
-}
-
-#[derive(Clone)]
-pub struct TokenizerRef {
-    inner: Arc<dyn Tokenizer>,
-}
-
-impl std::fmt::Debug for TokenizerRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TokenizerRef").finish_non_exhaustive()
-    }
-}
-
-impl TokenizerRef {
-    pub fn new(inner: Arc<dyn Tokenizer>) -> Self {
-        Self { inner }
-    }
-
-    pub fn grapheme() -> Self {
-        Self::new(Arc::new(GraphemeTokenizer))
-    }
-
-    pub fn characters() -> Self {
-        Self::new(Arc::new(CharacterTokenizer))
-    }
-
-    pub fn segment(&self, text: &str) -> Vec<String> {
-        self.inner.segment(text)
-    }
-}
-
-impl Default for TokenizerRef {
-    fn default() -> Self {
-        Self::grapheme()
-    }
-}
-
-struct GraphemeTokenizer;
-
-impl Tokenizer for GraphemeTokenizer {
-    fn segment(&self, text: &str) -> Vec<String> {
-        text.graphemes(true).map(|g| g.to_string()).collect()
-    }
-}
-
-struct CharacterTokenizer;
-
-impl Tokenizer for CharacterTokenizer {
-    fn segment(&self, text: &str) -> Vec<String> {
-        text.chars().map(|c| c.to_string()).collect()
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TileKind {
@@ -301,433 +197,33 @@ pub struct Tile {
     pub mark: Option<String>,
 }
 
-// -------- Board Geometry --------
+// -------- Geometry (module) --------
+pub mod geometry;
+pub use geometry::{BoardGeometry, CellId, Coord2D, GraphOverlay, RectGridGeometry};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct CellId(pub u32);
+// -------- Board (module) --------
+pub mod board;
+pub use board::{Board, Bonus, Cell};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Coord2D {
-    pub x: i32,
-    pub y: i32,
-}
+// -------- Game model (module) --------
+pub mod game;
+pub use game::{PlayerId, Player, GameEventKind, GameEvent, RectBoardLayout, GameConfig, MoveDraft};
 
-pub trait BoardGeometry {
-    fn neighbors(&self, id: CellId) -> SmallVec<[CellId; 4]>;
-    fn to_cell_id(&self, c: Coord2D) -> Option<CellId>;
-    #[allow(clippy::wrong_self_convention)]
-    fn from_cell_id(&self, id: CellId) -> Option<Coord2D>;
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
+// -------- Rules (plugins extracted) --------
+pub mod rules;
+pub use rules::plugins::{Action, UserMove, RulePlugin, BasicActionsPlugin, ScoreBonusPlugin, PluginRules};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RectGridGeometry {
-    pub width: u32,
-    pub height: u32,
-    // Optional graph overlay: restrict present cells and override adjacency with direction tags
-    #[serde(default, with = "serde_cell_adj")]
-    adj: Option<HashMap<CellId, Vec<(CellId, String)>>>,
-    #[serde(default, with = "serde_cell_set")]
-    present: Option<HashSet<CellId>>,
-}
-
-impl RectGridGeometry {
-    fn index(&self, c: Coord2D) -> Option<u32> {
-        if c.x < 0 || c.y < 0 {
-            return None;
-        }
-        let (x, y) = (c.x as u32, c.y as u32);
-        if x < self.width && y < self.height {
-            Some(y * self.width + x)
-        } else {
-            None
-        }
-    }
-
-    pub fn has_graph(&self) -> bool {
-        self.adj.is_some()
-    }
-
-    pub fn apply_graph_overlay(&mut self, overlay: GraphOverlay) -> Result<(), EngineError> {
-        let mut present = HashSet::new();
-        let mut id_for: Vec<CellId> = Vec::with_capacity(overlay.nodes.len());
-        for c in overlay.nodes.iter() {
-            if let Some(id) = self.index(*c).map(CellId) {
-                present.insert(id);
-                id_for.push(id);
-            } else {
-                return Err(EngineError::Config("overlay node outside bounds"));
-            }
-        }
-        let mut adj: HashMap<CellId, Vec<(CellId, String)>> = HashMap::new();
-        for (ai, bi, dir) in overlay.edges.into_iter() {
-            if ai >= id_for.len() || bi >= id_for.len() {
-                return Err(EngineError::Config("edge index out of range"));
-            }
-            let a = id_for[ai];
-            let b = id_for[bi];
-            if !present.contains(&a) || !present.contains(&b) {
-                return Err(EngineError::Config("edge references missing node"));
-            }
-            adj.entry(a).or_default().push((b, dir.clone()));
-            adj.entry(b).or_default().push((a, dir));
-        }
-        self.present = Some(present);
-        self.adj = Some(adj);
-        Ok(())
-    }
-
-    pub fn neighbors_with_tags(&self, id: CellId) -> SmallVec<[(CellId, &str); 8]> {
-        let mut out: SmallVec<[(CellId, &str); 8]> = SmallVec::new();
-        if let Some(adj) = &self.adj {
-            if let Some(v) = adj.get(&id) {
-                for (n, tag) in v {
-                    out.push((*n, tag.as_str()));
-                }
-            }
-        } else {
-            // default grid with implicit direction tags
-            if let Some(c) = self.from_cell_id(id) {
-                let dirs = [
-                    (Coord2D { x: c.x - 1, y: c.y }, "W"),
-                    (Coord2D { x: c.x + 1, y: c.y }, "E"),
-                    (Coord2D { x: c.x, y: c.y - 1 }, "N"),
-                    (Coord2D { x: c.x, y: c.y + 1 }, "S"),
-                ];
-                for (d, tag) in dirs {
-                    if let Some(n) = self.to_cell_id(d) {
-                        out.push((n, tag));
-                    }
-                }
-            }
-        }
-        out
-    }
-
-    pub fn dir_tag_between(&self, a: CellId, b: CellId) -> Option<&str> {
-        if let Some(adj) = &self.adj {
-            if let Some(v) = adj.get(&a) {
-                for (n, tag) in v {
-                    if *n == b {
-                        return Some(tag.as_str());
-                    }
-                }
-            }
-            None
-        } else {
-            let ac = self.from_cell_id(a)?;
-            let bc = self.from_cell_id(b)?;
-            if ac.x == bc.x {
-                if ac.y + 1 == bc.y {
-                    Some("S")
-                } else if ac.y - 1 == bc.y {
-                    Some("N")
-                } else {
-                    None
-                }
-            } else if ac.y == bc.y {
-                if ac.x + 1 == bc.x {
-                    Some("E")
-                } else if ac.x - 1 == bc.x {
-                    Some("W")
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }
-    }
-}
-
-impl BoardGeometry for RectGridGeometry {
-    fn neighbors(&self, id: CellId) -> SmallVec<[CellId; 4]> {
-        if let Some(adj) = &self.adj {
-            let mut out: SmallVec<[CellId; 4]> = SmallVec::new();
-            if let Some(v) = adj.get(&id) {
-                for (n, _) in v {
-                    out.push(*n);
-                }
-            }
-            out
-        } else {
-            let mut out: SmallVec<[CellId; 4]> = SmallVec::new();
-            if let Some(c) = self.from_cell_id(id) {
-                let dirs = [
-                    Coord2D { x: c.x - 1, y: c.y },
-                    Coord2D { x: c.x + 1, y: c.y },
-                    Coord2D { x: c.x, y: c.y - 1 },
-                    Coord2D { x: c.x, y: c.y + 1 },
-                ];
-                for d in dirs {
-                    if let Some(n) = self.to_cell_id(d) {
-                        out.push(n);
-                    }
-                }
-            }
-            out
-        }
-    }
-
-    fn to_cell_id(&self, c: Coord2D) -> Option<CellId> {
-        let id = self.index(c).map(CellId)?;
-        if let Some(p) = &self.present
-            && !p.contains(&id)
-        {
-            return None;
-        }
-        Some(id)
-    }
-
-    fn from_cell_id(&self, id: CellId) -> Option<Coord2D> {
-        let i = id.0;
-        if i >= self.width * self.height {
-            return None;
-        }
-        let y = i / self.width;
-        let x = i % self.width;
-        Some(Coord2D {
-            x: x as i32,
-            y: y as i32,
-        })
-    }
-
-    fn len(&self) -> usize {
-        (self.width * self.height) as usize
-    }
-}
-
-// -------- Graph Overlay --------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GraphOverlay {
-    pub nodes: Vec<Coord2D>,
-    pub edges: Vec<(usize, usize, String)>,
-}
-
-// -------- Board & Bonuses --------
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Bonus {
-    pub letter_mul: i8, // default 1
-    pub word_mul: i8,   // default 1
-    pub tags: BTreeSet<String>,
-}
-
-impl Default for Bonus {
-    fn default() -> Self {
-        Self {
-            letter_mul: 1,
-            word_mul: 1,
-            tags: BTreeSet::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Cell {
-    pub stack: Vec<Tile>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(bound(serialize = "G: Serialize", deserialize = "G: Deserialize<'de>"))]
-pub struct Board<G: BoardGeometry> {
-    pub geom: G,
-    pub cells: Vec<Cell>,
-    #[serde(default, with = "serde_cell_bonus")]
-    pub bonuses: HashMap<CellId, Bonus>,
-}
-
-impl<G: BoardGeometry> Board<G> {
-    pub fn new(geom: G) -> Self {
-        let len = geom.len();
-        Self {
-            geom,
-            cells: vec![Cell::default(); len],
-            bonuses: HashMap::new(),
-        }
-    }
-}
-
-// -------- Rack & Bag --------
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Rack {
-    pub tiles: Vec<Tile>,
-}
-
-impl Rack {
-    pub fn add(&mut self, t: Tile, rack_size: usize) -> Result<(), EngineError> {
-        if self.tiles.len() >= rack_size {
-            return Err(EngineError::RackCapacity);
-        }
-        self.tiles.push(t);
-        Ok(())
-    }
-    pub fn remove_at(&mut self, i: usize) -> Option<Tile> {
-        if i < self.tiles.len() {
-            Some(self.tiles.remove(i))
-        } else {
-            None
-        }
-    }
-    pub fn len(&self) -> usize {
-        self.tiles.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.tiles.is_empty()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Tileset {
-    pub tile_kinds: Vec<TileKind>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Bag {
-    #[serde(with = "serde_tile_counts")]
-    pub counts: HashMap<TileKind, u32>,
-    rng: ChaCha12Rng,
-}
-
-impl Bag {
-    pub fn from_tileset(ts: &Tileset, seed: u64) -> Self {
-        let mut counts = HashMap::new();
-        for tk in &ts.tile_kinds {
-            // Use aliases field as count holder if provided via serde? Instead rely on an implicit count=1 if absent.
-            // For Phase 1 tests, we will define counts explicitly when creating the bag.
-            counts.insert(tk.clone(), 0);
-        }
-        Self {
-            counts,
-            rng: ChaCha12Rng::seed_from_u64(seed),
-        }
-    }
-
-    pub fn with_counts(counts: HashMap<TileKind, u32>, seed: u64) -> Self {
-        Self {
-            counts,
-            rng: ChaCha12Rng::seed_from_u64(seed),
-        }
-    }
-
-    pub fn remaining(&self) -> u32 {
-        self.counts.values().copied().sum()
-    }
-
-    pub fn draw(&mut self, n: usize) -> Vec<Tile> {
-        let mut out = Vec::with_capacity(n);
-        for _ in 0..n {
-            if let Some(t) = self.draw_one() {
-                out.push(t);
-            }
-        }
-        out
-    }
-
-    pub fn draw_one(&mut self) -> Option<Tile> {
-        let total = self.remaining();
-        if total == 0 {
-            return None;
-        }
-        let choice = self.rng.gen_range(0..total);
-        // Iterate in deterministic order by kind id
-        let mut items: Vec<(&TileKind, &u32)> =
-            self.counts.iter().filter(|(_, c)| **c > 0).collect();
-        items.sort_by(|(k1, _), (k2, _)| k1.id.cmp(&k2.id));
-        let mut acc = 0u32;
-        let mut selected_key: Option<TileKind> = None;
-        for (k, c) in items {
-            acc += *c;
-            if choice < acc {
-                selected_key = Some(k.clone());
-                break;
-            }
-        }
-        if let Some(key) = selected_key {
-            let cnt = self.counts.get_mut(&key).unwrap();
-            *cnt -= 1;
-            Some(Tile {
-                kind_id: key.id.clone(),
-                mark: None,
-            })
-        } else {
-            None
-        }
-    }
-}
+// -------- Inventory (module) --------
+pub mod inventory;
+pub use inventory::{Rack, Tileset, Bag};
 
 // -------- Players & Game State --------
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct PlayerId(pub usize);
+// Game model moved to module
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Player {
-    pub rack: Rack,
-    pub score: i32,
-    /// Maximum rack capacity for this player (number of tiles the rack should hold)
-    #[serde(default = "Player::default_rack_capacity")]
-    pub rack_capacity: usize,
-}
+// Game events moved
 
-impl Default for Player {
-    fn default() -> Self {
-        Self { rack: Rack::default(), score: 0, rack_capacity: Self::default_rack_capacity() }
-    }
-}
-
-impl Player {
-    const fn default_rack_capacity() -> usize { 7 }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum GameEventKind {
-    Play {
-        placements: Vec<(CellId, Tile)>,
-        score: i32,
-        total: i32,
-    },
-    Draw {
-        tiles: Vec<String>,
-    },
-    Exchange {
-        give: Vec<String>,
-        take: Vec<String>,
-    },
-    Pass,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GameEvent {
-    pub turn: u32,
-    pub player: usize,
-    pub kind: GameEventKind,
-    pub position_hash: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RectBoardLayout {
-    pub width: u32,
-    pub height: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GameConfig {
-    pub tileset: Tileset,
-    pub rack_size: usize,
-    pub board_layout: RectBoardLayout,
-    pub ruleset_id: String,
-    pub dictionary_id: String,
-    pub rng_seed: u64,
-    /// (optional) counts per tile kind id
-    pub tile_counts: HashMap<String, u32>,
-}
+// Game config moved
 
 #[derive(Serialize, Deserialize)]
 pub struct GameState {
@@ -784,12 +280,7 @@ impl GameState {
         if players == 0 {
             return Err(EngineError::Config("at least 1 player"));
         }
-        let geom = RectGridGeometry {
-            width: config.board_layout.width,
-            height: config.board_layout.height,
-            adj: None,
-            present: None,
-        };
+        let geom = RectGridGeometry::new(config.board_layout.width, config.board_layout.height);
         let board = Board::new(geom);
 
         // Normalize symbols into tileset
@@ -1007,10 +498,7 @@ impl GameState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MoveDraft {
-    pub placements: Vec<(CellId, Tile)>,
-}
+// Move draft moved
 
 // -------- Rules & Scoring (Phase 2) --------
 
@@ -1655,202 +1143,7 @@ impl Rules for CrosswordRules {
     }
 }
 
-// -------- Rule Plugins (Phase 10) --------
-
-#[derive(Debug, Clone)]
-pub enum Action {
-    Place {
-        x: i32,
-        y: i32,
-        kind_id: String,
-        mark: Option<String>,
-    },
-    Stack {
-        x: i32,
-        y: i32,
-        kind_id: String,
-        mark: Option<String>,
-    },
-    SwapRack {
-        give: Vec<String>,
-    },
-    RotateTile {
-        x: i32,
-        y: i32,
-    },
-    SlideGroup {
-        cells: Vec<(i32, i32)>,
-        dx: i32,
-        dy: i32,
-    },
-    Custom(String, serde_json::Value),
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct UserMove {
-    pub actions: Vec<Action>,
-}
-
-pub trait RulePlugin {
-    fn name(&self) -> &str {
-        "plugin"
-    }
-    fn pre_validate(&self, _state: &GameState, _mv: &mut UserMove) -> Result<(), EngineError> {
-        Ok(())
-    }
-    fn validate(&self, _state: &GameState, _mv: &UserMove) -> Result<(), EngineError> {
-        Ok(())
-    }
-    fn to_draft(&self, _state: &GameState, _mv: &UserMove) -> Option<MoveDraft> {
-        None
-    }
-    fn modify_score(&self, _state: &GameState, _v: &ValidatedMove, _sc: &mut ScoreBreakdown) {}
-    fn commit(
-        &self,
-        _state: &mut GameState,
-        _v: &ValidatedMove,
-        _sc: &ScoreBreakdown,
-    ) -> Result<(), EngineError> {
-        Ok(())
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct BasicActionsPlugin;
-impl RulePlugin for BasicActionsPlugin {
-    fn name(&self) -> &str {
-        "basic_actions"
-    }
-    fn pre_validate(&self, _state: &GameState, mv: &mut UserMove) -> Result<(), EngineError> {
-        // reject unsupported actions here
-        for a in &mv.actions {
-            match a {
-                Action::Place { .. } | Action::Stack { .. } | Action::Custom(_, _) => {}
-                _ => return Err(EngineError::Config("unsupported action")),
-            }
-        }
-        Ok(())
-    }
-    fn to_draft(&self, state: &GameState, mv: &UserMove) -> Option<MoveDraft> {
-        let mut placements: Vec<(CellId, Tile)> = Vec::new();
-        for a in &mv.actions {
-            match a {
-                Action::Place {
-                    x,
-                    y,
-                    kind_id,
-                    mark,
-                }
-                | Action::Stack {
-                    x,
-                    y,
-                    kind_id,
-                    mark,
-                } => {
-                    let id = state.board.geom.to_cell_id(Coord2D { x: *x, y: *y })?;
-                    placements.push((
-                        id,
-                        Tile {
-                            kind_id: kind_id.clone(),
-                            mark: mark.clone(),
-                        },
-                    ));
-                }
-                Action::Custom(_, _) => {}
-                _ => {}
-            }
-        }
-        if placements.is_empty() {
-            None
-        } else {
-            Some(MoveDraft { placements })
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct ScoreBonusPlugin {
-    pub bonus: i32,
-}
-impl RulePlugin for ScoreBonusPlugin {
-    fn name(&self) -> &str {
-        "score_bonus"
-    }
-    fn modify_score(&self, _state: &GameState, _v: &ValidatedMove, sc: &mut ScoreBreakdown) {
-        sc.total += self.bonus;
-    }
-}
-
-pub struct PluginRules {
-    pub base: CrosswordRules,
-    pub plugins: Vec<Box<dyn RulePlugin + Send + Sync>>, // deterministic order
-}
-
-impl PluginRules {
-    pub fn new(base: CrosswordRules, plugins: Vec<Box<dyn RulePlugin + Send + Sync>>) -> Self {
-        Self { base, plugins }
-    }
-    pub fn validate_user_move(
-        &self,
-        state: &GameState,
-        mut mv: UserMove,
-    ) -> Result<ValidatedMove, EngineError> {
-        // preprocess
-        for p in &self.plugins {
-            p.pre_validate(state, &mut mv)?;
-        }
-        // validate hooks
-        for p in &self.plugins {
-            p.validate(state, &mv)?;
-        }
-        // draft conversion
-        let mut draft: Option<MoveDraft> = None;
-        for p in &self.plugins {
-            if let Some(d) = p.to_draft(state, &mv) {
-                draft = Some(d);
-            }
-        }
-        let draft = draft.ok_or(EngineError::Config("no draft produced by plugins"))?;
-        // base validation
-        self.base.validate(state, &draft)
-    }
-    pub fn score_user_move(&self, state: &GameState, v: &ValidatedMove) -> ScoreBreakdown {
-        let mut sc = self.base.score(state, v);
-        for p in &self.plugins {
-            p.modify_score(state, v, &mut sc);
-        }
-        sc
-    }
-    pub fn commit_user_move(
-        &self,
-        state: &mut GameState,
-        v: ValidatedMove,
-        sc: &ScoreBreakdown,
-    ) -> Result<(), EngineError> {
-        self.base.commit(state, v.clone(), sc)?;
-        for p in &self.plugins {
-            p.commit(state, &v, sc)?;
-        }
-        Ok(())
-    }
-}
-
-impl Rules for PluginRules {
-    fn validate(&self, state: &GameState, draft: &MoveDraft) -> Result<ValidatedMove, EngineError> {
-        self.base.validate(state, draft)
-    }
-    fn score(&self, state: &GameState, mv: &ValidatedMove) -> ScoreBreakdown {
-        self.base.score(state, mv)
-    }
-    fn commit(
-        &self,
-        state: &mut GameState,
-        mv: ValidatedMove,
-        score: &ScoreBreakdown,
-    ) -> Result<(), EngineError> {
-        self.base.commit(state, mv, score)
-    }
-}
+// Rule plugins moved to rules::plugins
 // ---- Graph helpers ----
 
 fn bfs_path_on_dir(
@@ -2699,7 +1992,7 @@ pub fn generate_moves(
         blank_kinds: &[String],
     ) {
         let len_tokens = if let Some((gd, _)) = &gaddag {
-            gd.tokenizer.segment(&built).len()
+            gd.tokenizer().segment(&built).len()
         } else {
             built.graphemes(true).count()
         };
@@ -3719,126 +3012,18 @@ impl Player {
 }
 
 // -------- Dictionary Engine (Phase 3) --------
+// Moved to module `dict`; re-exported here for compatibility
+pub mod dict;
+pub use dict::{Dictionary, DictionaryOptions, SetDictionary, FstDictionary, DawgDictionary, GaddagDictionary, GaddagCursor, GaddagRight};
 
-pub trait Dictionary {
-    fn contains(&self, word: &str) -> bool;
-    fn has_prefix(&self, _prefix: &str) -> bool {
-        false
-    }
-    fn as_any(&self) -> &dyn Any;
-    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync>;
-}
+/* old inlined trait moved to dict */
+// (Dictionary trait moved to dict)
 
-#[derive(Debug, Clone, Default)]
-pub struct SetDictionary {
-    words: std::collections::HashSet<String>,
-    case_fold: bool,
-    norm: NormalizationMode,
-}
+// (SetDictionary moved to dict)
 
-impl SetDictionary {
-    pub fn from_file<P: AsRef<std::path::Path>>(
-        path: P,
-        opts: DictionaryOptions,
-    ) -> std::io::Result<Self> {
-        use std::io::{BufRead, BufReader};
-        let f = std::fs::File::open(path)?;
-        let mut set = std::collections::HashSet::new();
-        let reader = BufReader::new(f);
-        for line in reader.lines() {
-            let s = line?;
-            let s = s.trim();
-            if s.is_empty() || s.starts_with('#') {
-                continue;
-            }
-            let mut w = normalize_with_mode(s, opts.norm);
-            if opts.case_fold {
-                w = w.to_lowercase();
-            }
-            let len = opts.tokenizer.segment(&w).len();
-            if let Some(min) = opts.min_len
-                && len < min
-            {
-                continue;
-            }
-            if let Some(max) = opts.max_len
-                && len > max
-            {
-                continue;
-            }
-            set.insert(w);
-        }
-        Ok(Self {
-            words: set,
-            case_fold: opts.case_fold,
-            norm: opts.norm,
-        })
-    }
-    pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        let mut set = std::collections::HashSet::new();
-        for w in iter {
-            let mut s = nfc(w.into());
-            if case_fold {
-                s = s.to_lowercase();
-            }
-            set.insert(s);
-        }
-        Self {
-            words: set,
-            case_fold,
-            norm: NormalizationMode::NFC,
-        }
-    }
+// (FstDictionary moved to dict)
 
-    pub fn from_words_opts<I, S>(iter: I, opts: DictionaryOptions) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        let mut set = std::collections::HashSet::new();
-        for w in iter {
-            let mut s = normalize_with_mode(w.into(), opts.norm);
-            if opts.case_fold {
-                s = s.to_lowercase();
-            }
-            set.insert(s);
-        }
-        Self {
-            words: set,
-            case_fold: opts.case_fold,
-            norm: opts.norm,
-        }
-    }
-}
-
-impl Dictionary for SetDictionary {
-    fn contains(&self, word: &str) -> bool {
-        let mut s = normalize_with_mode(word, self.norm);
-        if self.case_fold {
-            s = s.to_lowercase();
-        }
-        self.words.contains(&s)
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> {
-        Box::new(self.clone())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct FstDictionary {
-    set: fst::Set<Vec<u8>>,
-    case_fold: bool,
-    norm: NormalizationMode,
-}
-
-impl FstDictionary {
+/* moved: impl FstDictionary {
     pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -3964,9 +3149,10 @@ impl Dictionary for FstDictionary {
         Box::new(self.clone())
     }
 }
+*/
 
 // Simple DAWG/Trie implementation with prefix search (Phase 11)
-#[derive(Debug, Clone, Default)]
+/* moved: #[derive(Debug, Clone, Default)]
 pub struct DawgDictionary {
     nodes: Vec<DawgNode>,
     case_fold: bool,
@@ -4126,19 +3312,73 @@ impl Dictionary for DawgDictionary {
         Box::new(self.clone())
     }
 }
+*/
 
-#[derive(Debug, Clone)]
+/* moved: #[derive(Debug, Clone)]
 pub struct GaddagDictionary {
     forward: FstDictionary,
-    g_nodes: Vec<GNode>,
+    // packed graph
+    g_nodes: Vec<PackedNode>,
+    g_arcs: Vec<PackedArc>,
+    // symbol mapping
+    sym2id: std::collections::HashMap<String, u16>,
+    id2sym: Vec<String>,
     sep: String,
+    sep_id: u16,
     tokenizer: TokenizerRef,
 }
 
-#[derive(Debug, Clone, Default)]
-struct GNode {
-    edges: std::collections::HashMap<String, usize>,
+#[derive(Debug, Clone, Copy)]
+struct PackedNode {
+    offset: u32,
+    degree: u16,
+    flags: u16, // bit 0 => terminal
+}
+impl PackedNode {
+    #[inline]
+    fn terminal(&self) -> bool {
+        (self.flags & 1) != 0
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PackedArc {
+    label: u16,
+    target: u32,
+}
+
+// Transient builder node (u16-labeled sorted map)
+#[derive(Default)]
+struct BuildNode {
+    edges: std::collections::BTreeMap<u16, usize>,
     terminal: bool,
+}
+
+// On-disk representation for packed GADDAG
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PackedNodeDisk {
+    offset: u32,
+    degree: u16,
+    flags: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PackedArcDisk {
+    label: u16,
+    target: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GaddagDiskImage {
+    sep: String,
+    sep_id: u16,
+    id2sym: Vec<String>,
+    nodes: Vec<PackedNodeDisk>,
+    arcs: Vec<PackedArcDisk>,
+    words: Vec<String>,
+    case_fold: bool,
+    // 0 = NFC, 1 = NFKC
+    norm_mode: u8,
 }
 
 impl GaddagDictionary {
@@ -4159,65 +3399,83 @@ impl GaddagDictionary {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        let DictionaryOptions {
-            case_fold,
-            min_len,
-            max_len,
-            norm,
-            tokenizer,
-        } = opts;
+        let DictionaryOptions { case_fold, min_len, max_len, norm, tokenizer } = opts;
         let sep = "+".to_string();
-        let mut g_nodes = vec![GNode::default()];
+
+        // Normalize/filter words first
         let mut words: Vec<String> = Vec::new();
         for w in iter.into_iter() {
             let mut s = normalize_with_mode(w.into(), norm);
-            if case_fold {
-                s = s.to_lowercase();
+            if case_fold { s = s.to_lowercase(); }
+            if s.is_empty() { continue; }
+            let tks = tokenizer.segment(&s);
+            if tks.is_empty() { continue; }
+            let len = tks.len();
+            if let Some(min) = min_len { if len < min { continue; } }
+            if let Some(max) = max_len { if len > max { continue; } }
+            words.push(s);
+        }
+
+        // Build small symbol table
+        let mut sym2id: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
+        let mut id2sym: Vec<String> = Vec::new();
+        let mut intern = |sym: &str,
+                          map: &mut std::collections::HashMap<String, u16>,
+                          vec: &mut Vec<String>| -> u16 {
+            if let Some(&id) = map.get(sym) { return id; }
+            let id = vec.len() as u16;
+            map.insert(sym.to_string(), id);
+            vec.push(sym.to_string());
+            id
+        };
+        for s in &words {
+            for tk in tokenizer.segment(s) {
+                let _ = intern(&tk, &mut sym2id, &mut id2sym);
             }
-            if s.is_empty() {
-                continue;
-            }
-            let tokens = tokenizer.segment(&s);
-            if tokens.is_empty() {
-                continue;
-            }
-            words.push(s.clone());
+        }
+        let sep_id = intern(&sep, &mut sym2id, &mut id2sym);
+
+        // Build trie over u16 labels
+        let mut build_nodes: Vec<BuildNode> = vec![BuildNode::default()]; // root = 0
+        for s in &words {
+            let tokens = tokenizer.segment(s);
             let n = tokens.len();
             for split in 0..=n {
-                let prefix = &tokens[..split];
-                let suffix = &tokens[split..];
-                let mut seq: Vec<String> = prefix.iter().rev().cloned().collect();
-                seq.push(sep.clone());
-                seq.extend(suffix.iter().cloned());
+                let mut seq: Vec<u16> = Vec::with_capacity(n + 1);
+                for tk in tokens[..split].iter().rev() { seq.push(*sym2id.get(tk).expect("interned")); }
+                seq.push(sep_id);
+                for tk in &tokens[split..] { seq.push(*sym2id.get(tk).expect("interned")); }
                 let mut node = 0usize;
-                for token in seq {
-                    let next = if let Some(&id) = g_nodes[node].edges.get(&token) {
+                for &lab in &seq {
+                    let next = if let Some(&id) = build_nodes[node].edges.get(&lab) {
                         id
                     } else {
-                        let id = g_nodes.len();
-                        g_nodes.push(GNode::default());
-                        g_nodes[node].edges.insert(token.clone(), id);
+                        let id = build_nodes.len();
+                        build_nodes.push(BuildNode::default());
+                        build_nodes[node].edges.insert(lab, id);
                         id
                     };
                     node = next;
                 }
-                g_nodes[node].terminal = true;
+                build_nodes[node].terminal = true;
             }
         }
-        let forward_opts = DictionaryOptions {
-            case_fold,
-            min_len,
-            max_len,
-            norm,
-            tokenizer: tokenizer.clone(),
-        };
-        let forward = FstDictionary::from_words_opts(words, forward_opts);
-        Self {
-            forward,
-            g_nodes,
-            sep,
-            tokenizer,
+
+        // Freeze packed arrays
+        let mut g_nodes: Vec<PackedNode> = Vec::with_capacity(build_nodes.len());
+        let mut g_arcs: Vec<PackedArc> = Vec::new();
+        for bn in &build_nodes {
+            let offset = g_arcs.len() as u32;
+            let degree = bn.edges.len() as u16;
+            for (&label, &target) in bn.edges.iter() {
+                g_arcs.push(PackedArc { label, target: target as u32 });
+            }
+            g_nodes.push(PackedNode { offset, degree, flags: if bn.terminal { 1 } else { 0 } });
         }
+
+        let forward_opts = DictionaryOptions { case_fold, min_len, max_len, norm, tokenizer: tokenizer.clone() };
+        let forward = FstDictionary::from_words_opts(words.clone(), forward_opts);
+        Self { forward, g_nodes, g_arcs, sym2id, id2sym, sep, sep_id, tokenizer }
     }
 
     pub fn from_file<P: AsRef<std::path::Path>>(
@@ -4253,6 +3511,139 @@ impl GaddagDictionary {
         Ok(Self::from_words_opts(words, opts))
     }
 
+    /// Serialize the GADDAG automaton and normalized word list to a CBOR file.
+    /// Note: The tokenizer used for move generation is not serialized. Provide it when loading.
+    pub fn to_gaddag_file<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
+        use std::io::BufWriter;
+        let norm_mode: u8 = match self.forward.norm { NormalizationMode::NFC => 0, NormalizationMode::NFKC => 1 };
+        // Collect all words from FST using an empty prefix automaton.
+        let mut words: Vec<String> = Vec::new();
+        {
+            use fst::{IntoStreamer, Streamer, automaton::Str};
+            let aut = Str::new("").starts_with();
+            let mut stream = self.forward.set.search(aut).into_stream();
+            while let Some(bytes) = stream.next() {
+                let s = std::str::from_utf8(bytes)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("invalid utf8 in FST: {}", e)))?
+                    .to_string();
+                words.push(s);
+            }
+        }
+        let nodes: Vec<PackedNodeDisk> = self
+            .g_nodes
+            .iter()
+            .map(|n| PackedNodeDisk { offset: n.offset, degree: n.degree, flags: n.flags })
+            .collect();
+        let arcs: Vec<PackedArcDisk> = self
+            .g_arcs
+            .iter()
+            .map(|a| PackedArcDisk { label: a.label, target: a.target })
+            .collect();
+        let image = GaddagDiskImage {
+            sep: self.sep.clone(),
+            sep_id: self.sep_id,
+            id2sym: self.id2sym.clone(),
+            nodes,
+            arcs,
+            words,
+            case_fold: self.forward.case_fold,
+            norm_mode,
+        };
+        let f = std::fs::File::create(path)?;
+        let mut w = BufWriter::new(f);
+        ciborium::ser::into_writer(&image, &mut w)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+    }
+
+    /// Serialize to CBOR bytes for embedding (e.g., `include_bytes!` in WASM bundles).
+    pub fn to_gaddag_bytes(&self) -> std::io::Result<Vec<u8>> {
+        let norm_mode: u8 = match self.forward.norm { NormalizationMode::NFC => 0, NormalizationMode::NFKC => 1 };
+        let mut words: Vec<String> = Vec::new();
+        {
+            use fst::{IntoStreamer, Streamer, automaton::Str};
+            let aut = Str::new("").starts_with();
+            let mut stream = self.forward.set.search(aut).into_stream();
+            while let Some(bytes) = stream.next() {
+                let s = std::str::from_utf8(bytes)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("invalid utf8 in FST: {}", e)))?
+                    .to_string();
+                words.push(s);
+            }
+        }
+        let nodes: Vec<PackedNodeDisk> = self
+            .g_nodes
+            .iter()
+            .map(|n| PackedNodeDisk { offset: n.offset, degree: n.degree, flags: n.flags })
+            .collect();
+        let arcs: Vec<PackedArcDisk> = self
+            .g_arcs
+            .iter()
+            .map(|a| PackedArcDisk { label: a.label, target: a.target })
+            .collect();
+        let image = GaddagDiskImage { sep: self.sep.clone(), sep_id: self.sep_id, id2sym: self.id2sym.clone(), nodes, arcs, words, case_fold: self.forward.case_fold, norm_mode };
+        let mut buf = Vec::new();
+        ciborium::ser::into_writer(&image, &mut buf)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        Ok(buf)
+    }
+
+    /// Load a serialized GADDAG CBOR file. Caller must supply the tokenizer that matches
+    /// how the automaton was built.
+    pub fn from_gaddag_file<P: AsRef<std::path::Path>>(
+        path: P,
+        tokenizer: TokenizerRef,
+    ) -> std::io::Result<Self> {
+        use std::io::BufReader;
+        let f = std::fs::File::open(path)?;
+        let r = BufReader::new(f);
+        let image: GaddagDiskImage =
+            ciborium::de::from_reader(r).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        let g_nodes: Vec<PackedNode> = image
+            .nodes
+            .iter()
+            .map(|n| PackedNode { offset: n.offset, degree: n.degree, flags: n.flags })
+            .collect();
+        let g_arcs: Vec<PackedArc> = image
+            .arcs
+            .iter()
+            .map(|a| PackedArc { label: a.label, target: a.target })
+            .collect();
+        let mut sym2id: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
+        for (i, s) in image.id2sym.iter().enumerate() {
+            sym2id.insert(s.clone(), i as u16);
+        }
+        let norm = match image.norm_mode { 0 => NormalizationMode::NFC, 1 => NormalizationMode::NFKC, _ => NormalizationMode::NFC };
+        let forward_opts = DictionaryOptions { case_fold: image.case_fold, min_len: None, max_len: None, norm, tokenizer: tokenizer.clone() };
+        let forward = FstDictionary::from_words_opts(image.words, forward_opts.clone());
+        Ok(Self { forward, g_nodes, g_arcs, sym2id, id2sym: image.id2sym, sep: image.sep, sep_id: image.sep_id, tokenizer })
+    }
+
+    /// Load from CBOR bytes (e.g., embedded via `include_bytes!`).
+    pub fn from_gaddag_bytes<D: AsRef<[u8]>>(
+        bytes: D,
+        tokenizer: TokenizerRef,
+    ) -> std::io::Result<Self> {
+        let cursor = std::io::Cursor::new(bytes.as_ref());
+        let image: GaddagDiskImage =
+            ciborium::de::from_reader(cursor).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        let g_nodes: Vec<PackedNode> = image
+            .nodes
+            .iter()
+            .map(|n| PackedNode { offset: n.offset, degree: n.degree, flags: n.flags })
+            .collect();
+        let g_arcs: Vec<PackedArc> = image
+            .arcs
+            .iter()
+            .map(|a| PackedArc { label: a.label, target: a.target })
+            .collect();
+        let mut sym2id: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
+        for (i, s) in image.id2sym.iter().enumerate() { sym2id.insert(s.clone(), i as u16); }
+        let norm = match image.norm_mode { 0 => NormalizationMode::NFC, 1 => NormalizationMode::NFKC, _ => NormalizationMode::NFC };
+        let forward_opts = DictionaryOptions { case_fold: image.case_fold, min_len: None, max_len: None, norm, tokenizer: tokenizer.clone() };
+        let forward = FstDictionary::from_words_opts(image.words, forward_opts.clone());
+        Ok(Self { forward, g_nodes, g_arcs, sym2id, id2sym: image.id2sym, sep: image.sep, sep_id: image.sep_id, tokenizer })
+    }
+
     pub fn root(&self) -> usize {
         0
     }
@@ -4260,10 +3651,25 @@ impl GaddagDictionary {
         &self.sep
     }
     pub fn step_token(&self, node: usize, token: &str) -> Option<usize> {
-        self.g_nodes.get(node)?.edges.get(token).copied()
+        let &id = self.sym2id.get(token)?;
+        self.step_by_id(node, id)
     }
+    #[inline]
+    fn step_by_id(&self, node: usize, sym_id: u16) -> Option<usize> {
+        let n = *self.g_nodes.get(node)?;
+        let slice = &self.g_arcs[n.offset as usize .. n.offset as usize + n.degree as usize];
+        let mut lo = 0usize;
+        let mut hi = slice.len();
+        while lo < hi {
+            let mid = (lo + hi) >> 1;
+            let m = &slice[mid];
+            if m.label < sym_id { lo = mid + 1; } else { hi = mid; }
+        }
+        if lo < slice.len() && slice[lo].label == sym_id { Some(slice[lo].target as usize) } else { None }
+    }
+
     pub fn is_terminal(&self, node: usize) -> bool {
-        self.g_nodes.get(node).map(|n| n.terminal).unwrap_or(false)
+        self.g_nodes.get(node).map(|n| n.terminal()).unwrap_or(false)
     }
 
     /// Enumerate simple rightward suffixes from an anchor with given left context using rack letters.
@@ -4275,22 +3681,20 @@ impl GaddagDictionary {
         rack: &mut std::collections::HashMap<String, usize>,
         max_len: usize,
     ) -> Vec<String> {
+        // compute pre node from left_context quickly
         let mut node = self.root();
         for token in self.tokenizer.segment(left_context).into_iter().rev() {
-            if let Some(n2) = self.step_token(node, &token) {
+            let &id = if let Some(id) = self.sym2id.get(&token) { id } else { return vec![]; };
+            if let Some(n2) = self.step_by_id(node, id) {
                 node = n2;
-            } else {
-                return vec![];
-            }
+            } else { return vec![]; }
         }
-        if let Some(n2) = self.step_token(node, self.sep_token()) {
-            node = n2;
-        } else {
-            return vec![];
-        }
+        if let Some(n2) = self.step_by_id(node, self.sep_id) { node = n2; } else { return vec![]; }
+
+        // DFS on packed arcs
         let mut out = Vec::new();
         fn dfs(
-            dict: &GaddagDictionary,
+            g: &GaddagDictionary,
             node: usize,
             built: &mut Vec<String>,
             rack: &mut std::collections::HashMap<String, usize>,
@@ -4298,36 +3702,26 @@ impl GaddagDictionary {
             left_context: &str,
             max_len: usize,
         ) {
-            if built.len() >= max_len {
-                return;
-            }
-            if !built.is_empty() && dict.is_terminal(node) {
+            if built.len() >= max_len { return; }
+            if !built.is_empty() && g.is_terminal(node) {
                 let suffix = built.join("");
                 out.push(format!("{}{}", left_context, suffix));
             }
-            let keys: Vec<String> = rack
-                .iter()
-                .filter_map(|(k, c)| if *c > 0 { Some(k.clone()) } else { None })
-                .collect();
-            for token in keys {
-                if let Some(n2) = dict.step_token(node, &token) {
-                    *rack.get_mut(&token).unwrap() -= 1;
-                    built.push(token.clone());
-                    dfs(dict, n2, built, rack, out, left_context, max_len);
+            let ninfo = &g.g_nodes[node];
+            let arcs = &g.g_arcs[ninfo.offset as usize .. ninfo.offset as usize + ninfo.degree as usize];
+            for arc in arcs {
+                if arc.label == g.sep_id { continue; }
+                let sym = &g.id2sym[arc.label as usize];
+                if rack.get(sym).copied().unwrap_or(0) > 0 {
+                    { let c = rack.get_mut(sym).unwrap(); *c -= 1; }
+                    built.push(sym.clone());
+                    dfs(g, arc.target as usize, built, rack, out, left_context, max_len);
                     built.pop();
-                    *rack.get_mut(&token).unwrap() += 1;
+                    { let c = rack.get_mut(sym).unwrap(); *c += 1; }
                 }
             }
         }
-        dfs(
-            self,
-            node,
-            &mut Vec::new(),
-            rack,
-            &mut out,
-            left_context,
-            max_len,
-        );
+        dfs(self, node, &mut Vec::new(), rack, &mut out, left_context, max_len);
         out
     }
 
@@ -4338,6 +3732,10 @@ impl GaddagDictionary {
     pub fn tokenizer(&self) -> &TokenizerRef {
         &self.tokenizer
     }
+    // Small helpers for id-based paths
+    pub fn symbol_id(&self, sym: &str) -> Option<u16> { self.sym2id.get(sym).copied() }
+    pub fn id_to_symbol(&self, id: u16) -> &str { &self.id2sym[id as usize] }
+    pub fn alphabet_len(&self) -> usize { self.id2sym.len() }
 }
 
 pub struct GaddagCursor<'a> {
@@ -4355,6 +3753,14 @@ impl<'a> GaddagCursor<'a> {
         let mut node = dict.root();
         for token in dict.tokenizer.segment(left_context).into_iter().rev() {
             node = dict.step_token(node, &token)?;
+        }
+        Some(Self { dict, pre: node })
+    }
+    // Fast path without tokenization
+    pub fn new_from_tokens(dict: &'a GaddagDictionary, left_tokens: &[u16]) -> Option<Self> {
+        let mut node = dict.root();
+        for &id in left_tokens.iter().rev() {
+            node = dict.step_by_id(node, id)?;
         }
         Some(Self { dict, pre: node })
     }
@@ -4385,6 +3791,11 @@ impl<'a> GaddagRight<'a> {
             node: n,
         })
     }
+    // Step by symbol id (fast path)
+    pub fn step_id(&self, sym_id: u16) -> Option<Self> {
+        let n = self.dict.step_by_id(self.node, sym_id)?;
+        Some(Self { dict: self.dict, node: n })
+    }
     pub fn is_terminal(&self) -> bool {
         self.dict.is_terminal(self.node)
     }
@@ -4409,25 +3820,9 @@ impl Dictionary for GaddagDictionary {
 }
 
 #[derive(Debug, Clone)]
-pub struct DictionaryOptions {
-    pub case_fold: bool,
-    pub min_len: Option<usize>,
-    pub max_len: Option<usize>,
-    pub norm: NormalizationMode,
-    pub tokenizer: TokenizerRef,
-}
-
-impl Default for DictionaryOptions {
-    fn default() -> Self {
-        Self {
-            case_fold: false,
-            min_len: None,
-            max_len: None,
-            norm: NormalizationMode::NFC,
-            tokenizer: TokenizerRef::default(),
-        }
-    }
-}
+pub struct DictionaryOptions { /* moved */ }
+impl Default for DictionaryOptions { fn default() -> Self { unreachable!("moved") } }
+*/
 
 // -------- Tests --------
 
@@ -4436,14 +3831,7 @@ mod tests {
     use super::*;
     use unicode_normalization::UnicodeNormalization;
 
-    fn rect(w: u32, h: u32) -> RectGridGeometry {
-        RectGridGeometry {
-            width: w,
-            height: h,
-            adj: None,
-            present: None,
-        }
-    }
+    fn rect(w: u32, h: u32) -> RectGridGeometry { RectGridGeometry::new(w, h) }
 
     #[test]
     fn version_smoke() {
@@ -4944,13 +4332,9 @@ mod tests {
         fn has_seq(gd: &GaddagDictionary, s: &str) -> bool {
             let mut node = gd.root();
             for token in gd.tokenizer().segment(s) {
-                if let Some(&nxt) = gd.g_nodes[node].edges.get(&token) {
-                    node = nxt;
-                } else {
-                    return false;
-                }
+                if let Some(nxt) = gd.step_token(node, &token) { node = nxt; } else { return false; }
             }
-            gd.g_nodes[node].terminal
+            gd.is_terminal(node)
         }
         // Our builder includes split positions 0..=n, so it includes "+CARES"
         assert!(has_seq(&gd, "+cares"));
@@ -4959,6 +4343,17 @@ mod tests {
         assert!(has_seq(&gd, "rac+es"));
         assert!(has_seq(&gd, "erac+s"));
         assert!(has_seq(&gd, "serac+"));
+    }
+
+    #[test]
+    fn gaddag_id_cursor_and_step_id() {
+        let gd = GaddagDictionary::from_words(vec!["AB".to_string()], true);
+        let a = gd.symbol_id("a").expect("a id");
+        let b = gd.symbol_id("b").expect("b id");
+        let cur = GaddagCursor::new_from_tokens(&gd, &[a]).expect("cursor");
+        let right = cur.branch_right().expect("branch");
+        let r2 = right.step_id(b).expect("step b");
+        assert!(r2.is_terminal());
     }
 
     #[test]
@@ -5110,6 +4505,60 @@ mod tests {
         assert!(!dawgd.has_prefix("sqz"));
         let gd = GaddagDictionary::from_words_opts(vec!["qu".to_string()], opts);
         assert!(gd.step_symbol(gd.root(), "qu").is_some());
+    }
+
+    #[test]
+    fn gaddag_serialize_roundtrip_default() {
+        use std::path::PathBuf;
+        let gd = GaddagDictionary::from_words(vec!["CARE".to_string(), "CARES".to_string()], true);
+        let path = PathBuf::from(std::env::temp_dir()).join("gaddag_test_default.cbor");
+        gd.to_gaddag_file(&path).unwrap();
+        let gd2 = GaddagDictionary::from_gaddag_file(&path, TokenizerRef::default()).unwrap();
+        // Case-folded lookup via forward dictionary
+        assert!(gd2.contains("cares"));
+        assert!(gd2.contains("CARE"));
+        // Basic membership checks are sufficient for roundtrip integrity
+    }
+
+    #[test]
+    fn gaddag_serialize_roundtrip_custom_tokenizer() {
+        use std::sync::Arc;
+        struct QuTokenizer;
+        impl Tokenizer for QuTokenizer {
+            fn segment(&self, text: &str) -> Vec<String> {
+                let mut out = Vec::new();
+                let mut chars = text.chars().peekable();
+                while let Some(ch) = chars.next() {
+                    if ch == 'q' && chars.peek() == Some(&'u') {
+                        chars.next();
+                        out.push("qu".to_string());
+                    } else {
+                        out.push(ch.to_string());
+                    }
+                }
+                out
+            }
+        }
+        let tokenizer = TokenizerRef::new(Arc::new(QuTokenizer));
+        let opts = DictionaryOptions {
+            tokenizer: tokenizer.clone(),
+            ..Default::default()
+        };
+        let gd = GaddagDictionary::from_words_opts(vec!["qu".to_string()], opts);
+        let p = std::env::temp_dir().join("gaddag_test_qu.cbor");
+        gd.to_gaddag_file(&p).unwrap();
+        let gd2 = GaddagDictionary::from_gaddag_file(&p, tokenizer).unwrap();
+        assert!(gd2.step_symbol(gd2.root(), "qu").is_some());
+    }
+
+    #[test]
+    fn gaddag_bytes_roundtrip() {
+        let gd = GaddagDictionary::from_words(vec!["AB".to_string(), "ABC".to_string()], true);
+        let bytes = gd.to_gaddag_bytes().unwrap();
+        let gd2 = GaddagDictionary::from_gaddag_bytes(bytes, TokenizerRef::default()).unwrap();
+        assert!(gd2.contains("ab"));
+        assert!(gd2.contains("abc"));
+        // Transition checks are validated in non-serialized tests
     }
 
     #[test]

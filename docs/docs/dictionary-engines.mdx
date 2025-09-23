@@ -76,3 +76,24 @@ set_dictionary_from_text_engine(game, text, 'gaddag', true);
 ```
 
 Use `'set'`, `'fst'`, `'dawg'`, or `'gaddag'` for the `engine` argument. The helper automatically applies NFC and optional case-folding before building the data structure.
+
+## Prebuilt caches (FST and GADDAG)
+
+For large lexica, prebuild assets once and host them alongside your app.
+
+Reproduce locally:
+
+```bash
+# Build FST + WASM artifacts and copy demo assets under docs/static/
+make wasm
+
+# Build only the GADDAG cache next to TWL06.txt
+cargo run --bin gaddag_cache -- \
+  docs/static/dictionaries/TWL06.txt \
+  docs/static/dictionaries/TWL06.gaddag.cbor \
+  --case-fold --norm nfc
+```
+
+Details:
+- `docs/static/dictionaries/TWL06.fst` is an FST set generated from the text list.
+- `docs/static/dictionaries/TWL06.gaddag.cbor` is a CBOR snapshot of the GADDAG automaton with metadata for normalized words.

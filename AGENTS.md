@@ -1,40 +1,62 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-- Root contains planning docs: `VISION.md` (north star) and `TODO.md` (execution plan).
-- New implementation code, when created, should live under a fresh `src/` (and `tests/`).
+This file sets expectations for contributors and automation working in this repository. It applies repo‑wide.
 
-## Workflow: TODO‑Driven Phases
-- Always read `VISION.md` and `TODO.md` before starting any work.
-- Work strictly by phases defined in `TODO.md` and fully complete a phase before starting the next.
-  - After finishing a phase, update `TODO.md` by marking items complete (e.g., `- [x] Implement parser`).
-  - Report a brief summary of work completed and ask to continue to the next phase.
-- Keep changes minimal and focused; prefer small, reviewable PRs.
+## Docs Style Guide
 
-## Build, Test, and Development Commands
-- Do not execute anything in `OLD/`.
-- Rust workspace commands (root):
-  - `make build` or `cargo build --workspace` — compile all crates.
-  - `make test` or `cargo test --workspace --all-features` — run tests.
-  - `make lint` — Clippy lint with `-D warnings`.
-  - `make fmt` — format with rustfmt.
+Audience and purpose
 
-## Coding Style & Naming Conventions
-- Default language: TypeScript (unless `TODO.md` specifies otherwise).
-- Indentation: 2 spaces; UTF‑8; Unix line endings.
-- Names: `PascalCase` (classes/types), `camelCase` (vars/functions), `SCREAMING_SNAKE_CASE` (constants).
-- Structure: domain‑oriented folders under `src/`; avoid cyclic imports; keep pure logic separate from I/O.
+- Write for human readers (players, integrators, developers), not for agents.
+- Keep docs self‑contained, practical, and task oriented. Favor examples that work as shown.
 
-## Testing Guidelines
-- Place tests in `tests/` with `*.test.ts`.
-- Use `vitest` or `jest`; target critical logic first. Aim for meaningful coverage, not just line count.
-- Provide deterministic fixtures; avoid relying on legacy `OLD/` assets.
+Voice and tense
 
-## Commit & Pull Request Guidelines
-- Conventional Commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`.
-- PRs must: describe the change and scope, link related TODO items, and include screenshots/logs if UX/dev‑tooling changes.
-- Update `TODO.md` in the same PR when completing items.
+- Use clear, direct, present‑tense language. Describe what the engine does now.
+- Avoid speculative phrasing: do not use “will”, “could add”, “future”, “Phase X”, or similar roadmap talk.
+- Prefer “the engine” / “this page” over “we/I”.
 
-## Security & Configuration Tips
-- Do not commit large/proprietary dictionaries or secrets. Use configs/placeholders and document sources.
-- Keep strict compiler/linter settings; justify any relaxations in PR description.
+Internal references
+
+- Do not mention internal planning files or processes in user docs (e.g., no references to TODO.md, VISION.md phases, “Appendix A”, or roadmap items).
+- If background is necessary, link to public docs pages, not internal notes.
+
+Trademarks and proper nouns
+
+- Do not reference trademarked or copyrighted games by name.
+- Use neutral descriptors instead, for example:
+  - “classic 15×15 crossword‑style board”
+  - “anchor‑based move generation”, “cross‑check sets”
+  - “word bonus”, “letter multiplier”, “bingo bonus”
+
+Benchmarks and numbers
+
+- Treat benchmark numbers as a snapshot. Do not instruct readers to change files or “update the chart”.
+- Provide a “Reproduce locally” command and explain the workload, batch sizes, and variability across hardware/toolchains.
+- Qualify environment details (CPU, compiler) only when they aid interpretation.
+
+CI and examples
+
+- Describe CI/perf gates as examples unless a public workflow exists. Avoid phrasing that implies guarantees.
+- Prefer “Example gate: fail on ≥2× slowdown vs. baseline” over “CI runs X and fails the build”.
+
+Examples must run as written
+
+- Keep examples self‑contained. If a page shows emoji or custom tiles, define those tile kinds and counts inline.
+- Ensure dictionary settings match the example content (or explicitly disable dictionary checks for non‑lexical demos).
+- Avoid hidden dependencies on environment defaults.
+
+Terminology and consistency
+
+- Use consistent terms across pages (anchor, cross‑check, rack, prefix search, etc.). Define concepts on first use.
+- Prefer engine‑agnostic terms over brand‑specific ones.
+
+Tone and scope
+
+- Do not include contributor‑ or bot‑oriented instructions in user docs.
+- Keep claims factual; avoid marketing language and future promises.
+
+Change management
+
+- Keep edits minimal and focused. Prefer small, reviewable diffs.
+- When updating examples, verify they run with the current repository state.
+
