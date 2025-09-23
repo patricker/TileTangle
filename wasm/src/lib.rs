@@ -293,15 +293,16 @@ pub fn new_game(config_json: &str, players: usize) -> Result<JsGame, JsValue> {
         history: Vec::new(),
         future: Vec::new(),
     };
-    // Deal initial racks (7 tiles per player default)
+    // Deal initial racks using per-player rack capacity from engine config
     let players_n = game.state.players.len();
     for pid in 0..players_n {
+        let cap = game.state.players[pid].rack_capacity.max(1);
         loop {
-            if game.state.players[pid].rack.tiles.len() >= 7 {
+            if game.state.players[pid].rack.tiles.len() >= cap {
                 break;
             }
             if let Some(t) = game.state.bag.draw_one() {
-                let _ = game.state.players[pid].rack.add(t, 7);
+                let _ = game.state.players[pid].rack.add(t, cap);
             } else {
                 break;
             }

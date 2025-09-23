@@ -1,4 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import useBaseUrl from '@docusaurus/useBaseUrl';
 import {useColorMode} from '@docusaurus/theme-common';
 
 import {classicBonuses, classicTilesets} from './demoUtils';
@@ -22,7 +23,7 @@ const BOARD_WIDTH = 15;
 const BOARD_HEIGHT = 15;
 const MAX_HINTS = 5;
 
-export default function ClassicDemo(): JSX.Element {
+export default function ClassicDemo({compact}: {compact?: boolean}): JSX.Element {
   const {colorMode} = useColorMode();
   const palette = useMemo(() => getPlaygroundPalette(colorMode as 'light' | 'dark'), [colorMode]);
   const themeVars = useMemo(() => buildThemeVars(palette), [palette]);
@@ -63,6 +64,8 @@ export default function ClassicDemo(): JSX.Element {
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   const {ensureWorker, callWorker, terminateWorker} = useWorkerMessenger();
+  const fstUrl = useBaseUrl('dictionaries/TWL06.fst');
+  const txtUrl = useBaseUrl('dictionaries/TWL06.txt');
 
   const cfg = useMemo(() => ({
     tileset: {tile_kinds: classic.tile_kinds},
@@ -134,7 +137,7 @@ export default function ClassicDemo(): JSX.Element {
 
     const loadDictionary = async () => {
       try {
-        const fst = await fetch('/dictionaries/TWL06.fst');
+        const fst = await fetch(fstUrl);
         if (fst.ok) {
           const buf = new Uint8Array(await fst.arrayBuffer());
           await call('set_dictionary_from_fst_bytes', {bytes: buf, case_fold: true});
@@ -144,7 +147,7 @@ export default function ClassicDemo(): JSX.Element {
         console.warn('FST dictionary fetch failed', err);
       }
       try {
-        const txtResp = await fetch('/dictionaries/TWL06.txt');
+        const txtResp = await fetch(txtUrl);
         if (txtResp.ok) {
           const text = await txtResp.text();
           await call('set_dictionary_from_text', {text, case_fold: true});
@@ -196,7 +199,7 @@ export default function ClassicDemo(): JSX.Element {
       setRack([]);
       setHints([]);
     };
-  }, [bonusLayout, cfg, rtl, stackOn, stackScoring, forbidSame, useDict, syncState, ensureWorker, callWorker, terminateWorker]);
+  }, [bonusLayout, cfg, rtl, stackOn, stackScoring, forbidSame, useDict, syncState, ensureWorker, callWorker, terminateWorker, fstUrl, txtUrl]);
 
   const updateFromGame = useCallback(async () => {
     if (!game) return;
@@ -708,6 +711,8 @@ export default function ClassicDemo(): JSX.Element {
     />
   );
 
+  const compactMode = compact ?? true;
+
   return (
     <PlaygroundShell
       themeVars={themeVars}
@@ -716,6 +721,7 @@ export default function ClassicDemo(): JSX.Element {
       sidebar={sidebarContent}
       main={stageContent}
       rightRail={rightRailContent}
+      compact={compactMode}
     />
   );
 }

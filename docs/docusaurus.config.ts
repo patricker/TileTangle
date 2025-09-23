@@ -37,14 +37,14 @@ const config: Config = {
   },
 
   // Set the production url of your site here
-  url: 'https://your-docusaurus-site.example.com',
+  url: 'https://patricker.github.io',
   // Set the /<baseUrl>/ pathname under which your site is served
-  // For GitHub pages deployment, it is often '/<projectName>/'
+  // For GitHub Pages project sites, it is '/<projectName>/'
   baseUrl: '/',
 
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
-  organizationName: 'TileTangle',
+  organizationName: 'patricker',
   projectName: 'TileTangle',
 
   onBrokenLinks: 'throw',
@@ -82,7 +82,7 @@ const config: Config = {
       title: 'Tile Tangle',
       logo: {
         alt: 'Tile Tangle Logo',
-        src: 'img/TileTangleLogo.png',
+        src: 'img/tiletangle_t.png',
       },
       items: [
         { type: 'docSidebar', sidebarId: 'tutorialSidebar', position: 'left', label: 'Docs' },

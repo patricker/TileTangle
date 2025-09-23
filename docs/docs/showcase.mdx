@@ -25,21 +25,21 @@ respond, and use <kbd>Undo</kbd>/<kbd>Redo</kbd> to scrub the event log.
 
 ## Hex Board Variant (web)
 
-<Playground initial={{ useHex: true, useDict: true, dictEngine: 'dawg' }} />
+<Playground compact initial={{ useHex: true, useDict: true, dictEngine: 'dawg' }} />
 
 Hex adjacency uses graph-based move generation. Try placing letters around the origin and notice that
 perpendicular checks follow the six-direction neighbourhood.
 
 ## Upwords-style Stacking (web)
 
-<Playground initial={{ stackOn: true, stackScoring: 'sum', forbidSame: false }} />
+<Playground compact initial={{ stackOn: true, stackScoring: 'sum', forbidSame: false }} />
 
 Enable stacking to layer tiles on existing words. The demo defaults to `SumStack` scoring so previously
 covered letters still contribute—toggle back to `TopOnly` to emulate Upwords.
 
 ## Emoji Crossword (web)
 
-<Playground
+<Playground compact
   initial={{
     useDict: false,
     config: {

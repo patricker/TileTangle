@@ -667,10 +667,23 @@ impl Bag {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PlayerId(pub usize);
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Player {
     pub rack: Rack,
     pub score: i32,
+    /// Maximum rack capacity for this player (number of tiles the rack should hold)
+    #[serde(default = "Player::default_rack_capacity")]
+    pub rack_capacity: usize,
+}
+
+impl Default for Player {
+    fn default() -> Self {
+        Self { rack: Rack::default(), score: 0, rack_capacity: Self::default_rack_capacity() }
+    }
+}
+
+impl Player {
+    const fn default_rack_capacity() -> usize { 7 }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -801,7 +814,11 @@ impl GameState {
         }
         let bag = Bag::with_counts(counts, config.rng_seed);
         let zobrist_seed = splitmix64(config.rng_seed ^ 0x9E37_79B9_7F4A_7C15);
-        let players_vec = (0..players).map(|_| Player::default()).collect();
+        let mut players_vec: Vec<Player> = (0..players).map(|_| Player::default()).collect();
+        for p in &mut players_vec {
+            // No arbitrary upper cap at the engine level; callers control sane bounds.
+            p.rack_capacity = config.rack_size.max(1);
+        }
         Ok(Self {
             board,
             players: players_vec,
@@ -3697,7 +3714,7 @@ fn generate_moves_graph_basic(
 
 impl Player {
     fn rack_size(&self) -> Option<usize> {
-        Some(7)
+        Some(self.rack_capacity.max(1))
     }
 }
 

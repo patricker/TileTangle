@@ -1,4 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import useBaseUrl from '@docusaurus/useBaseUrl';
 import {useColorMode} from '@docusaurus/theme-common';
 import {classicTilesets} from './demoUtils';
 import PlaygroundBoard, {HEX_POLYGON} from './playground/PlaygroundBoard';
@@ -9,7 +10,7 @@ import type {BoardJson} from './playground/types';
 import {SetupState, buildShapeMask, clamp, formatTileCounts, formatTileScores, parseTileCounts, parseTileScores} from './playground/config';
 import {resolveBonusPreset, type BonusCell} from './playground/bonuses';
 import {BoardSetupPanel, LanguagePanel, StackingPanel} from './playground/panels';
-import {ButtonRow, type ButtonConfig, CpuHintSummary, MoveList, Panel, PlayerList, RackRow, ToggleField, type RackRowTile, SegmentedControl, type SegmentedOption} from './playground/ui';
+import {ButtonRow, type ButtonConfig, CpuHintSummary, MoveList, Panel, PlayerList, RackRow, ToggleField, type RackRowTile, SegmentedControl, type SegmentedOption, StatChip} from './playground/ui';
 import {buildThemeVars, getPlaygroundPalette} from './playground/theme';
 import {useWorkerMessenger} from './playground/useWorkerMessenger';
 import {randomSeed} from './playground/random';
@@ -27,7 +28,7 @@ const fallbackDictionaryWords = [
 ];
 const fallbackDictionaryText = fallbackDictionaryWords.join('\n');
 
-const dictionaryTextSources = ['/dictionaries/TWL06.txt', '/dictionaries/demo.txt'];
+// Dictionary assets live under docs/static/dictionaries and must be baseUrl-aware
 
 type DictionaryPayload =
   | {kind: 'fst'; bytes: Uint8Array}
@@ -83,6 +84,7 @@ type PlaygroundInitial = {
 
 type PlaygroundProps = {
   initial?: PlaygroundInitial;
+  compact?: boolean;
 };
 
 type PlayerSummary = {
@@ -103,7 +105,7 @@ type QuickPreset = {
   onApply: () => void;
 };
 
-export default function Playground({initial}: PlaygroundProps = {}): JSX.Element {
+export default function Playground({initial, compact}: PlaygroundProps = {}): JSX.Element {
   const initialConfig = initial?.config;
   const initialLayout = (initialConfig?.board_layout ?? {}) as Record<string, any>;
   const initialWidth = typeof initialLayout.width === 'number' && initialLayout.width > 0 ? initialLayout.width : 9;
@@ -112,6 +114,10 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
   const initialRackSize = initialConfig?.rack_size ?? 7;
 
   const {colorMode} = useColorMode();
+  const wasmModuleUrl = useBaseUrl('wasm/engine/pkg/tiletangle_wasm.js');
+  const dictFstUrl = useBaseUrl('dictionaries/TWL06.fst');
+  const dictTxtUrl1 = useBaseUrl('dictionaries/TWL06.txt');
+  const dictTxtUrl2 = useBaseUrl('dictionaries/demo.txt');
 
   const palette = useMemo(() => getPlaygroundPalette(colorMode as 'light' | 'dark'), [colorMode]);
 
@@ -180,14 +186,14 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     }
     if (!wasmModulePromiseRef.current) {
       wasmModulePromiseRef.current = (async () => {
-        const mod = await import('/wasm/engine/pkg/tiletangle_wasm.js');
+        const mod = await import(/* webpackIgnore: true */ wasmModuleUrl);
         await mod.default();
         wasmModuleRef.current = mod;
         return mod;
       })();
     }
     return wasmModulePromiseRef.current;
-  }, []);
+  }, [wasmModuleUrl]);
 
   const [appliedSettings, setAppliedSettings] = useState<SetupState>({
     width: initialWidth,
@@ -362,7 +368,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     async (engine: 'fst' | 'set' | 'dawg' | 'gaddag'): Promise<DictionaryPayload> => {
       if (engine === 'fst') {
         try {
-          const resp = await fetch('/dictionaries/TWL06.fst');
+          const resp = await fetch(dictFstUrl);
           if (resp.ok) {
             const bytes = new Uint8Array(await resp.arrayBuffer());
             return {kind: 'fst', bytes};
@@ -373,7 +379,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
         }
       }
 
-      for (const url of dictionaryTextSources) {
+      for (const url of [dictTxtUrl1, dictTxtUrl2]) {
         try {
           const resp = await fetch(url);
           if (!resp.ok) {
@@ -389,7 +395,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
 
       return {kind: 'text', text: fallbackDictionaryText};
     },
-    [],
+    [dictFstUrl, dictTxtUrl1, dictTxtUrl2],
   );
 
   const applyDictionaryToWorker = useCallback(
@@ -551,7 +557,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
         return;
       }
       try {
-        const resp = await fetch('/dictionaries/TWL06.txt');
+        const resp = await fetch(dictTxtUrl1);
         if (!resp.ok) {
           setAnagramIndex(null);
           return;
@@ -575,7 +581,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     return () => {
       cancelled = true;
     };
-  }, [useAnagram, useDict, appliedSettings.rackSize]);
+  }, [useAnagram, useDict, appliedSettings.rackSize, dictTxtUrl1]);
 
   const appliedAdjacencyMode = useMemo(() => {
     if (useHex) return 'hex';
@@ -757,7 +763,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
 
     return {
       tileset: {tile_kinds: dynamicTileKinds},
-      rack_size: clamp(appliedSettings.rackSize, 1, 14),
+      rack_size: clamp(appliedSettings.rackSize, 1, 50),
       board_layout: boardLayout,
       ruleset_id: initialConfig?.ruleset_id ?? 'cross',
       dictionary_id: initialConfig?.dictionary_id ?? 'en',
@@ -1055,7 +1061,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     const width = clamp(settings.width, 2, 30);
     const height = clamp(settings.height, 2, 30);
     const depth = clamp(settings.depth, 1, 12);
-    const rackSize = clamp(settings.rackSize, 1, 14);
+    const rackSize = clamp(settings.rackSize, 1, 50);
     const countsParsed = parseTileCounts(settings.tileCountsText, defaultTileCounts);
     if (countsParsed.error) {
       setTileCountsError(countsParsed.error);
@@ -1137,7 +1143,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     setLoadingMoves(true);
     try {
       let moves: GeneratedMove[] = [];
-      const maxLen = appliedSettings.rackSize;
+      const maxLen = Math.min(appliedSettings.rackSize, 15);
       if (useWorker) {
         const resp = await game.call('generate_moves', {max_len: maxLen, limit: 30});
         moves = JSON.parse(resp.moves as string) as GeneratedMove[];
@@ -1299,10 +1305,10 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
           let movesJson: string;
           const limit = 50;
           if (useWorker) {
-            const resp = await game.call('generate_moves', {max_len: appliedSettings.rackSize, limit});
+            const resp = await game.call('generate_moves', {max_len: Math.min(appliedSettings.rackSize, 15), limit});
             movesJson = String(resp.moves ?? '[]');
           } else {
-            movesJson = game.mod.generate_moves(game.g, appliedSettings.rackSize, limit);
+            movesJson = game.mod.generate_moves(game.g, Math.min(appliedSettings.rackSize, 15), limit);
           }
           const moves: GeneratedMove[] = dedupeMoves(JSON.parse(movesJson) as GeneratedMove[]);
           if (moves.length === 0) {
@@ -1812,12 +1818,10 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     [players, activePlayer],
   );
 
+  const compactMode = compact ?? true;
+
   if (!ready || !board) {
-    return (
-      <div className={styles.breakout}>
-        <div className={styles.loading}>Loading WASM…</div>
-      </div>
-    );
+    return <div className={styles.wrap}><div className={styles.loading}>Loading WASM…</div></div>;
   }
 
   const boardPanel = (
@@ -1994,146 +1998,151 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     </>
   );
 
+  const sidebarNode = sidebarContent;
+
+  const turnTrackerPanel = (
+    <Panel title="Turn Tracker" subtitle="Scoreboard and bag" density="compact">
+      <PlayerList players={playerCards} emptyMessage="Loading players…" />
+      <div className={styles.helperText}>
+        Bag: {bagSummary.total} tiles{bagSummary.total > 0 && bagPreview ? ` • ${bagPreview}` : ''}
+      </div>
+    </Panel>
+  );
+
+  const modesPanel = (
+    <Panel title="Playground Modes" subtitle="Switch adjacency and runtime modes." density="compact">
+      <div className={styles.modeGroup}>
+        <div className={styles.modeLabel}>Adjacency</div>
+        <SegmentedControl
+          name="Adjacency"
+          value={draftAdjacencyMode}
+          onChange={handleAdjacencyModeChange}
+          options={[
+            {value: 'orthogonal', label: 'Orthogonal', hint: 'Classic'},
+            {value: 'diagonal', label: 'Diagonal', hint: 'Eight-way'},
+            {value: 'hex', label: 'Hex', hint: 'Three axes', testId: 'toggle-hex-adjacency'},
+          ]}
+        />
+      </div>
+      <div className={styles.modeGroup}>
+        <div className={styles.modeLabel}>Dimensions</div>
+        <SegmentedControl
+          name="Dimensions"
+          value={draftDimensionMode}
+          onChange={handleDimensionModeChange}
+          options={[
+            {value: '2d', label: '2D'},
+            {value: '3d', label: '3D', hint: 'Stacked'},
+          ]}
+        />
+      </div>
+      <ToggleField label="Run heavy work in a Web Worker" checked={useWorker} onChange={setUseWorker} />
+      {draftAdjacencyMode === 'hex' && (
+        <div className={styles.helperText}>Hex adjacency uses staggered rows with three axes (E, NE, SE).</div>
+      )}
+      {draftAdjacencyMode === 'diagonal' && (
+        <div className={styles.helperText}>Diagonal mode enables moves along all eight directions.</div>
+      )}
+    </Panel>
+  );
+
+  const automationPanelCore = (
+    <Panel title="Automation & Hints" subtitle="Let the engine explore." density="compact">
+      <SegmentedControl
+        name="CPU Difficulty"
+        value={cpuDifficulty}
+        onChange={value => setCpuDifficulty(value as 'off' | 'easy' | 'medium' | 'hard')}
+        options={[
+          {value: 'off', label: 'Off'},
+          {value: 'easy', label: 'Easy'},
+          {value: 'medium', label: 'Medium'},
+          {value: 'hard', label: 'Hard'},
+        ]}
+      />
+      <ButtonRow
+        buttons={[
+          {
+            key: 'cpu-hint',
+            label: cpuThinking ? 'Thinking…' : 'CPU hint',
+            onClick: requestCpuHint,
+            disabled: !game || cpuDifficulty === 'off' || cpuThinking || !dictReady || use3D,
+          },
+          {
+            key: 'cpu-play',
+            label: 'Play as CPU',
+            onClick: playCpuSuggestion,
+            disabled: !game || cpuSuggestion == null || cpuThinking || use3D,
+            testId: 'cpu-play-button',
+          },
+        ]}
+      />
+      {cpuThinking && <div className={styles.helperText}>Computing best move…</div>}
+      {cpuSuggestion && (
+        <CpuHintSummary
+          tone="active"
+          title={<>CPU ({cpuSuggestion.difficulty}) suggests</>}
+          word={cpuSuggestion.word}
+          total={<>{cpuSuggestion.total} pts</>}
+          meta={
+            <>Raw {cpuSuggestion.score}, leave {cpuSuggestion.rackLeave}, equity {cpuSuggestion.boardEquity}</>
+          }
+        />
+      )}
+      {!cpuSuggestion && lastCpu && (
+        <CpuHintSummary
+          tone="muted"
+          title={<>Last hint ({lastCpu.difficulty})</>}
+          word={lastCpu.word}
+          total={<>{lastCpu.total} pts</>}
+          meta={
+            <>Raw {lastCpu.score}, leave {lastCpu.rackLeave}, equity {lastCpu.boardEquity}</>
+          }
+        />
+      )}
+      {cpuError && <div className={styles.errorText}>{cpuError}</div>}
+    </Panel>
+  );
+
+  const automationPanel = automationPanelCore;
+
+  const exploreMovesPanel = (
+    <Panel title="Explore Moves" subtitle="Generate legal plays for the current rack." density="compact" accent={showMoves}>
+      <ButtonRow buttons={exploreMoveButtons} />
+      {showMoves && (loadingMoves ? (
+        <div className={styles.helperText}>Loading legal moves…</div>
+      ) : (
+        <MoveList items={moveListItems} emptyMessage="No moves available for the current rack." />
+      ))}
+    </Panel>
+  );
+
+  const snapshotPanel = (
+    <Panel title="Snapshots & Log" subtitle="Export state or inspect history." density="compact">
+      <textarea
+        value={snapshotText}
+        onChange={e => setSnapshotText(e.target.value)}
+        rows={5}
+        className={styles.snapshotArea}
+        placeholder="Click Save snapshot to capture the current game state"
+      />
+      <ButtonRow
+        buttons={[
+          {key: 'save', label: 'Save snapshot', onClick: exportSnapshot, disabled: !game},
+          {key: 'load', label: 'Load snapshot', onClick: importSnapshot, disabled: !game || snapshotText.trim() === ''},
+          {key: 'log', label: 'Show event log', onClick: fetchEventLog, disabled: !game},
+        ]}
+      />
+      {eventLogText && <pre className={styles.logViewer}>{eventLogText}</pre>}
+    </Panel>
+  );
+
   const rightRailContent = (
     <>
-      <Panel title="Turn Tracker" subtitle="Scoreboard and bag" density="compact">
-        <PlayerList players={playerCards} emptyMessage="Loading players…" />
-        <div className={styles.helperText}>
-          Bag: {bagSummary.total} tiles{bagSummary.total > 0 && bagPreview ? ` • ${bagPreview}` : ''}
-        </div>
-      </Panel>
-
-      <Panel title="Playground Modes" subtitle="Switch adjacency and runtime modes." density="compact">
-        <div className={styles.modeGroup}>
-          <div className={styles.modeLabel}>Adjacency</div>
-          <SegmentedControl
-            name="Adjacency"
-            value={draftAdjacencyMode}
-            onChange={handleAdjacencyModeChange}
-            options={[
-              {value: 'orthogonal', label: 'Orthogonal', hint: 'Classic'},
-              {value: 'diagonal', label: 'Diagonal', hint: 'Eight-way'},
-              {value: 'hex', label: 'Hex', hint: 'Three axes', testId: 'toggle-hex-adjacency'},
-            ]}
-          />
-        </div>
-        <div className={styles.modeGroup}>
-          <div className={styles.modeLabel}>Dimensions</div>
-          <SegmentedControl
-            name="Dimensions"
-            value={draftDimensionMode}
-            onChange={handleDimensionModeChange}
-            options={[
-              {value: '2d', label: '2D'},
-              {value: '3d', label: '3D', hint: 'Stacked'},
-            ]}
-          />
-        </div>
-        <ToggleField label="Run heavy work in a Web Worker" checked={useWorker} onChange={setUseWorker} />
-        {draftAdjacencyMode === 'hex' && (
-          <div className={styles.helperText}>Hex adjacency uses staggered rows with three axes (E, NE, SE).</div>
-        )}
-        {draftAdjacencyMode === 'diagonal' && (
-          <div className={styles.helperText}>Diagonal mode enables moves along all eight directions.</div>
-        )}
-      </Panel>
-
-      <Panel title="Automation & Hints" subtitle="Let the engine explore." density="compact">
-        <SegmentedControl
-          name="CPU Difficulty"
-          value={cpuDifficulty}
-          onChange={value => setCpuDifficulty(value as 'off' | 'easy' | 'medium' | 'hard')}
-          options={[
-            {value: 'off', label: 'Off'},
-            {value: 'easy', label: 'Easy'},
-            {value: 'medium', label: 'Medium'},
-            {value: 'hard', label: 'Hard'},
-          ]}
-        />
-        <ButtonRow
-          buttons={[
-            {
-              key: 'cpu-hint',
-              label: cpuThinking ? 'Thinking…' : 'CPU hint',
-              onClick: requestCpuHint,
-              disabled: !game || cpuDifficulty === 'off' || cpuThinking || !dictReady || use3D,
-            },
-            {
-              key: 'cpu-play',
-              label: 'Play as CPU',
-              onClick: playCpuSuggestion,
-              disabled: !game || cpuSuggestion == null || cpuThinking || use3D,
-              testId: 'cpu-play-button',
-            },
-          ]}
-        />
-        {cpuThinking && <div className={styles.helperText}>Computing best move…</div>}
-        {cpuSuggestion && (
-          <CpuHintSummary
-            tone="active"
-            title={<>CPU ({cpuSuggestion.difficulty}) suggests</>}
-            word={cpuSuggestion.word}
-            total={<>{cpuSuggestion.total} pts</>}
-            meta={
-              <>Raw {cpuSuggestion.score}, leave {cpuSuggestion.rackLeave}, equity {cpuSuggestion.boardEquity}</>
-            }
-          />
-        )}
-        {!cpuSuggestion && lastCpu && (
-          <CpuHintSummary
-            tone="muted"
-            title={<>Last hint ({lastCpu.difficulty})</>}
-            word={lastCpu.word}
-            total={<>{lastCpu.total} pts</>}
-            meta={
-              <>Raw {lastCpu.score}, leave {lastCpu.rackLeave}, equity {lastCpu.boardEquity}</>
-            }
-          />
-        )}
-        {cpuError && <div className={styles.errorText}>{cpuError}</div>}
-      </Panel>
-
-      <Panel
-        title="Explore Moves"
-        subtitle="Generate legal plays for the current rack."
-        density="compact"
-        accent={showMoves}
-      >
-        <ButtonRow buttons={exploreMoveButtons} />
-        {showMoves && (
-          loadingMoves ? (
-            <div className={styles.helperText}>Loading legal moves…</div>
-          ) : (
-            <MoveList
-              items={moveListItems}
-              emptyMessage="No moves available for the current rack."
-            />
-          )
-        )}
-      </Panel>
-
-      <Panel title="Snapshots & Log" subtitle="Export state or inspect history." density="compact">
-        <textarea
-          value={snapshotText}
-          onChange={e => setSnapshotText(e.target.value)}
-          rows={5}
-          className={styles.snapshotArea}
-          placeholder="Click Save snapshot to capture the current game state"
-        />
-        <ButtonRow
-          buttons={[
-            {key: 'save', label: 'Save snapshot', onClick: exportSnapshot, disabled: !game},
-            {
-              key: 'load',
-              label: 'Load snapshot',
-              onClick: importSnapshot,
-              disabled: !game || snapshotText.trim() === '',
-            },
-            {key: 'log', label: 'Show event log', onClick: fetchEventLog, disabled: !game},
-          ]}
-        />
-        {eventLogText && <pre className={styles.logViewer}>{eventLogText}</pre>}
-      </Panel>
+      {turnTrackerPanel}
+      {modesPanel}
+      {automationPanel}
+      {exploreMovesPanel}
+      {snapshotPanel}
     </>
   );
 
@@ -2142,25 +2151,7 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
       eyebrow="TileTangle Playground"
       title="Design. Experiment. Solve."
       description="Tune adjacency, stack rules, and automation to watch the engine reshape every move in real time."
-      stats={heroStats}
-      rightSlot={(
-        <div className={styles.heroPresets}>
-          <div className={styles.presetsHeading}>Quick presets</div>
-          <div className={styles.presetGrid}>
-            {quickPresets.map(preset => (
-              <button
-                key={preset.id}
-                type="button"
-                className={styles.presetCard}
-                onClick={preset.onApply}
-              >
-                <span className={styles.presetTitle}>{preset.title}</span>
-                <span className={styles.presetDescription}>{preset.description}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      stats={undefined}
     />
   );
 
@@ -2178,16 +2169,50 @@ export default function Playground({initial}: PlaygroundProps = {}): JSX.Element
     alerts.push({id: 'info', kind: 'info', message: infoMessage});
   }
 
-  const alertsNode = <AlertStack alerts={alerts} />;
+  const presetsRow = (
+    <div className={styles.heroPresets} style={{marginTop: '0.75rem'}}>
+      <div className={styles.presetsHeading}>Quick presets</div>
+      <div className={styles.presetGrid}>
+        {quickPresets.map(preset => (
+          <button
+            key={preset.id}
+            type="button"
+            className={styles.presetCard}
+            onClick={preset.onApply}
+          >
+            <span className={styles.presetTitle}>{preset.title}</span>
+            <span className={styles.presetDescription}>{preset.description}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const optionsRow = (
+    <div className={styles.heroStatsRow} style={{marginTop: '0.75rem', justifyContent: 'center'}}>
+      {heroStats.map(stat => (
+        <StatChip key={stat.label} label={stat.label} value={stat.value} />
+      ))}
+    </div>
+  );
+
+  const alertsNode = (
+    <>
+      {presetsRow}
+      {optionsRow}
+      <AlertStack alerts={alerts} />
+    </>
+  );
 
   return (
     <PlaygroundShell
       themeVars={themeVars}
       hero={heroNode}
       alerts={alertsNode}
-      sidebar={sidebarContent}
+      sidebar={sidebarNode}
       main={stageContent}
       rightRail={rightRailContent}
+      compact={compactMode}
     />
   );
 }

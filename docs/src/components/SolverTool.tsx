@@ -1,4 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import useBaseUrl from '@docusaurus/useBaseUrl';
 import {classicTilesets, classicBonuses} from './demoUtils';
 
 type SolverMove = {
@@ -14,6 +15,7 @@ type WorkerHandle = {
 
 function useWasmWorker(): WorkerHandle {
   const workerRef = useRef<Worker | null>(null);
+  const workerUrl = useBaseUrl('wasm/engine/worker.js');
 
   useEffect(() => () => {
     if (workerRef.current) {
@@ -24,7 +26,7 @@ function useWasmWorker(): WorkerHandle {
 
   const call = useCallback((action: string, payload?: any) => {
     if (!workerRef.current) {
-      workerRef.current = new Worker('/wasm/engine/worker.js', {type: 'module'});
+      workerRef.current = new Worker(workerUrl, {type: 'module'});
     }
     const worker = workerRef.current;
     return new Promise<any>((resolve, reject) => {
@@ -38,7 +40,7 @@ function useWasmWorker(): WorkerHandle {
       worker.addEventListener('message', onMsg);
       worker.postMessage({id, action, payload});
     });
-  }, []);
+  }, [workerUrl]);
 
   const terminate = useCallback(() => {
     if (workerRef.current) {
@@ -75,12 +77,15 @@ export default function SolverTool(): JSX.Element {
     } as any;
   }, []);
 
+  const fstUrl = useBaseUrl('dictionaries/TWL06.fst');
+  const txtUrl = useBaseUrl('dictionaries/TWL06.txt');
+
   const ensureDictionary = useCallback(async () => {
     if (dictionaryBytesRef.current || dictionaryTextRef.current) {
       return;
     }
     try {
-      const resp = await fetch('/dictionaries/TWL06.fst');
+      const resp = await fetch(fstUrl);
       if (resp.ok) {
         dictionaryBytesRef.current = new Uint8Array(await resp.arrayBuffer());
         return;
@@ -88,11 +93,11 @@ export default function SolverTool(): JSX.Element {
     } catch (err) {
       console.warn('Failed to fetch FST dictionary, falling back to text', err);
     }
-    const txtResp = await fetch('/dictionaries/TWL06.txt');
+    const txtResp = await fetch(txtUrl);
     if (txtResp.ok) {
       dictionaryTextRef.current = await txtResp.text();
     }
-  }, []);
+  }, [fstUrl, txtUrl]);
 
   const solve = useCallback(async () => {
     const letters = rackInput.replace(/[^A-Za-z\?]/g, '').toUpperCase().split('');

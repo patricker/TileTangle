@@ -2,43 +2,44 @@ import type {ReactNode} from 'react';
 import clsx from 'clsx';
 import Heading from '@theme/Heading';
 import styles from './styles.module.css';
+import LivePlaygroundPreview from '../homepage/LivePlaygroundPreview';
+import LanguagesCodePreview from '../homepage/LanguagesCodePreview';
+import UnicodeRulesPreview from '../homepage/UnicodeRulesPreview';
 
 type FeatureItem = {
   title: string;
-  Svg: React.ComponentType<React.ComponentProps<'svg'>>;
+  visual: ReactNode;
   description: ReactNode;
 };
 
 const FeatureList: FeatureItem[] = [
   {
     title: 'Live Playground',
-    Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
+    visual: <LivePlaygroundPreview />,
     description: (
-      <>Try the engine in-browser via WASM. Place tiles, inspect board JSON, and iterate quickly. See the <a href="/docs/classic-demo">Classic Crossword Demo</a>.</>
+      <>Place tiles in-browser. Toggle anchors and cross-check sets to visualize move generation. See the <a href="/docs/classic-demo">Classic Crossword Demo</a>.</>
     ),
   },
   {
-    title: 'Rust Core + WASM',
-    Svg: require('@site/static/img/undraw_docusaurus_tree.svg').default,
+    title: 'Languages & Bindings',
+    visual: <LanguagesCodePreview />,
     description: (
-      <>Deterministic Rust engine, packaged for web with wasm-bindgen. Clean API for JS and other bindings.</>
+      <>Rust core surfaced via WebAssembly and Python. Minimal, deterministic APIs for quick integration.</>
     ),
   },
   {
     title: 'Unicode & Rules',
-    Svg: require('@site/static/img/undraw_docusaurus_react.svg').default,
+    visual: <UnicodeRulesPreview />,
     description: (
-      <>Unicode-first dictionary, configurable boards/bonuses, and classic crossword validation & scoring.</>
+      <>Unicode-aware tiles and configurable rules: dictionaries, reading direction, multi-grapheme tiles, and stacking.</>
     ),
   },
 ];
 
-function Feature({title, Svg, description}: FeatureItem) {
+function Feature({title, visual, description}: FeatureItem) {
   return (
     <div className={clsx('col col--4')}>
-      <div className="text--center">
-        <Svg className={styles.featureSvg} role="img" />
-      </div>
+      <div className="text--center">{visual}</div>
       <div className="text--center padding-horiz--md">
         <Heading as="h3">{title}</Heading>
         <p>{description}</p>

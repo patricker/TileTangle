@@ -59,7 +59,7 @@ export function BoardSetupPanel({draft, onDraftChange, onApply}: BoardSetupPanel
           <input
             type="number"
             min={1}
-            max={14}
+            max={50}
             value={draft.rackSize}
             onChange={event => onDraftChange({rackSize: parseNumber(event.target.value)})}
           />

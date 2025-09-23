@@ -1,18 +1,20 @@
 import {useCallback, useRef} from 'react';
+import useBaseUrl from '@docusaurus/useBaseUrl';
 
-export function useWorkerMessenger(workerScript = '/wasm/engine/worker.js') {
+export function useWorkerMessenger(workerScript = 'wasm/engine/worker.js') {
   const workerRef = useRef<Worker | null>(null);
   const requestId = useRef(0);
+  const workerUrl = useBaseUrl(workerScript.startsWith('/') ? workerScript.slice(1) : workerScript);
 
   const ensureWorker = useCallback(() => {
     if (typeof window === 'undefined') {
       return null;
     }
     if (!workerRef.current) {
-      workerRef.current = new Worker(workerScript, {type: 'module'});
+      workerRef.current = new Worker(workerUrl, {type: 'module'});
     }
     return workerRef.current;
-  }, [workerScript]);
+  }, [workerUrl]);
 
   const terminateWorker = useCallback(() => {
     if (workerRef.current) {

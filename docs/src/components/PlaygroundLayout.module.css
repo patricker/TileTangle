@@ -22,6 +22,34 @@
   }
 }
 
+/* Contained wrapper for embedded contexts (respects doc column width) */
+.wrap {
+  position: relative;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.panelGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+/* Simple accordion styles for compact mode */
+.accordion {
+  border: 1px solid var(--tt-panel-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.accordionSummary {
+  padding: 0.6rem 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--tt-panel-bg);
+  border-bottom: 1px solid var(--tt-panel-border);
+}
+
 .shell {
   display: flex;
   flex-direction: column;
@@ -183,6 +211,13 @@
   grid-template-columns: minmax(260px, 320px) minmax(680px, 1fr) minmax(260px, 320px);
   gap: 1.75rem;
   align-items: start;
+}
+
+/* Compact single-column layout for embedded/contained contexts */
+.layoutCompact {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
 .sidebar,

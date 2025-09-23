@@ -21,6 +21,9 @@ function HomepageHeader() {
           <Link className="button button--secondary button--lg" to="/docs/playground">
             Open Playground ▶
           </Link>
+          <Link className="button button--outline button--lg" style={{marginLeft: '0.75rem'}} to="/docs/getting-started">
+            Getting Started
+          </Link>
         </div>
       </div>
     </header>

@@ -4,7 +4,8 @@ let game = null;
 
 async function ensureInit() {
   if (!mod) {
-    mod = await import('/wasm/engine/pkg/tiletangle_wasm.js');
+    // Use a relative path so this works under any baseUrl
+    mod = await import('./pkg/tiletangle_wasm.js');
     await mod.default();
   }
 }

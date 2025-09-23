@@ -1,4 +1,5 @@
 import React, {useCallback, useMemo, useRef, useState} from 'react';
+import useBaseUrl from '@docusaurus/useBaseUrl';
 import {Panel, ButtonRow} from '../playground/ui';
 
 async function fetchText(url: string): Promise<string | null> {
@@ -23,7 +24,7 @@ export default function WordCheck(): JSX.Element {
     setLoading(true);
     setError(null);
     try {
-      const txt = (await fetchText('/dictionaries/TWL06.txt')) || (await fetchText('/dictionaries/demo.txt'));
+      const txt = (await fetchText(txtUrl1)) || (await fetchText(txtUrl2));
       if (!txt) throw new Error('Failed to load demo dictionary');
       const set = new Set<string>();
       txt.split(/\r?\n/).forEach(line => {
@@ -37,7 +38,7 @@ export default function WordCheck(): JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [txtUrl1, txtUrl2]);
 
   const check = useCallback(async () => {
     await ensureDict();
@@ -81,4 +82,5 @@ export default function WordCheck(): JSX.Element {
     </Panel>
   );
 }
-
+  const txtUrl1 = useBaseUrl('dictionaries/TWL06.txt');
+  const txtUrl2 = useBaseUrl('dictionaries/demo.txt');

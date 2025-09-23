@@ -8,11 +8,28 @@ type PlaygroundShellProps = {
   sidebar: React.ReactNode;
   main: React.ReactNode;
   rightRail?: React.ReactNode;
+  compact?: boolean;
 };
 
-export default function PlaygroundShell({themeVars, hero, alerts, sidebar, main, rightRail}: PlaygroundShellProps): JSX.Element {
+export default function PlaygroundShell({themeVars, hero, alerts, sidebar, main, rightRail, compact}: PlaygroundShellProps): JSX.Element {
+  const outerClass = styles.wrap;
+  if (compact) {
+    return (
+      <div className={outerClass}>
+        <div className={styles.shell} style={themeVars}>
+          {hero}
+          {alerts}
+          <div className={styles.layoutCompact}>
+            <main className={styles.stage}>{main}</main>
+            {rightRail && <div className={`${styles.rightRail} ${styles.panelGrid}`}>{rightRail}</div>}
+            <div className={`${styles.sidebar} ${styles.panelGrid}`}>{sidebar}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
-    <div className={styles.breakout}>
+    <div className={outerClass}>
       <div className={styles.shell} style={themeVars}>
         {hero}
         {alerts}
