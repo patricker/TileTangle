@@ -98,3 +98,26 @@ impl Dictionary for FstDictionary {
     fn as_any(&self) -> &dyn Any { self }
     fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> { Box::new(self.clone()) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn fst_dictionary_contains_and_prefix() {
+        let dict = FstDictionary::from_words(vec!["AB".to_string(), "ABC".to_string(), "BEE".to_string()], true);
+        assert!(dict.contains("ab"));
+        assert!(dict.has_prefix("ab"));
+        assert!(dict.contains("abc"));
+        assert!(!dict.contains("abd"));
+        assert!(!dict.has_prefix("zz"));
+    }
+    #[test]
+    fn nfkc_contains_ligature_variant() {
+        let opts = super::DictionaryOptions { case_fold: false, min_len: None, max_len: None, norm: crate::NormalizationMode::NFKC, tokenizer: crate::TokenizerRef::default() };
+        let dict = FstDictionary::from_words_opts(vec!["coffee".to_string()], opts);
+        let ligature = "coﬀee"; // contains U+FB00
+        assert!(dict.contains(ligature));
+        let dict_nfc = FstDictionary::from_words(vec!["coffee".to_string()], false);
+        assert!(!dict_nfc.contains(ligature));
+    }
+}

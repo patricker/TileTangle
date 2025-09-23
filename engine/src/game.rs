@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fmt;
-
-use crate::{Board, CellId, EngineError, Rack, RectGridGeometry, Tile, Tileset, nfc};
+use crate::{CellId, Rack, Tile, Tileset};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PlayerId(pub usize);
@@ -55,4 +53,3 @@ pub struct GameConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoveDraft { pub placements: Vec<(CellId, Tile)> }
-

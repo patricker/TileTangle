@@ -443,3 +443,112 @@ impl Dictionary for GaddagDictionary {
     fn as_any(&self) -> &dyn Any { self }
     fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> { Box::new(self.clone()) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::text::{TokenizerRef, Tokenizer, NormalizationMode};
+
+    #[test]
+    fn gaddag_dictionary_basic() {
+        let dict = GaddagDictionary::from_words(vec!["CARE".to_string(), "CARES".to_string()], true);
+        assert!(dict.contains("care"));
+        assert!(dict.has_prefix("ca"));
+    }
+
+    #[test]
+    fn gaddag_forms_for_cares() {
+        let gd = GaddagDictionary::from_words(vec!["CARES".to_string()], true);
+        fn has_seq(gd: &GaddagDictionary, s: &str) -> bool {
+            let mut node = gd.root();
+            for token in gd.tokenizer().segment(s) {
+                if let Some(nxt) = gd.step_token(node, &token) { node = nxt; } else { return false; }
+            }
+            gd.is_terminal(node)
+        }
+        assert!(has_seq(&gd, "+cares"));
+        assert!(has_seq(&gd, "c+ares"));
+        assert!(has_seq(&gd, "ac+res"));
+        assert!(has_seq(&gd, "rac+es"));
+        assert!(has_seq(&gd, "erac+s"));
+        assert!(has_seq(&gd, "serac+"));
+    }
+
+    #[test]
+    fn gaddag_id_cursor_and_step_id() {
+        let gd = GaddagDictionary::from_words(vec!["AB".to_string()], true);
+        let a = gd.symbol_id("a").expect("a id");
+        let b = gd.symbol_id("b").expect("b id");
+        let cur = GaddagCursor::new_from_tokens(&gd, &[a]).expect("cursor");
+        let right = cur.branch_right().expect("branch");
+        let r2 = right.step_id(b).expect("step b");
+        assert!(r2.is_terminal());
+    }
+
+    #[test]
+    fn gaddag_enumerate_suffixes_simple_ab() {
+        let gd = GaddagDictionary::from_words(vec!["ab".to_string()], true);
+        let mut rack: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::from([("a".to_string(), 1usize), ("b".to_string(), 1usize)]);
+        let words = gd.enumerate_suffixes_simple("", &mut rack, 8);
+        assert!(words.contains(&"ab".to_string()));
+    }
+
+    #[test]
+    fn gaddag_normalization_and_casefold() {
+        use unicode_normalization::UnicodeNormalization;
+        let composed = "Café".to_string();
+        let decomposed = "Cafe\u{301}".nfc().collect::<String>();
+        let gd = GaddagDictionary::from_words(vec![decomposed.clone()], true);
+        assert!(gd.contains(&composed));
+        assert!(gd.has_prefix("caf"));
+    }
+
+    #[test]
+    fn gaddag_serialize_roundtrip_default() {
+        use std::path::PathBuf;
+        let gd = GaddagDictionary::from_words(vec!["CARE".to_string(), "CARES".to_string()], true);
+        let path = PathBuf::from(std::env::temp_dir()).join("gaddag_test_default.cbor");
+        gd.to_gaddag_file(&path).unwrap();
+        let gd2 = GaddagDictionary::from_gaddag_file(&path, TokenizerRef::default()).unwrap();
+        assert!(gd2.contains("cares"));
+        assert!(gd2.contains("CARE"));
+    }
+
+    #[test]
+    fn gaddag_serialize_roundtrip_custom_tokenizer() {
+        use std::sync::Arc;
+        struct QuTokenizer;
+        impl Tokenizer for QuTokenizer {
+            fn segment(&self, text: &str) -> Vec<String> {
+                let mut out = Vec::new();
+                let mut chars = text.chars().peekable();
+                while let Some(ch) = chars.next() {
+                    if ch == 'q' && chars.peek() == Some(&'u') {
+                        chars.next();
+                        out.push("qu".to_string());
+                    } else {
+                        out.push(ch.to_string());
+                    }
+                }
+                out
+            }
+        }
+        let tokenizer = TokenizerRef::new(Arc::new(QuTokenizer));
+        let opts = super::DictionaryOptions { tokenizer: tokenizer.clone(), ..Default::default() };
+        let gd = GaddagDictionary::from_words_opts(vec!["qu".to_string()], opts);
+        let p = std::env::temp_dir().join("gaddag_test_qu.cbor");
+        gd.to_gaddag_file(&p).unwrap();
+        let gd2 = GaddagDictionary::from_gaddag_file(&p, tokenizer).unwrap();
+        assert!(gd2.step_symbol(gd2.root(), "qu").is_some());
+    }
+
+    #[test]
+    fn gaddag_bytes_roundtrip() {
+        let gd = GaddagDictionary::from_words(vec!["AB".to_string(), "ABC".to_string()], true);
+        let bytes = gd.to_gaddag_bytes().unwrap();
+        let gd2 = GaddagDictionary::from_gaddag_bytes(bytes, TokenizerRef::default()).unwrap();
+        assert!(gd2.contains("ab"));
+        assert!(gd2.contains("abc"));
+    }
+}

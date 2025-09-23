@@ -114,3 +114,27 @@ impl Dictionary for DawgDictionary {
     fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> { Box::new(self.clone()) }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn dawg_dictionary_contains_and_prefix() {
+        let dict = DawgDictionary::from_words(vec!["AB".to_string(), "ABC".to_string(), "BEE".to_string()], true);
+        assert!(dict.contains("ab"));
+        assert!(dict.has_prefix("ab"));
+        assert!(dict.contains("abc"));
+        assert!(!dict.contains("abd"));
+        assert!(!dict.has_prefix("zz"));
+    }
+    #[test]
+    fn dawg_normalization_and_casefold() {
+        use unicode_normalization::UnicodeNormalization;
+        let composed = "Café".to_string();
+        let decomposed = "Cafe\u{301}".nfc().collect::<String>();
+        let dict_cf = DawgDictionary::from_words(vec![decomposed.clone()], true);
+        assert!(dict_cf.contains(&composed));
+        assert!(dict_cf.has_prefix("caf"));
+        let dict_no = DawgDictionary::from_words(vec!["café".to_string()], false);
+        assert!(!dict_no.contains("CAFÉ"));
+    }
+}

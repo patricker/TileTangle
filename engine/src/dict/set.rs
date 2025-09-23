@@ -90,3 +90,36 @@ impl Dictionary for SetDictionary {
     fn as_any(&self) -> &dyn Any { self }
     fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> { Box::new(self.clone()) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn dictionary_normalization_and_casefold() {
+        use unicode_normalization::UnicodeNormalization;
+        let composed = "Café".to_string();
+        let decomposed = "Cafe\u{301}".nfc().collect::<String>();
+        let dict = SetDictionary::from_words(vec![decomposed.clone()], false);
+        assert!(dict.contains(&composed));
+        let dict_cf = SetDictionary::from_words(vec!["café".to_string()], true);
+        assert!(dict_cf.contains("CAFÉ"));
+        let dict_no = SetDictionary::from_words(vec!["café".to_string()], false);
+        assert!(!dict_no.contains("CAFÉ"));
+    }
+    #[test]
+    fn dictionary_loader_from_file() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("tiletangle_dict_test.txt");
+        let content = "# sample\nHELLO\nworld\n \nCafé\n";
+        std::fs::write(&path, content).unwrap();
+        let dict = SetDictionary::from_file(
+            &path,
+            super::DictionaryOptions { case_fold: true, min_len: Some(2), max_len: None, ..Default::default() },
+        ).unwrap();
+        assert!(dict.contains("hello"));
+        assert!(dict.contains("WORLD"));
+        assert!(dict.contains("cafe\u{301}"));
+        assert!(!dict.contains("x"));
+        let _ = std::fs::remove_file(&path);
+    }
+}

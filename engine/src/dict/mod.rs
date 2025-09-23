@@ -2,7 +2,7 @@
 
 use std::any::Any;
 
-use crate::{normalize_with_mode, NormalizationMode, TokenizerRef};
+use crate::{NormalizationMode, TokenizerRef};
 
 pub trait Dictionary {
     fn contains(&self, word: &str) -> bool;

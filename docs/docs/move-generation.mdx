@@ -33,6 +33,67 @@ for cand in moves.iter().take(5) {
 }
 ```
 
+## Cross‑check pruning
+
+The engine prunes illegal letters before it recurses. At each empty cell on the current line:
+
+- It computes the set of symbols that form a valid perpendicular cross‑word with the tiles already on the board.
+- On graph/hex overlays, a cell may have multiple perpendicular axes; the engine intersects allowed sets across all of them.
+- If there is no perpendicular neighbour, all symbols are allowed at that cell (subject to prefix checks).
+- Normal tiles are only tried when their symbol is in the allowed set. Blanks enumerate only the allowed symbols.
+
+This trimming happens ahead of validation and scoring, which still run for every candidate to keep legality authoritative. When no dictionary is attached (free‑word mode), the cross‑check set becomes permissive so examples and demos without a lexicon keep working.
+
+Example: a fixed tile above the anchor forces the first placed letter
+
+```rust title="Rust"
+use tiletangle_engine::{GameConfig, GameState, RectBoardLayout, Tileset, TileKind,
+                        Tile, CrosswordRules, SetDictionary, generate_moves};
+use std::collections::HashMap;
+
+// Minimal classic 3×3 board and A–Z tiles (scores irrelevant here)
+let config = GameConfig {
+  board_layout: RectBoardLayout { width: 3, height: 3 },
+  tileset: Tileset { tile_kinds: (b'A'..=b'Z').map(|b| TileKind { id: (b as char).to_string(), symbol: (b as char).to_string(), score: 1, is_blank: false, aliases: vec![] }).collect() },
+  tile_counts: (b'A'..=b'Z').map(|b| ((b as char).to_string(), 10)).collect(),
+  rack_size: 7,
+  ruleset_id: "cross".into(),
+  dictionary_id: "en".into(),
+  rng_seed: 1,
+};
+let mut state = GameState::new(&config, 1).unwrap();
+
+// Attach a tiny dictionary so perpendicular words are meaningful
+state.dictionary = Some(Box::new(SetDictionary::from_words(["ME", "TEN", "NET"], true)));
+
+// Pre-place 'M' above the centre so the perpendicular word must be "ME"
+let centre = tiletangle_engine::CrosswordRules::center_cell(&state.board.geom);
+let above = {
+  let c = state.board.geom.from_cell_id(centre).unwrap();
+  state.board.geom.to_cell_id(tiletangle_engine::Coord2D { x: c.x, y: c.y - 1 }).unwrap()
+};
+state.board.cells[above.0 as usize].stack.push(Tile { kind_id: "M".into(), mark: None });
+
+// Rack contains several letters including 'E'
+let rack = vec!["E".into(), "A".into(), "T".into(), "N".into(), "R".into(), "S".into(), "L".into()];
+let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
+let moves = generate_moves(&state, &rules, &rack, 5);
+
+// Every candidate that covers the centre places 'E' there (cross-check prunes others)
+let placed_at_centre: std::collections::HashSet<String> = moves.iter()
+  .flat_map(|m| m.placements.iter())
+  .filter(|(cid, _)| *cid == centre)
+  .map(|(_, t)| t.mark.clone().unwrap_or_else(|| {
+      // normal tiles: resolve the symbol from the kind id
+      state.tileset.tile_kinds.iter()
+        .find(|tk| tk.id == t.kind_id)
+        .map(|tk| tk.symbol.clone())
+        .unwrap_or_else(|| t.kind_id.clone())
+  }))
+  .collect();
+assert_eq!(placed_at_centre, std::collections::HashSet::from(["E".to_string()]));
+```
+
 ## Graphs, 3D, and stacking
 
 The move generator is graph-aware. When you apply a `GraphOverlay` (for hex boards or 3D layers)
@@ -52,8 +113,7 @@ branching factor determined by rack size and cross-check sets. Practical perform
 
 - **Dictionary structure** – using a GADDAG dramatically reduces prefix backtracking when stacking
   or graph overlays are enabled. FSTs remain the best fit for pure lookup speed.
-- **Cross-check pruning** – perpendicular sets trim illegal letters early. Enabling dictionaries in
-  the generator (`free_word_mode = false`) ensures these sets are populated.
+- **Cross‑check pruning** – perpendicular sets trim illegal letters early by intersecting allowed symbols across all perpendicular axes at a cell. With a dictionary attached (`free_word_mode = false`), these sets are populated and applied during DFS.
 - **Max length / limit** – both Rust and WASM paths accept `max_len` so you can short-circuit on
   shallow racks or UI previews.
 

@@ -1,23 +1,18 @@
 //! TileTangle Engine — Core Model (Phase 1)
 
-use fst::Streamer;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
+#[cfg(test)]
+use std::collections::BTreeSet;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-use thiserror::Error;
-use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
-#[cfg(feature = "simd")]
-use wide::i32x4;
 
 fn splitmix64(mut x: u64) -> u64 {
     x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -212,6 +207,7 @@ pub use game::{PlayerId, Player, GameEventKind, GameEvent, RectBoardLayout, Game
 // -------- Rules (plugins extracted) --------
 pub mod rules;
 pub use rules::plugins::{Action, UserMove, RulePlugin, BasicActionsPlugin, ScoreBonusPlugin, PluginRules};
+pub use rules::crossword::{ScoreBreakdown, Rules, ReadingDirection, StackScoring, CrosswordRules, ValidatedMove};
 
 // -------- Inventory (module) --------
 pub mod inventory;
@@ -497,855 +493,6 @@ impl GameState {
         &self.event_log
     }
 }
-
-// Move draft moved
-
-// -------- Rules & Scoring (Phase 2) --------
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ScoreBreakdown {
-    pub total: i32,
-    pub main_word: String,
-    pub main_score: i32,
-    pub cross_words: Vec<(String, i32)>,
-    pub bingo: bool,
-}
-
-pub trait Rules {
-    fn validate(&self, state: &GameState, draft: &MoveDraft) -> Result<ValidatedMove, EngineError>;
-    fn score(&self, state: &GameState, mv: &ValidatedMove) -> ScoreBreakdown;
-    fn commit(
-        &self,
-        state: &mut GameState,
-        mv: ValidatedMove,
-        score: &ScoreBreakdown,
-    ) -> Result<(), EngineError>;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ReadingDirection {
-    #[default]
-    LTR,
-    RTL,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum StackScoring {
-    #[default]
-    TopOnly,
-    SumStack,
-}
-
-#[derive(Debug, Clone)]
-pub struct CrosswordRules {
-    pub free_word_mode: bool,
-    pub bingo_bonus: i32,
-    pub require_center_first_move: bool,
-    pub reading_dir: ReadingDirection,
-    pub stacking_enabled: bool,
-    pub stacking_max_height: usize,
-    pub forbid_same_symbol_overlay: bool,
-    pub stacking_scoring: StackScoring,
-}
-
-impl Default for CrosswordRules {
-    fn default() -> Self {
-        Self {
-            free_word_mode: true,
-            bingo_bonus: 50,
-            require_center_first_move: true,
-            reading_dir: ReadingDirection::LTR,
-            stacking_enabled: false,
-            stacking_max_height: 7,
-            forbid_same_symbol_overlay: true,
-            stacking_scoring: StackScoring::TopOnly,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ValidatedMove {
-    pub placements: Vec<(CellId, Tile)>,
-    pub line_is_row: bool,
-}
-
-impl CrosswordRules {
-    pub fn center_cell(geom: &RectGridGeometry) -> CellId {
-        let cx = (geom.width / 2) as i32;
-        let cy = (geom.height / 2) as i32;
-        geom.to_cell_id(Coord2D { x: cx, y: cy }).unwrap()
-    }
-
-    fn cell_has_tile(board: &Board<RectGridGeometry>, id: CellId) -> bool {
-        !board.cells[id.0 as usize].stack.is_empty()
-    }
-
-    fn line_contiguous(board: &Board<RectGridGeometry>, ids: &[CellId], is_row: bool) -> bool {
-        if ids.is_empty() {
-            return false;
-        }
-        // sort by x or y
-        let mut coords: Vec<Coord2D> = ids
-            .iter()
-            .map(|id| board.geom.from_cell_id(*id).unwrap())
-            .collect();
-        coords.sort_by(|a, b| if is_row { a.x.cmp(&b.x) } else { a.y.cmp(&b.y) });
-        let fixed = if is_row { coords[0].y } else { coords[0].x };
-        let (min, max) = if is_row {
-            (coords.first().unwrap().x, coords.last().unwrap().x)
-        } else {
-            (coords.first().unwrap().y, coords.last().unwrap().y)
-        };
-        for k in min..=max {
-            let c = if is_row {
-                Coord2D { x: k, y: fixed }
-            } else {
-                Coord2D { x: fixed, y: k }
-            };
-            let id = board.geom.to_cell_id(c).unwrap();
-            if !Self::cell_has_tile(board, id) && !ids.contains(&id) {
-                return false;
-            }
-        }
-        true
-    }
-
-    fn adjacent_to_existing(board: &Board<RectGridGeometry>, ids: &[CellId]) -> bool {
-        for id in ids {
-            // Stacking on an existing tile is inherently touching the board
-            if !board.cells[id.0 as usize].stack.is_empty() {
-                return true;
-            }
-            for n in board.geom.neighbors(*id) {
-                if Self::cell_has_tile(board, n) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    fn tileset_lookup_kind<'a>(tileset: &'a Tileset, kind_id: &str) -> Option<&'a TileKind> {
-        tileset.tile_kinds.iter().find(|tk| tk.id == kind_id)
-    }
-
-    fn tile_symbol_and_score(tileset: &Tileset, tile: &Tile) -> (i16, String) {
-        if let Some(tk) = Self::tileset_lookup_kind(tileset, &tile.kind_id) {
-            if tk.is_blank {
-                let sym = tile.mark.clone().unwrap_or_else(|| tk.symbol.clone());
-                (tk.score, sym)
-            } else {
-                (tk.score, tk.symbol.clone())
-            }
-        } else {
-            (0, "?".into())
-        }
-    }
-
-    fn form_word(
-        board: &Board<RectGridGeometry>,
-        tileset: &Tileset,
-        start: Coord2D,
-        dir: (i32, i32),
-        placed: &std::collections::HashSet<CellId>,
-        reverse_horiz: bool,
-        stack_mode: StackScoring,
-    ) -> (String, i32, usize) {
-        // move to beginning
-        let mut c = start;
-        loop {
-            let prev = Coord2D {
-                x: c.x - dir.0,
-                y: c.y - dir.1,
-            };
-            if let Some(id) = board.geom.to_cell_id(prev)
-                && Self::cell_has_tile(board, id)
-            {
-                c = prev;
-                continue;
-            }
-            break;
-        }
-        // build token list and score
-        let mut tokens: Vec<String> = Vec::new();
-        let mut score: i32 = 0;
-        let mut word_mul: i32 = 1;
-        let mut tiles_count: usize = 0;
-        loop {
-            if let Some(id) = board.geom.to_cell_id(c)
-                && Self::cell_has_tile(board, id)
-            {
-                let cell = &board.cells[id.0 as usize];
-                let tile = cell.stack.last().unwrap();
-                let (ls, sym) = Self::tile_symbol_and_score(tileset, tile);
-                tokens.push(sym);
-                let mut letter_mul = 1i32;
-                if placed.contains(&id)
-                    && let Some(b) = board.bonuses.get(&id)
-                {
-                    letter_mul = b.letter_mul as i32;
-                    word_mul *= b.word_mul as i32;
-                }
-                // compute contribution
-                let add = match stack_mode {
-                    StackScoring::TopOnly => (ls as i32) * letter_mul,
-                    StackScoring::SumStack => {
-                        // Sum underlying tiles (unmultiplied) + top tile with letter multiplier
-                        let mut sum_under = 0i32;
-                        if !board.cells[id.0 as usize].stack.is_empty() {
-                            // sum all scores except top
-                            for t in board.cells[id.0 as usize]
-                                .stack
-                                .iter()
-                                .take(board.cells[id.0 as usize].stack.len().saturating_sub(1))
-                            {
-                                let (s_u, _) = Self::tile_symbol_and_score(tileset, t);
-                                sum_under += s_u as i32;
-                            }
-                        }
-                        sum_under + (ls as i32) * letter_mul
-                    }
-                };
-                score += add;
-                tiles_count += 1;
-                c = Coord2D {
-                    x: c.x + dir.0,
-                    y: c.y + dir.1,
-                };
-                continue;
-            }
-            break;
-        }
-        let word = if reverse_horiz {
-            tokens.into_iter().rev().collect::<Vec<_>>().join("")
-        } else {
-            tokens.join("")
-        };
-        (word, score * word_mul, tiles_count)
-    }
-
-    fn graph_adjacent_to_existing(board: &Board<RectGridGeometry>, ids: &HashSet<CellId>) -> bool {
-        for id in ids {
-            if !board.cells[id.0 as usize].stack.is_empty() {
-                return true;
-            }
-            for n in board.geom.neighbors(*id) {
-                if !ids.contains(&n) && Self::cell_has_tile(board, n) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    fn graph_find_main_dir_and_path(
-        board: &Board<RectGridGeometry>,
-        placed: &HashSet<CellId>,
-    ) -> Option<(String, Vec<CellId>)> {
-        // Single tile: choose arbitrary tag and path of length 1
-        if placed.len() == 1 {
-            let id = *placed.iter().next().unwrap();
-            let tag = board
-                .geom
-                .neighbors_with_tags(id)
-                .first()
-                .map(|(_, t)| t.to_string())
-                .unwrap_or_else(|| "E".into());
-            return Some((tag, vec![id]));
-        }
-        // Collect candidate tags between placed neighbors
-        let mut tags: HashSet<String> = HashSet::new();
-        for &id in placed.iter() {
-            for (n, t) in board.geom.neighbors_with_tags(id) {
-                if placed.contains(&n) || CrosswordRules::cell_has_tile(board, n) {
-                    tags.insert(t.to_string());
-                }
-            }
-        }
-        // Try each tag
-        for tag in tags.into_iter() {
-            // endpoints among placed nodes using only this tag
-            let mut deg: HashMap<CellId, usize> = HashMap::new();
-            for &u in placed.iter() {
-                let mut d = 0usize;
-                for (v, t) in board.geom.neighbors_with_tags(u) {
-                    if t == tag && placed.contains(&v) {
-                        d += 1;
-                    }
-                }
-                deg.insert(u, d);
-            }
-            let endpoints: Vec<CellId> = deg
-                .iter()
-                .filter_map(|(k, d)| if *d <= 1 { Some(*k) } else { None })
-                .collect();
-            if endpoints.is_empty() || endpoints.len() > 2 {
-                continue;
-            }
-            let start = endpoints[0];
-            let goal = if endpoints.len() == 2 {
-                endpoints[1]
-            } else {
-                start
-            };
-            if let Some(path) = bfs_path_on_dir(board, start, goal, &tag, placed) {
-                return Some((tag, path));
-            }
-        }
-        None
-    }
-}
-
-impl Rules for CrosswordRules {
-    fn validate(&self, state: &GameState, draft: &MoveDraft) -> Result<ValidatedMove, EngineError> {
-        if draft.placements.is_empty() {
-            return Err(EngineError::Config("no tiles placed"));
-        }
-        if state.board.geom.has_graph() {
-            // Graph-based: collisions
-            for (cid, tile) in &draft.placements {
-                let occupied = Self::cell_has_tile(&state.board, *cid);
-                if occupied {
-                    if !self.stacking_enabled {
-                        return Err(EngineError::Collision(*cid));
-                    }
-                    let cell = &state.board.cells[cid.0 as usize];
-                    if cell.stack.len() + 1 > self.stacking_max_height {
-                        return Err(EngineError::Config("stack too high"));
-                    }
-                    if self.forbid_same_symbol_overlay
-                        && let Some(top) = cell.stack.last()
-                    {
-                        let (_, top_sym) = Self::tile_symbol_and_score(&state.tileset, top);
-                        let (_, new_sym) = Self::tile_symbol_and_score(&state.tileset, tile);
-                        if top_sym == new_sym {
-                            return Err(EngineError::Config("cannot overlay same symbol"));
-                        }
-                    }
-                }
-            }
-            let ids_set: HashSet<CellId> = draft.placements.iter().map(|(id, _)| *id).collect();
-            // Anchor unless board empty
-            let any_on_board = state.board.cells.iter().any(|c| !c.stack.is_empty());
-            if any_on_board && !Self::graph_adjacent_to_existing(&state.board, &ids_set) {
-                return Err(EngineError::Config("must connect to existing tiles"));
-            }
-            // Line and contiguity along a single direction tag
-            if Self::graph_find_main_dir_and_path(&state.board, &ids_set).is_none() {
-                return Err(EngineError::Config("must be straight line"));
-            }
-            return Ok(ValidatedMove {
-                placements: draft.placements.clone(),
-                line_is_row: true,
-            });
-        }
-        // no collisions: cannot place on occupied cells (unless stacking is enabled)
-        for (cid, tile) in &draft.placements {
-            let occupied = CrosswordRules::cell_has_tile(&state.board, *cid);
-            if occupied {
-                if !self.stacking_enabled {
-                    return Err(EngineError::Collision(*cid));
-                }
-                let cell = &state.board.cells[cid.0 as usize];
-                if cell.stack.len() + 1 > self.stacking_max_height {
-                    return Err(EngineError::Config("stack too high"));
-                }
-                if self.forbid_same_symbol_overlay
-                    && let Some(top) = cell.stack.last()
-                {
-                    let (_, top_sym) = Self::tile_symbol_and_score(&state.tileset, top);
-                    let (_, new_sym) = Self::tile_symbol_and_score(&state.tileset, tile);
-                    if top_sym == new_sym {
-                        return Err(EngineError::Config("cannot overlay same symbol"));
-                    }
-                }
-            }
-        }
-        // all in single row or column
-        let coords: Vec<Coord2D> = draft
-            .placements
-            .iter()
-            .map(|(id, _)| state.board.geom.from_cell_id(*id).unwrap())
-            .collect();
-        let same_row = coords.iter().all(|c| c.y == coords[0].y);
-        let same_col = coords.iter().all(|c| c.x == coords[0].x);
-        if !same_row && !same_col {
-            return Err(EngineError::Config("must be straight line"));
-        }
-        let is_row = same_row;
-        // contiguity across span
-        let ids: Vec<CellId> = draft.placements.iter().map(|(id, _)| *id).collect();
-        if !Self::line_contiguous(&state.board, &ids, is_row) {
-            return Err(EngineError::Config("not contiguous"));
-        }
-        // first move center
-        let any_on_board = state.board.cells.iter().any(|c| !c.stack.is_empty());
-        if !any_on_board {
-            if self.require_center_first_move {
-                let center = Self::center_cell(&state.board.geom);
-                if !ids.contains(&center) {
-                    return Err(EngineError::Config("first move must cover center"));
-                }
-            }
-        } else {
-            // must touch existing tiles
-            if !Self::adjacent_to_existing(&state.board, &ids) {
-                return Err(EngineError::Config("must connect to existing tiles"));
-            }
-        }
-        Ok(ValidatedMove {
-            placements: draft.placements.clone(),
-            line_is_row: is_row,
-        })
-    }
-
-    fn score(&self, state: &GameState, mv: &ValidatedMove) -> ScoreBreakdown {
-        if state.board.geom.has_graph() {
-            use std::collections::HashSet as Hs;
-            let placed_ids: Hs<CellId> = mv.placements.iter().map(|(id, _)| *id).collect();
-            // Overlay placements for scoring
-            let mut temp_board = state.board.clone();
-            for (cid, tile) in &mv.placements {
-                temp_board.cells[cid.0 as usize].stack.push(tile.clone());
-            }
-            let mut main_word = String::new();
-            let mut main_score = 0;
-            let mut cross_words: Vec<(String, i32)> = Vec::new();
-            if let Some((tag, path)) =
-                CrosswordRules::graph_find_main_dir_and_path(&state.board, &placed_ids)
-            {
-                let (w, s) = score_word_on_path(
-                    &temp_board,
-                    &state.tileset,
-                    &path,
-                    &placed_ids,
-                    self.stacking_scoring,
-                );
-                main_word = w;
-                main_score = s;
-                for (cid, _) in &mv.placements {
-                    // unique other dir tags at this node
-                    let mut seen: HashSet<String> = HashSet::new();
-                    for (_, t) in state.board.geom.neighbors_with_tags(*cid) {
-                        if t == tag {
-                            continue;
-                        }
-                        if !seen.insert(t.to_string()) {
-                            continue;
-                        }
-                        let line = collect_line_on_dir(&temp_board, *cid, t, &placed_ids);
-                        if line.len() > 1 {
-                            let (cw, cs) = score_word_on_path(
-                                &temp_board,
-                                &state.tileset,
-                                &line,
-                                &placed_ids,
-                                self.stacking_scoring,
-                            );
-                            cross_words.push((cw, cs));
-                        }
-                    }
-                }
-            }
-            let total = main_score + cross_words.iter().map(|(_, s)| *s).sum::<i32>();
-            // dictionary checks if enabled
-            if !self.free_word_mode
-                && let Some(dict) = &state.dictionary
-            {
-                if !dict.contains(&main_word) {
-                    return ScoreBreakdown {
-                        total: -1,
-                        main_word,
-                        main_score: -1,
-                        cross_words: vec![],
-                        bingo: false,
-                    };
-                }
-                for (w, _) in &cross_words {
-                    if !dict.contains(w) {
-                        return ScoreBreakdown {
-                            total: -1,
-                            main_word,
-                            main_score: -1,
-                            cross_words: vec![],
-                            bingo: false,
-                        };
-                    }
-                }
-            }
-            return ScoreBreakdown {
-                total,
-                main_word,
-                main_score,
-                cross_words,
-                bingo: false,
-            };
-        }
-        // Build set of placed cells
-        let placed_ids: std::collections::HashSet<CellId> =
-            mv.placements.iter().map(|(id, _)| *id).collect();
-        // Temporarily overlay tiles to compute words
-        let mut temp_board = state.board.clone();
-        for (cid, tile) in &mv.placements {
-            temp_board.cells[cid.0 as usize].stack.push(tile.clone());
-        }
-        // main word direction
-        let start_coord = temp_board.geom.from_cell_id(mv.placements[0].0).unwrap();
-        let dir = if mv.line_is_row { (1, 0) } else { (0, 1) };
-        let reverse_main = self.reading_dir == ReadingDirection::RTL && dir.1 == 0;
-        let (main_word, main_score, _main_tiles) = Self::form_word(
-            &temp_board,
-            &state.tileset,
-            start_coord,
-            dir,
-            &placed_ids,
-            reverse_main,
-            self.stacking_scoring,
-        );
-        // cross words
-        let pdir = if mv.line_is_row { (0, 1) } else { (1, 0) };
-        let mut cross_words = Vec::new();
-        for (cid, _) in &mv.placements {
-            let c = temp_board.geom.from_cell_id(*cid).unwrap();
-            // Only if neighbors in perpendicular direction form a word length > 1
-            // Build word centered at c in pdir
-            let reverse_cross = self.reading_dir == ReadingDirection::RTL && pdir.1 == 0;
-            let (w, s, t) = Self::form_word(
-                &temp_board,
-                &state.tileset,
-                c,
-                pdir,
-                &placed_ids,
-                reverse_cross,
-                self.stacking_scoring,
-            );
-            if t > 1 {
-                cross_words.push((w, s));
-            }
-        }
-        let mut total = main_score + cross_words.iter().map(|(_, s)| *s).sum::<i32>();
-        // dictionary checks if enabled
-        if !self.free_word_mode
-            && let Some(dict) = &state.dictionary
-        {
-            if !dict.contains(&main_word) {
-                return ScoreBreakdown {
-                    total: -1,
-                    main_word,
-                    main_score: -1,
-                    cross_words: vec![],
-                    bingo: false,
-                };
-            }
-            for (w, _) in &cross_words {
-                if !dict.contains(w) {
-                    return ScoreBreakdown {
-                        total: -1,
-                        main_word,
-                        main_score: -1,
-                        cross_words: vec![],
-                        bingo: false,
-                    };
-                }
-            }
-        }
-        // dictionary checks if enabled
-        if !self.free_word_mode
-            && let Some(dict) = &state.dictionary
-        {
-            if !dict.contains(&main_word) {
-                return ScoreBreakdown {
-                    total: -1,
-                    main_word,
-                    main_score: -1,
-                    cross_words: vec![],
-                    bingo: false,
-                };
-            }
-            for (w, _) in &cross_words {
-                if !dict.contains(w) {
-                    return ScoreBreakdown {
-                        total: -1,
-                        main_word,
-                        main_score: -1,
-                        cross_words: vec![],
-                        bingo: false,
-                    };
-                }
-            }
-        }
-        // bingo
-        let bingo = mv.placements.len() >= state.players[state.to_move.0].rack.tiles.len()
-            && !mv.placements.is_empty()
-            && state.players[state.to_move.0].rack.len() >= 7; // heuristic
-        let bingo = if bingo {
-            total += self.bingo_bonus;
-            true
-        } else {
-            false
-        };
-        ScoreBreakdown {
-            total,
-            main_word,
-            main_score,
-            cross_words,
-            bingo,
-        }
-    }
-
-    fn commit(
-        &self,
-        state: &mut GameState,
-        mv: ValidatedMove,
-        score: &ScoreBreakdown,
-    ) -> Result<(), EngineError> {
-        // Place tiles
-        for (cid, tile) in &mv.placements {
-            state.board.cells[cid.0 as usize].stack.push(tile.clone());
-        }
-        // Update score
-        let pid = state.to_move.0;
-        state.players[pid].score += score.total;
-        // Remove used tiles from rack (by kind_id occurrences)
-        let mut used_counts: HashMap<String, usize> = HashMap::new();
-        for (_, t) in &mv.placements {
-            *used_counts.entry(t.kind_id.clone()).or_default() += 1;
-        }
-        let mut new_rack = Vec::new();
-        for t in state.players[pid].rack.tiles.drain(..) {
-            if let Some(entry) = used_counts.get_mut(&t.kind_id)
-                && *entry > 0
-            {
-                *entry -= 1;
-                continue;
-            }
-            new_rack.push(t);
-        }
-        state.players[pid].rack.tiles = new_rack;
-        // Refill rack
-        let want = state.players[pid].rack.tiles.len();
-        let draw_n = (state.players[pid].rack_size().unwrap_or(7)).saturating_sub(want); // default 7
-        let mut drawn = state.bag.draw(draw_n);
-        let drawn_clone = drawn.clone();
-        state.players[pid].rack.tiles.append(&mut drawn);
-
-        state.push_event(
-            pid,
-            GameEventKind::Play {
-                placements: mv.placements.clone(),
-                score: score.main_score,
-                total: score.total,
-            },
-        );
-        state.log_draw(pid, &drawn_clone);
-        state.advance_turn();
-        Ok(())
-    }
-}
-
-// Rule plugins moved to rules::plugins
-// ---- Graph helpers ----
-
-fn bfs_path_on_dir(
-    board: &Board<RectGridGeometry>,
-    start: CellId,
-    goal: CellId,
-    tag: &str,
-    placed: &HashSet<CellId>,
-) -> Option<Vec<CellId>> {
-    use std::collections::VecDeque;
-    let mut q = VecDeque::new();
-    let mut prev: HashMap<CellId, Option<CellId>> = HashMap::new();
-    let mut seen: HashSet<CellId> = HashSet::new();
-    q.push_back(start);
-    seen.insert(start);
-    prev.insert(start, None);
-    while let Some(u) = q.pop_front() {
-        if u == goal {
-            break;
-        }
-        for (v, t) in board.geom.neighbors_with_tags(u) {
-            if t != tag {
-                continue;
-            }
-            // allow traversal only through placed nodes or existing tiles
-            if !placed.contains(&v) && board.cells[v.0 as usize].stack.is_empty() {
-                continue;
-            }
-            if seen.insert(v) {
-                prev.insert(v, Some(u));
-                q.push_back(v);
-            }
-        }
-    }
-    if !prev.contains_key(&goal) {
-        return None;
-    }
-    // reconstruct path
-    let mut path = Vec::new();
-    let mut cur = goal;
-    path.push(cur);
-    while let Some(Some(p)) = prev.get(&cur) {
-        cur = *p;
-        path.push(cur);
-    }
-    path.reverse();
-    Some(path)
-}
-
-fn collect_line_on_dir(
-    board: &Board<RectGridGeometry>,
-    center: CellId,
-    tag: &str,
-    placed: &HashSet<CellId>,
-) -> Vec<CellId> {
-    // find one neighbor to go backwards
-    let neighs: Vec<CellId> = board
-        .geom
-        .neighbors_with_tags(center)
-        .into_iter()
-        .filter(|(_, t)| *t == tag)
-        .map(|(n, _)| n)
-        .collect();
-    let mut back = center;
-    // choose a backward direction arbitrarily among available
-    if let Some(nb) = neighs.first() {
-        let mut prev = center;
-        let mut cur = *nb;
-        // walk backwards as long as nodes are filled (placed or existing)
-        loop {
-            if !placed.contains(&cur) && board.cells[cur.0 as usize].stack.is_empty() {
-                break;
-            }
-            let nxt = board
-                .geom
-                .neighbors_with_tags(cur)
-                .into_iter()
-                .filter(|(_, t)| *t == tag)
-                .map(|(n, _)| n)
-                .find(|n| *n != prev);
-            back = cur;
-            if let Some(n2) = nxt {
-                prev = cur;
-                cur = n2;
-            } else {
-                break;
-            }
-        }
-    }
-    // now walk forward from `back` accumulating cells
-    let mut out = Vec::new();
-    let mut prev = None;
-    let mut cur = back;
-    loop {
-        if !placed.contains(&cur) && board.cells[cur.0 as usize].stack.is_empty() {
-            break;
-        }
-        out.push(cur);
-        let nxt = board
-            .geom
-            .neighbors_with_tags(cur)
-            .into_iter()
-            .filter(|(_, t)| *t == tag)
-            .map(|(n, _)| n)
-            .find(|n| Some(*n) != prev);
-        if let Some(n2) = nxt {
-            prev = Some(cur);
-            cur = n2;
-        } else {
-            break;
-        }
-    }
-    out
-}
-
-fn score_word_on_path(
-    board: &Board<RectGridGeometry>,
-    tileset: &Tileset,
-    path: &[CellId],
-    placed: &HashSet<CellId>,
-    stack_mode: StackScoring,
-) -> (String, i32) {
-    let mut tokens: Vec<String> = Vec::new();
-    let mut scalar_score: i32 = 0;
-    let mut word_mul: i32 = 1;
-    #[cfg(feature = "simd")]
-    let mut top_only_scores: Vec<i32> = Vec::with_capacity(path.len());
-    #[cfg(feature = "simd")]
-    let mut top_only_multipliers: Vec<i32> = Vec::with_capacity(path.len());
-    for id in path {
-        let cell = &board.cells[id.0 as usize];
-        if let Some(tile) = cell.stack.last() {
-            let (ls, sym) = CrosswordRules::tile_symbol_and_score(tileset, tile);
-            tokens.push(sym);
-            let mut letter_mul = 1i32;
-            if placed.contains(id)
-                && let Some(b) = board.bonuses.get(id)
-            {
-                letter_mul = b.letter_mul as i32;
-                word_mul *= b.word_mul as i32;
-            }
-            match stack_mode {
-                StackScoring::TopOnly => {
-                    #[cfg(feature = "simd")]
-                    {
-                        top_only_scores.push(ls as i32);
-                        top_only_multipliers.push(letter_mul);
-                    }
-                    #[cfg(not(feature = "simd"))]
-                    {
-                        scalar_score += (ls as i32) * letter_mul;
-                    }
-                }
-                StackScoring::SumStack => {
-                    let mut sum_under = 0i32;
-                    if cell.stack.len() > 1 {
-                        for t in cell.stack.iter().take(cell.stack.len() - 1) {
-                            let (s_u, _) = CrosswordRules::tile_symbol_and_score(tileset, t);
-                            sum_under += s_u as i32;
-                        }
-                    }
-                    scalar_score += sum_under + (ls as i32) * letter_mul;
-                }
-            }
-        }
-    }
-    let score = match stack_mode {
-        StackScoring::TopOnly => {
-            #[cfg(feature = "simd")]
-            {
-                simd_dot_product(&top_only_scores, &top_only_multipliers)
-            }
-            #[cfg(not(feature = "simd"))]
-            {
-                scalar_score
-            }
-        }
-        StackScoring::SumStack => scalar_score,
-    };
-    (tokens.join(""), score * word_mul)
-}
-
-#[cfg(feature = "simd")]
-fn simd_dot_product(lhs: &[i32], rhs: &[i32]) -> i32 {
-    debug_assert_eq!(lhs.len(), rhs.len());
-    let len = lhs.len().min(rhs.len());
-    let mut total = 0i32;
-    let mut i = 0usize;
-    while i + 4 <= len {
-        let a = i32x4::from([lhs[i], lhs[i + 1], lhs[i + 2], lhs[i + 3]]);
-        let b = i32x4::from([rhs[i], rhs[i + 1], rhs[i + 2], rhs[i + 3]]);
-        let prod = (a * b).to_array();
-        total += prod[0] + prod[1] + prod[2] + prod[3];
-        i += 4;
-    }
-    while i < len {
-        total += lhs[i] * rhs[i];
-        i += 1;
-    }
-    total
-}
-// -------- Move Generation (Phase 12 start) --------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CandidateMove {
@@ -2809,11 +1956,160 @@ fn generate_moves_graph_basic(
         deque.into_iter().collect()
     }
 
+    // Collect all non-blank symbols from the tileset as an alphabet
+    fn alphabet_symbols(state: &GameState) -> HashSet<String> {
+        let mut set = HashSet::new();
+        for tk in &state.tileset.tile_kinds {
+            if !tk.is_blank {
+                set.insert(tk.symbol.clone());
+            }
+        }
+        set
+    }
+
+    // Walk along a tagged axis starting at `next` and away from `prev`, collecting fixed symbols
+    fn collect_chain_symbols_from(
+        state: &GameState,
+        mut next: CellId,
+        mut prev: CellId,
+        tag: &str,
+    ) -> Vec<String> {
+        let mut out = Vec::new();
+        loop {
+            let cell = &state.board.cells[next.0 as usize];
+            if let Some(tile) = cell.stack.last() {
+                let (_score, sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, tile);
+                out.push(sym);
+            } else {
+                break;
+            }
+            let mut advanced = false;
+            for (n, t) in state.board.geom.neighbors_with_tags(next) {
+                if t == tag && n != prev {
+                    prev = next;
+                    next = n;
+                    advanced = true;
+                    break;
+                }
+            }
+            if !advanced {
+                break;
+            }
+        }
+        out
+    }
+
+    // Allowed symbols for placing on `cell` along a single perpendicular axis `ctag`.
+    fn allowed_for_cell_on_axis(
+        state: &GameState,
+        cell: CellId,
+        ctag: &str,
+        alphabet: &HashSet<String>,
+    ) -> HashSet<String> {
+        // neighbors on this axis
+        let mut sides: Vec<CellId> = Vec::with_capacity(2);
+        for (n, t) in state.board.geom.neighbors_with_tags(cell) {
+            if t == ctag {
+                sides.push(n);
+            }
+        }
+        // gather fixed chains
+        let mut left_syms: Vec<String> = Vec::new();
+        let mut right_syms: Vec<String> = Vec::new();
+        match (sides.get(0), sides.get(1)) {
+            (None, None) => return alphabet.clone(),
+            (Some(&a), None) | (None, Some(&a)) => {
+                right_syms = collect_chain_symbols_from(state, a, cell, ctag);
+                if right_syms.is_empty() {
+                    return alphabet.clone();
+                }
+            }
+            (Some(&a), Some(&b)) => {
+                left_syms = collect_chain_symbols_from(state, a, cell, ctag);
+                right_syms = collect_chain_symbols_from(state, b, cell, ctag);
+                if left_syms.is_empty() && right_syms.is_empty() {
+                    return alphabet.clone();
+                }
+            }
+        }
+        // If no dictionary, be permissive
+        let Some(dict) = state.dictionary.as_ref() else {
+            return alphabet.clone();
+        };
+        let mut allowed: HashSet<String> = HashSet::new();
+        let base_tiles = left_syms.len() + right_syms.len();
+        for sym in alphabet {
+            // word in one reading
+            let mut a = String::new();
+            for s in left_syms.iter().rev() {
+                a.push_str(s);
+            }
+            a.push_str(sym);
+            for s in &right_syms {
+                a.push_str(s);
+            }
+            let mut ok = base_tiles + 1 > 1 && dict.contains(&a);
+            if !ok {
+                // opposite reading
+                let mut b = String::new();
+                for s in right_syms.iter().rev() {
+                    b.push_str(s);
+                }
+                b.push_str(sym);
+                for s in &left_syms {
+                    b.push_str(s);
+                }
+                ok = base_tiles + 1 > 1 && dict.contains(&b);
+            }
+            if ok || base_tiles == 0 {
+                allowed.insert(sym.clone());
+            }
+        }
+        allowed
+    }
+
+    // For a main-axis `tag`, compute allowed symbols per empty cell by intersecting across all
+    // perpendicular tags present at the cell.
+    fn cross_checks_for_tag(
+        state: &GameState,
+        tag: &str,
+        alphabet: &HashSet<String>,
+    ) -> HashMap<CellId, HashSet<String>> {
+        let mut map: HashMap<CellId, HashSet<String>> = HashMap::new();
+        for (idx, cell) in state.board.cells.iter().enumerate() {
+            if !cell.stack.is_empty() {
+                continue;
+            }
+            let cid = CellId(idx as u32);
+            // collect distinct perpendicular tags
+            let mut perp: HashSet<&str> = HashSet::new();
+            for (_n, t) in state.board.geom.neighbors_with_tags(cid) {
+                if t != tag {
+                    perp.insert(t);
+                }
+            }
+            let mut allowed = alphabet.clone();
+            for ctag in perp {
+                let on_axis = allowed_for_cell_on_axis(state, cid, ctag, alphabet);
+                allowed = allowed
+                    .into_iter()
+                    .filter(|s| on_axis.contains(s))
+                    .collect();
+                if allowed.is_empty() {
+                    break;
+                }
+            }
+            map.insert(cid, allowed);
+        }
+        map
+    }
+
     struct ExploreCtx<'a> {
         state: &'a GameState,
         rules: &'a dyn Rules,
         tile_symbols: &'a [(String, String)],
         blank_ids: &'a [String],
+        cross: &'a HashMap<CellId, HashSet<String>>, // allowed symbols per cell on this axis
         seen: &'a mut HashSet<String>,
         out: &'a mut Vec<CandidateMove>,
     }
@@ -2868,55 +2164,63 @@ fn generate_moves_graph_basic(
             return;
         }
 
-        // Try normal tiles
-        for (kind_id, _symbol) in ctx.tile_symbols.iter() {
-            let available = rack_counts.get(kind_id).copied().unwrap_or(0);
-            if available == 0 {
-                continue;
-            }
-            {
-                let entry = rack_counts.get_mut(kind_id).unwrap();
-                *entry -= 1;
-            }
-            placements.push((
-                cid,
-                Tile {
-                    kind_id: kind_id.clone(),
-                    mark: None,
-                },
-            ));
-            explore_segment(segment, idx + 1, rack_counts, placements, ctx);
-            placements.pop();
-            {
-                let entry = rack_counts.get_mut(kind_id).unwrap();
-                *entry += 1;
-            }
-        }
+        // Cross-check filtered candidates at this cell
+        let allowed_syms = ctx.cross.get(&cid);
 
-        // Try blank tiles
-        for blank_id in ctx.blank_ids {
-            let available = rack_counts.get(blank_id).copied().unwrap_or(0);
-            if available == 0 {
-                continue;
-            }
-            {
-                let entry = rack_counts.get_mut(blank_id).unwrap();
-                *entry -= 1;
-            }
-            for (_, symbol) in ctx.tile_symbols.iter() {
+        if let Some(allowed) = allowed_syms {
+            // Try normal tiles that yield allowed symbols
+            for (kind_id, symbol) in ctx.tile_symbols.iter() {
+                if !allowed.contains(symbol) {
+                    continue;
+                }
+                let available = rack_counts.get(kind_id).copied().unwrap_or(0);
+                if available == 0 {
+                    continue;
+                }
+                {
+                    let entry = rack_counts.get_mut(kind_id).unwrap();
+                    *entry -= 1;
+                }
                 placements.push((
                     cid,
                     Tile {
-                        kind_id: blank_id.clone(),
-                        mark: Some(symbol.clone()),
+                        kind_id: kind_id.clone(),
+                        mark: None,
                     },
                 ));
                 explore_segment(segment, idx + 1, rack_counts, placements, ctx);
                 placements.pop();
+                {
+                    let entry = rack_counts.get_mut(kind_id).unwrap();
+                    *entry += 1;
+                }
             }
-            {
-                let entry = rack_counts.get_mut(blank_id).unwrap();
-                *entry += 1;
+
+            // Try blank tiles assigning only allowed symbols
+            for blank_id in ctx.blank_ids {
+                let available = rack_counts.get(blank_id).copied().unwrap_or(0);
+                if available == 0 {
+                    continue;
+                }
+                {
+                    let entry = rack_counts.get_mut(blank_id).unwrap();
+                    *entry -= 1;
+                }
+                for symbol in allowed {
+                    placements.push((
+                        cid,
+                        Tile {
+                            kind_id: blank_id.clone(),
+                            mark: Some(symbol.clone()),
+                        },
+                    ));
+                    explore_segment(segment, idx + 1, rack_counts, placements, ctx);
+                    placements.pop();
+                }
+                {
+                    let entry = rack_counts.get_mut(blank_id).unwrap();
+                    *entry += 1;
+                }
             }
         }
     }
@@ -2951,6 +2255,7 @@ fn generate_moves_graph_basic(
         rules: rules as &dyn Rules,
         tile_symbols: &tile_symbols,
         blank_ids: &blank_ids,
+        cross: &HashMap::new(), // replaced per tag below
         seen: &mut seen,
         out: &mut out,
     };
@@ -2968,6 +2273,9 @@ fn generate_moves_graph_basic(
         }
 
         for tag in tags {
+            // Precompute cross-checks for this axis tag
+            let alphabet = alphabet_symbols(state);
+            let cross_checks = cross_checks_for_tag(state, &tag, &alphabet);
             let line = build_line(&state.board.geom, anchor, &tag);
             if line.is_empty() {
                 continue;
@@ -2996,7 +2304,16 @@ fn generate_moves_graph_basic(
 
                     let mut rack_counts = rack_template.clone();
                     let mut placements: Vec<(CellId, Tile)> = Vec::new();
-                    explore_segment(segment, 0, &mut rack_counts, &mut placements, &mut ctx);
+                    let mut tag_ctx = ExploreCtx {
+                        state: ctx.state,
+                        rules: ctx.rules,
+                        tile_symbols: ctx.tile_symbols,
+                        blank_ids: ctx.blank_ids,
+                        cross: &cross_checks,
+                        seen: ctx.seen,
+                        out: ctx.out,
+                    };
+                    explore_segment(segment, 0, &mut rack_counts, &mut placements, &mut tag_ctx);
                 }
             }
         }
@@ -3015,814 +2332,6 @@ impl Player {
 // Moved to module `dict`; re-exported here for compatibility
 pub mod dict;
 pub use dict::{Dictionary, DictionaryOptions, SetDictionary, FstDictionary, DawgDictionary, GaddagDictionary, GaddagCursor, GaddagRight};
-
-/* old inlined trait moved to dict */
-// (Dictionary trait moved to dict)
-
-// (SetDictionary moved to dict)
-
-// (FstDictionary moved to dict)
-
-/* moved: impl FstDictionary {
-    pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        let mut v: Vec<String> = iter
-            .into_iter()
-            .map(|w| {
-                let mut s = nfc(w.into());
-                if case_fold {
-                    s = s.to_lowercase();
-                }
-                s
-            })
-            .collect();
-        v.sort();
-        v.dedup();
-        let set = fst::Set::from_iter(v.iter()).expect("build fst set");
-        Self {
-            set,
-            case_fold,
-            norm: NormalizationMode::NFC,
-        }
-    }
-
-    pub fn from_file<P: AsRef<std::path::Path>>(
-        path: P,
-        opts: DictionaryOptions,
-    ) -> std::io::Result<Self> {
-        use std::io::{BufRead, BufReader};
-        let f = std::fs::File::open(path)?;
-        let reader = BufReader::new(f);
-        let mut v: Vec<String> = Vec::new();
-        for line in reader.lines() {
-            let s = line?;
-            let s = s.trim();
-            if s.is_empty() || s.starts_with('#') {
-                continue;
-            }
-            let mut w = normalize_with_mode(s, opts.norm);
-            if opts.case_fold {
-                w = w.to_lowercase();
-            }
-            let len = opts.tokenizer.segment(&w).len();
-            if let Some(min) = opts.min_len
-                && len < min
-            {
-                continue;
-            }
-            if let Some(max) = opts.max_len
-                && len > max
-            {
-                continue;
-            }
-            v.push(w);
-        }
-        v.sort();
-        v.dedup();
-        let set = fst::Set::from_iter(v.iter()).expect("build fst set");
-        Ok(Self {
-            set,
-            case_fold: opts.case_fold,
-            norm: opts.norm,
-        })
-    }
-    pub fn from_bytes<D: AsRef<[u8]>>(bytes: D, case_fold: bool) -> Result<Self, fst::Error> {
-        let set = fst::Set::new(bytes.as_ref().to_vec())?;
-        Ok(Self {
-            set,
-            case_fold,
-            norm: NormalizationMode::NFC,
-        })
-    }
-
-    pub fn from_words_opts<I, S>(iter: I, opts: DictionaryOptions) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        let mut v: Vec<String> = iter
-            .into_iter()
-            .map(|w| {
-                let mut s = normalize_with_mode(w.into(), opts.norm);
-                if opts.case_fold {
-                    s = s.to_lowercase();
-                }
-                s
-            })
-            .collect();
-        v.sort();
-        v.dedup();
-        let set = fst::Set::from_iter(v.iter()).expect("build fst set");
-        Self {
-            set,
-            case_fold: opts.case_fold,
-            norm: opts.norm,
-        }
-    }
-}
-
-impl Dictionary for FstDictionary {
-    fn contains(&self, word: &str) -> bool {
-        let mut s = normalize_with_mode(word, self.norm);
-        if self.case_fold {
-            s = s.to_lowercase();
-        }
-        self.set.contains(&s)
-    }
-    fn has_prefix(&self, prefix: &str) -> bool {
-        use fst::{IntoStreamer, automaton::Str};
-        let mut p = normalize_with_mode(prefix, self.norm);
-        if self.case_fold {
-            p = p.to_lowercase();
-        }
-        let aut = Str::new(&p).starts_with();
-        let mut stream = self.set.search(aut).into_stream();
-        stream.next().is_some()
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> {
-        Box::new(self.clone())
-    }
-}
-*/
-
-// Simple DAWG/Trie implementation with prefix search (Phase 11)
-/* moved: #[derive(Debug, Clone, Default)]
-pub struct DawgDictionary {
-    nodes: Vec<DawgNode>,
-    case_fold: bool,
-    norm: NormalizationMode,
-    tokenizer: TokenizerRef,
-}
-
-#[derive(Debug, Clone, Default)]
-struct DawgNode {
-    edges: std::collections::HashMap<String, usize>,
-    terminal: bool,
-}
-
-impl DawgDictionary {
-    pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        let opts = DictionaryOptions {
-            case_fold,
-            ..Default::default()
-        };
-        Self::from_words_opts(iter, opts)
-    }
-
-    pub fn from_words_opts<I, S>(iter: I, opts: DictionaryOptions) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        let mut words: Vec<String> = iter
-            .into_iter()
-            .map(|w| {
-                let mut s = normalize_with_mode(w.into(), opts.norm);
-                if opts.case_fold {
-                    s = s.to_lowercase();
-                }
-                s
-            })
-            .collect();
-        words.sort();
-        words.dedup();
-        Self::build_from_words(words, opts)
-    }
-
-    fn build_from_words(words: Vec<String>, opts: DictionaryOptions) -> Self {
-        let DictionaryOptions {
-            case_fold,
-            min_len: _,
-            max_len: _,
-            norm,
-            tokenizer,
-        } = opts;
-        let mut nodes = vec![DawgNode::default()];
-        for w in &words {
-            let tokens = tokenizer.segment(w);
-            if tokens.is_empty() {
-                continue;
-            }
-            let mut node = 0usize;
-            for token in tokens {
-                let next = if let Some(&id) = nodes[node].edges.get(&token) {
-                    id
-                } else {
-                    let id = nodes.len();
-                    nodes.push(DawgNode::default());
-                    nodes[node].edges.insert(token.clone(), id);
-                    id
-                };
-                node = next;
-            }
-            nodes[node].terminal = true;
-        }
-        Self {
-            nodes,
-            case_fold,
-            norm,
-            tokenizer,
-        }
-    }
-
-    pub fn from_file<P: AsRef<std::path::Path>>(
-        path: P,
-        opts: DictionaryOptions,
-    ) -> std::io::Result<Self> {
-        use std::io::{BufRead, BufReader};
-        let f = std::fs::File::open(path)?;
-        let reader = BufReader::new(f);
-        let mut v: Vec<String> = Vec::new();
-        for line in reader.lines() {
-            let s = line?;
-            let s = s.trim();
-            if s.is_empty() || s.starts_with('#') {
-                continue;
-            }
-            let mut w = normalize_with_mode(s, opts.norm);
-            if opts.case_fold {
-                w = w.to_lowercase();
-            }
-            let len = opts.tokenizer.segment(&w).len();
-            if let Some(min) = opts.min_len
-                && len < min
-            {
-                continue;
-            }
-            if let Some(max) = opts.max_len
-                && len > max
-            {
-                continue;
-            }
-            v.push(w);
-        }
-        Ok(Self::from_words_opts(v, opts))
-    }
-
-    pub fn tokenizer(&self) -> &TokenizerRef {
-        &self.tokenizer
-    }
-}
-
-impl Dictionary for DawgDictionary {
-    fn contains(&self, word: &str) -> bool {
-        let mut s = normalize_with_mode(word, self.norm);
-        if self.case_fold {
-            s = s.to_lowercase();
-        }
-        let mut node = 0usize;
-        for token in self.tokenizer.segment(&s) {
-            if let Some(&nxt) = self.nodes[node].edges.get(&token) {
-                node = nxt;
-            } else {
-                return false;
-            }
-        }
-        self.nodes.get(node).map(|n| n.terminal).unwrap_or(false)
-    }
-    fn has_prefix(&self, prefix: &str) -> bool {
-        let mut p = normalize_with_mode(prefix, self.norm);
-        if self.case_fold {
-            p = p.to_lowercase();
-        }
-        let mut node = 0usize;
-        for token in self.tokenizer.segment(&p) {
-            if let Some(&nxt) = self.nodes[node].edges.get(&token) {
-                node = nxt;
-            } else {
-                return false;
-            }
-        }
-        true
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> {
-        Box::new(self.clone())
-    }
-}
-*/
-
-/* moved: #[derive(Debug, Clone)]
-pub struct GaddagDictionary {
-    forward: FstDictionary,
-    // packed graph
-    g_nodes: Vec<PackedNode>,
-    g_arcs: Vec<PackedArc>,
-    // symbol mapping
-    sym2id: std::collections::HashMap<String, u16>,
-    id2sym: Vec<String>,
-    sep: String,
-    sep_id: u16,
-    tokenizer: TokenizerRef,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct PackedNode {
-    offset: u32,
-    degree: u16,
-    flags: u16, // bit 0 => terminal
-}
-impl PackedNode {
-    #[inline]
-    fn terminal(&self) -> bool {
-        (self.flags & 1) != 0
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct PackedArc {
-    label: u16,
-    target: u32,
-}
-
-// Transient builder node (u16-labeled sorted map)
-#[derive(Default)]
-struct BuildNode {
-    edges: std::collections::BTreeMap<u16, usize>,
-    terminal: bool,
-}
-
-// On-disk representation for packed GADDAG
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PackedNodeDisk {
-    offset: u32,
-    degree: u16,
-    flags: u16,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PackedArcDisk {
-    label: u16,
-    target: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct GaddagDiskImage {
-    sep: String,
-    sep_id: u16,
-    id2sym: Vec<String>,
-    nodes: Vec<PackedNodeDisk>,
-    arcs: Vec<PackedArcDisk>,
-    words: Vec<String>,
-    case_fold: bool,
-    // 0 = NFC, 1 = NFKC
-    norm_mode: u8,
-}
-
-impl GaddagDictionary {
-    pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        let opts = DictionaryOptions {
-            case_fold,
-            ..Default::default()
-        };
-        Self::from_words_opts(iter, opts)
-    }
-
-    pub fn from_words_opts<I, S>(iter: I, opts: DictionaryOptions) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        let DictionaryOptions { case_fold, min_len, max_len, norm, tokenizer } = opts;
-        let sep = "+".to_string();
-
-        // Normalize/filter words first
-        let mut words: Vec<String> = Vec::new();
-        for w in iter.into_iter() {
-            let mut s = normalize_with_mode(w.into(), norm);
-            if case_fold { s = s.to_lowercase(); }
-            if s.is_empty() { continue; }
-            let tks = tokenizer.segment(&s);
-            if tks.is_empty() { continue; }
-            let len = tks.len();
-            if let Some(min) = min_len { if len < min { continue; } }
-            if let Some(max) = max_len { if len > max { continue; } }
-            words.push(s);
-        }
-
-        // Build small symbol table
-        let mut sym2id: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
-        let mut id2sym: Vec<String> = Vec::new();
-        let mut intern = |sym: &str,
-                          map: &mut std::collections::HashMap<String, u16>,
-                          vec: &mut Vec<String>| -> u16 {
-            if let Some(&id) = map.get(sym) { return id; }
-            let id = vec.len() as u16;
-            map.insert(sym.to_string(), id);
-            vec.push(sym.to_string());
-            id
-        };
-        for s in &words {
-            for tk in tokenizer.segment(s) {
-                let _ = intern(&tk, &mut sym2id, &mut id2sym);
-            }
-        }
-        let sep_id = intern(&sep, &mut sym2id, &mut id2sym);
-
-        // Build trie over u16 labels
-        let mut build_nodes: Vec<BuildNode> = vec![BuildNode::default()]; // root = 0
-        for s in &words {
-            let tokens = tokenizer.segment(s);
-            let n = tokens.len();
-            for split in 0..=n {
-                let mut seq: Vec<u16> = Vec::with_capacity(n + 1);
-                for tk in tokens[..split].iter().rev() { seq.push(*sym2id.get(tk).expect("interned")); }
-                seq.push(sep_id);
-                for tk in &tokens[split..] { seq.push(*sym2id.get(tk).expect("interned")); }
-                let mut node = 0usize;
-                for &lab in &seq {
-                    let next = if let Some(&id) = build_nodes[node].edges.get(&lab) {
-                        id
-                    } else {
-                        let id = build_nodes.len();
-                        build_nodes.push(BuildNode::default());
-                        build_nodes[node].edges.insert(lab, id);
-                        id
-                    };
-                    node = next;
-                }
-                build_nodes[node].terminal = true;
-            }
-        }
-
-        // Freeze packed arrays
-        let mut g_nodes: Vec<PackedNode> = Vec::with_capacity(build_nodes.len());
-        let mut g_arcs: Vec<PackedArc> = Vec::new();
-        for bn in &build_nodes {
-            let offset = g_arcs.len() as u32;
-            let degree = bn.edges.len() as u16;
-            for (&label, &target) in bn.edges.iter() {
-                g_arcs.push(PackedArc { label, target: target as u32 });
-            }
-            g_nodes.push(PackedNode { offset, degree, flags: if bn.terminal { 1 } else { 0 } });
-        }
-
-        let forward_opts = DictionaryOptions { case_fold, min_len, max_len, norm, tokenizer: tokenizer.clone() };
-        let forward = FstDictionary::from_words_opts(words.clone(), forward_opts);
-        Self { forward, g_nodes, g_arcs, sym2id, id2sym, sep, sep_id, tokenizer }
-    }
-
-    pub fn from_file<P: AsRef<std::path::Path>>(
-        path: P,
-        opts: DictionaryOptions,
-    ) -> std::io::Result<Self> {
-        use std::io::{BufRead, BufReader};
-        let f = std::fs::File::open(path)?;
-        let reader = BufReader::new(f);
-        let mut words: Vec<String> = Vec::new();
-        for line in reader.lines() {
-            let raw = line?;
-            let mut s = normalize_with_mode(raw.trim(), opts.norm);
-            if opts.case_fold {
-                s = s.to_lowercase();
-            }
-            if s.is_empty() {
-                continue;
-            }
-            let len = opts.tokenizer.segment(&s).len();
-            if let Some(min) = opts.min_len
-                && len < min
-            {
-                continue;
-            }
-            if let Some(max) = opts.max_len
-                && len > max
-            {
-                continue;
-            }
-            words.push(s);
-        }
-        Ok(Self::from_words_opts(words, opts))
-    }
-
-    /// Serialize the GADDAG automaton and normalized word list to a CBOR file.
-    /// Note: The tokenizer used for move generation is not serialized. Provide it when loading.
-    pub fn to_gaddag_file<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
-        use std::io::BufWriter;
-        let norm_mode: u8 = match self.forward.norm { NormalizationMode::NFC => 0, NormalizationMode::NFKC => 1 };
-        // Collect all words from FST using an empty prefix automaton.
-        let mut words: Vec<String> = Vec::new();
-        {
-            use fst::{IntoStreamer, Streamer, automaton::Str};
-            let aut = Str::new("").starts_with();
-            let mut stream = self.forward.set.search(aut).into_stream();
-            while let Some(bytes) = stream.next() {
-                let s = std::str::from_utf8(bytes)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("invalid utf8 in FST: {}", e)))?
-                    .to_string();
-                words.push(s);
-            }
-        }
-        let nodes: Vec<PackedNodeDisk> = self
-            .g_nodes
-            .iter()
-            .map(|n| PackedNodeDisk { offset: n.offset, degree: n.degree, flags: n.flags })
-            .collect();
-        let arcs: Vec<PackedArcDisk> = self
-            .g_arcs
-            .iter()
-            .map(|a| PackedArcDisk { label: a.label, target: a.target })
-            .collect();
-        let image = GaddagDiskImage {
-            sep: self.sep.clone(),
-            sep_id: self.sep_id,
-            id2sym: self.id2sym.clone(),
-            nodes,
-            arcs,
-            words,
-            case_fold: self.forward.case_fold,
-            norm_mode,
-        };
-        let f = std::fs::File::create(path)?;
-        let mut w = BufWriter::new(f);
-        ciborium::ser::into_writer(&image, &mut w)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-    }
-
-    /// Serialize to CBOR bytes for embedding (e.g., `include_bytes!` in WASM bundles).
-    pub fn to_gaddag_bytes(&self) -> std::io::Result<Vec<u8>> {
-        let norm_mode: u8 = match self.forward.norm { NormalizationMode::NFC => 0, NormalizationMode::NFKC => 1 };
-        let mut words: Vec<String> = Vec::new();
-        {
-            use fst::{IntoStreamer, Streamer, automaton::Str};
-            let aut = Str::new("").starts_with();
-            let mut stream = self.forward.set.search(aut).into_stream();
-            while let Some(bytes) = stream.next() {
-                let s = std::str::from_utf8(bytes)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("invalid utf8 in FST: {}", e)))?
-                    .to_string();
-                words.push(s);
-            }
-        }
-        let nodes: Vec<PackedNodeDisk> = self
-            .g_nodes
-            .iter()
-            .map(|n| PackedNodeDisk { offset: n.offset, degree: n.degree, flags: n.flags })
-            .collect();
-        let arcs: Vec<PackedArcDisk> = self
-            .g_arcs
-            .iter()
-            .map(|a| PackedArcDisk { label: a.label, target: a.target })
-            .collect();
-        let image = GaddagDiskImage { sep: self.sep.clone(), sep_id: self.sep_id, id2sym: self.id2sym.clone(), nodes, arcs, words, case_fold: self.forward.case_fold, norm_mode };
-        let mut buf = Vec::new();
-        ciborium::ser::into_writer(&image, &mut buf)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-        Ok(buf)
-    }
-
-    /// Load a serialized GADDAG CBOR file. Caller must supply the tokenizer that matches
-    /// how the automaton was built.
-    pub fn from_gaddag_file<P: AsRef<std::path::Path>>(
-        path: P,
-        tokenizer: TokenizerRef,
-    ) -> std::io::Result<Self> {
-        use std::io::BufReader;
-        let f = std::fs::File::open(path)?;
-        let r = BufReader::new(f);
-        let image: GaddagDiskImage =
-            ciborium::de::from_reader(r).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-        let g_nodes: Vec<PackedNode> = image
-            .nodes
-            .iter()
-            .map(|n| PackedNode { offset: n.offset, degree: n.degree, flags: n.flags })
-            .collect();
-        let g_arcs: Vec<PackedArc> = image
-            .arcs
-            .iter()
-            .map(|a| PackedArc { label: a.label, target: a.target })
-            .collect();
-        let mut sym2id: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
-        for (i, s) in image.id2sym.iter().enumerate() {
-            sym2id.insert(s.clone(), i as u16);
-        }
-        let norm = match image.norm_mode { 0 => NormalizationMode::NFC, 1 => NormalizationMode::NFKC, _ => NormalizationMode::NFC };
-        let forward_opts = DictionaryOptions { case_fold: image.case_fold, min_len: None, max_len: None, norm, tokenizer: tokenizer.clone() };
-        let forward = FstDictionary::from_words_opts(image.words, forward_opts.clone());
-        Ok(Self { forward, g_nodes, g_arcs, sym2id, id2sym: image.id2sym, sep: image.sep, sep_id: image.sep_id, tokenizer })
-    }
-
-    /// Load from CBOR bytes (e.g., embedded via `include_bytes!`).
-    pub fn from_gaddag_bytes<D: AsRef<[u8]>>(
-        bytes: D,
-        tokenizer: TokenizerRef,
-    ) -> std::io::Result<Self> {
-        let cursor = std::io::Cursor::new(bytes.as_ref());
-        let image: GaddagDiskImage =
-            ciborium::de::from_reader(cursor).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-        let g_nodes: Vec<PackedNode> = image
-            .nodes
-            .iter()
-            .map(|n| PackedNode { offset: n.offset, degree: n.degree, flags: n.flags })
-            .collect();
-        let g_arcs: Vec<PackedArc> = image
-            .arcs
-            .iter()
-            .map(|a| PackedArc { label: a.label, target: a.target })
-            .collect();
-        let mut sym2id: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
-        for (i, s) in image.id2sym.iter().enumerate() { sym2id.insert(s.clone(), i as u16); }
-        let norm = match image.norm_mode { 0 => NormalizationMode::NFC, 1 => NormalizationMode::NFKC, _ => NormalizationMode::NFC };
-        let forward_opts = DictionaryOptions { case_fold: image.case_fold, min_len: None, max_len: None, norm, tokenizer: tokenizer.clone() };
-        let forward = FstDictionary::from_words_opts(image.words, forward_opts.clone());
-        Ok(Self { forward, g_nodes, g_arcs, sym2id, id2sym: image.id2sym, sep: image.sep, sep_id: image.sep_id, tokenizer })
-    }
-
-    pub fn root(&self) -> usize {
-        0
-    }
-    pub fn sep_token(&self) -> &str {
-        &self.sep
-    }
-    pub fn step_token(&self, node: usize, token: &str) -> Option<usize> {
-        let &id = self.sym2id.get(token)?;
-        self.step_by_id(node, id)
-    }
-    #[inline]
-    fn step_by_id(&self, node: usize, sym_id: u16) -> Option<usize> {
-        let n = *self.g_nodes.get(node)?;
-        let slice = &self.g_arcs[n.offset as usize .. n.offset as usize + n.degree as usize];
-        let mut lo = 0usize;
-        let mut hi = slice.len();
-        while lo < hi {
-            let mid = (lo + hi) >> 1;
-            let m = &slice[mid];
-            if m.label < sym_id { lo = mid + 1; } else { hi = mid; }
-        }
-        if lo < slice.len() && slice[lo].label == sym_id { Some(slice[lo].target as usize) } else { None }
-    }
-
-    pub fn is_terminal(&self, node: usize) -> bool {
-        self.g_nodes.get(node).map(|n| n.terminal()).unwrap_or(false)
-    }
-
-    /// Enumerate simple rightward suffixes from an anchor with given left context using rack letters.
-    /// left_context is the contiguous string immediately to the left of anchor (not reversed).
-    /// Returns full words (left_context + suffix) that are in the dictionary.
-    pub fn enumerate_suffixes_simple(
-        &self,
-        left_context: &str,
-        rack: &mut std::collections::HashMap<String, usize>,
-        max_len: usize,
-    ) -> Vec<String> {
-        // compute pre node from left_context quickly
-        let mut node = self.root();
-        for token in self.tokenizer.segment(left_context).into_iter().rev() {
-            let &id = if let Some(id) = self.sym2id.get(&token) { id } else { return vec![]; };
-            if let Some(n2) = self.step_by_id(node, id) {
-                node = n2;
-            } else { return vec![]; }
-        }
-        if let Some(n2) = self.step_by_id(node, self.sep_id) { node = n2; } else { return vec![]; }
-
-        // DFS on packed arcs
-        let mut out = Vec::new();
-        fn dfs(
-            g: &GaddagDictionary,
-            node: usize,
-            built: &mut Vec<String>,
-            rack: &mut std::collections::HashMap<String, usize>,
-            out: &mut Vec<String>,
-            left_context: &str,
-            max_len: usize,
-        ) {
-            if built.len() >= max_len { return; }
-            if !built.is_empty() && g.is_terminal(node) {
-                let suffix = built.join("");
-                out.push(format!("{}{}", left_context, suffix));
-            }
-            let ninfo = &g.g_nodes[node];
-            let arcs = &g.g_arcs[ninfo.offset as usize .. ninfo.offset as usize + ninfo.degree as usize];
-            for arc in arcs {
-                if arc.label == g.sep_id { continue; }
-                let sym = &g.id2sym[arc.label as usize];
-                if rack.get(sym).copied().unwrap_or(0) > 0 {
-                    { let c = rack.get_mut(sym).unwrap(); *c -= 1; }
-                    built.push(sym.clone());
-                    dfs(g, arc.target as usize, built, rack, out, left_context, max_len);
-                    built.pop();
-                    { let c = rack.get_mut(sym).unwrap(); *c += 1; }
-                }
-            }
-        }
-        dfs(self, node, &mut Vec::new(), rack, &mut out, left_context, max_len);
-        out
-    }
-
-    pub fn step_symbol(&self, node: usize, sym: &str) -> Option<usize> {
-        self.step_token(node, sym)
-    }
-
-    pub fn tokenizer(&self) -> &TokenizerRef {
-        &self.tokenizer
-    }
-    // Small helpers for id-based paths
-    pub fn symbol_id(&self, sym: &str) -> Option<u16> { self.sym2id.get(sym).copied() }
-    pub fn id_to_symbol(&self, id: u16) -> &str { &self.id2sym[id as usize] }
-    pub fn alphabet_len(&self) -> usize { self.id2sym.len() }
-}
-
-pub struct GaddagCursor<'a> {
-    dict: &'a GaddagDictionary,
-    pre: usize,
-}
-
-pub struct GaddagRight<'a> {
-    dict: &'a GaddagDictionary,
-    node: usize,
-}
-
-impl<'a> GaddagCursor<'a> {
-    pub fn new(dict: &'a GaddagDictionary, left_context: &str) -> Option<Self> {
-        let mut node = dict.root();
-        for token in dict.tokenizer.segment(left_context).into_iter().rev() {
-            node = dict.step_token(node, &token)?;
-        }
-        Some(Self { dict, pre: node })
-    }
-    // Fast path without tokenization
-    pub fn new_from_tokens(dict: &'a GaddagDictionary, left_tokens: &[u16]) -> Option<Self> {
-        let mut node = dict.root();
-        for &id in left_tokens.iter().rev() {
-            node = dict.step_by_id(node, id)?;
-        }
-        Some(Self { dict, pre: node })
-    }
-    pub fn step_left(&self, sym: &str) -> Option<Self> {
-        let n = self.dict.step_token(self.pre, sym)?;
-        Some(Self {
-            dict: self.dict,
-            pre: n,
-        })
-    }
-    pub fn branch_right(&self) -> Option<GaddagRight<'a>> {
-        let n = self.dict.step_token(self.pre, self.dict.sep_token())?;
-        Some(GaddagRight {
-            dict: self.dict,
-            node: n,
-        })
-    }
-    pub fn pre_node(&self) -> usize {
-        self.pre
-    }
-}
-
-impl<'a> GaddagRight<'a> {
-    pub fn step(&self, sym: &str) -> Option<Self> {
-        let n = self.dict.step_token(self.node, sym)?;
-        Some(Self {
-            dict: self.dict,
-            node: n,
-        })
-    }
-    // Step by symbol id (fast path)
-    pub fn step_id(&self, sym_id: u16) -> Option<Self> {
-        let n = self.dict.step_by_id(self.node, sym_id)?;
-        Some(Self { dict: self.dict, node: n })
-    }
-    pub fn is_terminal(&self) -> bool {
-        self.dict.is_terminal(self.node)
-    }
-    pub fn node(&self) -> usize {
-        self.node
-    }
-}
-
-impl Dictionary for GaddagDictionary {
-    fn contains(&self, word: &str) -> bool {
-        self.forward.contains(word)
-    }
-    fn has_prefix(&self, prefix: &str) -> bool {
-        self.forward.has_prefix(prefix)
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> {
-        Box::new(self.clone())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct DictionaryOptions { /* moved */ }
-impl Default for DictionaryOptions { fn default() -> Self { unreachable!("moved") } }
-*/
 
 // -------- Tests --------
 
@@ -4263,416 +2772,6 @@ mod tests {
         // main word AB: A(1 existing) + B(3*3=9) = 10
         assert_eq!(sc2.main_score, 10);
         assert!(sc2.total >= 10);
-    }
-
-    #[test]
-    fn dictionary_normalization_and_casefold() {
-        // composed vs decomposed
-        let composed = "Café".to_string();
-        let decomposed = "Cafe\u{301}".nfc().collect::<String>();
-        let dict = SetDictionary::from_words(vec![decomposed.clone()], false);
-        assert!(dict.contains(&composed));
-        // case fold
-        let dict_cf = SetDictionary::from_words(vec!["café".to_string()], true);
-        assert!(dict_cf.contains("CAFÉ"));
-        let dict_no = SetDictionary::from_words(vec!["café".to_string()], false);
-        assert!(!dict_no.contains("CAFÉ"));
-    }
-
-    #[test]
-    fn dictionary_loader_from_file() {
-        // Create a temporary word list
-        let dir = std::env::temp_dir();
-        let path = dir.join("tiletangle_dict_test.txt");
-        let content = "# sample\nHELLO\nworld\n \nCafé\n";
-        std::fs::write(&path, content).unwrap();
-        let dict = SetDictionary::from_file(
-            &path,
-            DictionaryOptions {
-                case_fold: true,
-                min_len: Some(2),
-                max_len: None,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert!(dict.contains("hello"));
-        assert!(dict.contains("WORLD"));
-        assert!(dict.contains("cafe\u{301}")); // decomposed
-        assert!(!dict.contains("x"));
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn fst_dictionary_contains_and_prefix() {
-        let dict = FstDictionary::from_words(
-            vec!["AB".to_string(), "ABC".to_string(), "BEE".to_string()],
-            true,
-        );
-        assert!(dict.contains("ab"));
-        assert!(dict.has_prefix("ab"));
-        assert!(dict.contains("abc"));
-        assert!(!dict.contains("abd"));
-        assert!(!dict.has_prefix("zz"));
-    }
-
-    #[test]
-    fn gaddag_dictionary_basic() {
-        let dict =
-            GaddagDictionary::from_words(vec!["CARE".to_string(), "CARES".to_string()], true);
-        assert!(dict.contains("care"));
-        assert!(dict.has_prefix("ca"));
-    }
-
-    #[test]
-    fn gaddag_forms_for_cares() {
-        // Validate GADDAG encoded forms exist in the internal trie
-        let gd = GaddagDictionary::from_words(vec!["CARES".to_string()], true);
-        // helper to check presence of a sequence in internal g_nodes
-        fn has_seq(gd: &GaddagDictionary, s: &str) -> bool {
-            let mut node = gd.root();
-            for token in gd.tokenizer().segment(s) {
-                if let Some(nxt) = gd.step_token(node, &token) { node = nxt; } else { return false; }
-            }
-            gd.is_terminal(node)
-        }
-        // Our builder includes split positions 0..=n, so it includes "+CARES"
-        assert!(has_seq(&gd, "+cares"));
-        assert!(has_seq(&gd, "c+ares"));
-        assert!(has_seq(&gd, "ac+res"));
-        assert!(has_seq(&gd, "rac+es"));
-        assert!(has_seq(&gd, "erac+s"));
-        assert!(has_seq(&gd, "serac+"));
-    }
-
-    #[test]
-    fn gaddag_id_cursor_and_step_id() {
-        let gd = GaddagDictionary::from_words(vec!["AB".to_string()], true);
-        let a = gd.symbol_id("a").expect("a id");
-        let b = gd.symbol_id("b").expect("b id");
-        let cur = GaddagCursor::new_from_tokens(&gd, &[a]).expect("cursor");
-        let right = cur.branch_right().expect("branch");
-        let r2 = right.step_id(b).expect("step b");
-        assert!(r2.is_terminal());
-    }
-
-    #[test]
-    fn gaddag_enumerate_suffixes_simple_ab() {
-        let gd = GaddagDictionary::from_words(vec!["ab".to_string()], true);
-        let mut rack: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::from([("a".to_string(), 1usize), ("b".to_string(), 1usize)]);
-        let words = gd.enumerate_suffixes_simple("", &mut rack, 8);
-        assert!(words.contains(&"ab".to_string()));
-    }
-
-    #[test]
-    fn gaddag_normalization_and_casefold() {
-        // composed vs decomposed + casefold behavior
-        let composed = "Café".to_string();
-        let decomposed = "Cafe\u{301}".nfc().collect::<String>();
-        let gd = GaddagDictionary::from_words(vec![decomposed.clone()], true);
-        assert!(gd.contains(&composed));
-        assert!(gd.has_prefix("caf"));
-    }
-
-    #[test]
-    fn dawg_dictionary_contains_and_prefix() {
-        let dict = DawgDictionary::from_words(
-            vec!["AB".to_string(), "ABC".to_string(), "BEE".to_string()],
-            true,
-        );
-        assert!(dict.contains("ab"));
-        assert!(dict.has_prefix("ab"));
-        assert!(dict.contains("abc"));
-        assert!(!dict.contains("abd"));
-        assert!(!dict.has_prefix("zz"));
-    }
-
-    #[test]
-    fn dawg_normalization_and_casefold() {
-        let composed = "Café".to_string();
-        let decomposed = "Cafe\u{301}".nfc().collect::<String>();
-        let dict_cf = DawgDictionary::from_words(vec![decomposed.clone()], true);
-        assert!(dict_cf.contains(&composed));
-        assert!(dict_cf.has_prefix("caf"));
-        let dict_no = DawgDictionary::from_words(vec!["café".to_string()], false);
-        assert!(!dict_no.contains("CAFÉ"));
-    }
-
-    #[test]
-    fn nfkc_contains_ligature_variant() {
-        // Build dict with NFC words; use NFKC mode so ligatures map to base letters
-        let opts = DictionaryOptions {
-            case_fold: false,
-            min_len: None,
-            max_len: None,
-            norm: NormalizationMode::NFKC,
-            tokenizer: TokenizerRef::default(),
-        };
-        let dict = FstDictionary::from_words_opts(vec!["coffee".to_string()], opts);
-        let ligature = "coﬀee"; // contains U+FB00 LIGATURE FF
-        assert!(dict.contains(ligature));
-        // Default NFC dictionary should not match the ligature
-        let dict_nfc = FstDictionary::from_words(vec!["coffee".to_string()], false);
-        assert!(!dict_nfc.contains(ligature));
-    }
-
-    #[test]
-    fn nfkc_move_accepts_halfwidth() {
-        use std::collections::HashMap;
-        let tileset = Tileset {
-            tile_kinds: vec![TileKind {
-                id: "HALFPA".into(),
-                symbol: "ﾊﾟ".into(),
-                score: 3,
-                is_blank: false,
-                aliases: vec![],
-            }],
-        };
-        let mut counts = HashMap::new();
-        counts.insert("HALFPA".to_string(), 5);
-        let cfg = GameConfig {
-            tileset,
-            rack_size: 7,
-            board_layout: RectBoardLayout {
-                width: 5,
-                height: 5,
-            },
-            ruleset_id: "cross".into(),
-            dictionary_id: "jp".into(),
-            rng_seed: 3,
-            tile_counts: counts,
-        };
-        let mut st = GameState::new(&cfg, 2).unwrap();
-        let opts = DictionaryOptions {
-            case_fold: false,
-            min_len: None,
-            max_len: None,
-            norm: NormalizationMode::NFKC,
-            tokenizer: TokenizerRef::default(),
-        };
-        st.dictionary = Some(Box::new(FstDictionary::from_words_opts(
-            vec!["パ".to_string()],
-            opts,
-        )));
-        let rules = CrosswordRules {
-            free_word_mode: false,
-            ..Default::default()
-        };
-        let center = CrosswordRules::center_cell(&st.board.geom);
-        let mv = MoveDraft {
-            placements: vec![(
-                center,
-                Tile {
-                    kind_id: "HALFPA".into(),
-                    mark: None,
-                },
-            )],
-        };
-        let validated = rules.validate(&st, &mv).unwrap();
-        let sc = rules.score(&st, &validated);
-        assert!(sc.main_score > 0);
-        assert_eq!(sc.main_word, "ﾊﾟ");
-    }
-
-    #[test]
-    fn custom_tokenizer_groups_qu() {
-        use std::sync::Arc;
-        struct QuTokenizer;
-        impl Tokenizer for QuTokenizer {
-            fn segment(&self, text: &str) -> Vec<String> {
-                let mut out = Vec::new();
-                let mut chars = text.chars().peekable();
-                while let Some(ch) = chars.next() {
-                    if ch == 'q' && chars.peek() == Some(&'u') {
-                        chars.next();
-                        out.push("qu".to_string());
-                    } else {
-                        out.push(ch.to_string());
-                    }
-                }
-                out
-            }
-        }
-        let tokenizer = TokenizerRef::new(Arc::new(QuTokenizer));
-        let opts = DictionaryOptions {
-            tokenizer: tokenizer.clone(),
-            ..Default::default()
-        };
-        let dawgd = DawgDictionary::from_words_opts(vec!["squid".to_string()], opts.clone());
-        assert!(dawgd.has_prefix("squ"));
-        assert!(dawgd.contains("squid"));
-        assert!(!dawgd.has_prefix("sqz"));
-        let gd = GaddagDictionary::from_words_opts(vec!["qu".to_string()], opts);
-        assert!(gd.step_symbol(gd.root(), "qu").is_some());
-    }
-
-    #[test]
-    fn gaddag_serialize_roundtrip_default() {
-        use std::path::PathBuf;
-        let gd = GaddagDictionary::from_words(vec!["CARE".to_string(), "CARES".to_string()], true);
-        let path = PathBuf::from(std::env::temp_dir()).join("gaddag_test_default.cbor");
-        gd.to_gaddag_file(&path).unwrap();
-        let gd2 = GaddagDictionary::from_gaddag_file(&path, TokenizerRef::default()).unwrap();
-        // Case-folded lookup via forward dictionary
-        assert!(gd2.contains("cares"));
-        assert!(gd2.contains("CARE"));
-        // Basic membership checks are sufficient for roundtrip integrity
-    }
-
-    #[test]
-    fn gaddag_serialize_roundtrip_custom_tokenizer() {
-        use std::sync::Arc;
-        struct QuTokenizer;
-        impl Tokenizer for QuTokenizer {
-            fn segment(&self, text: &str) -> Vec<String> {
-                let mut out = Vec::new();
-                let mut chars = text.chars().peekable();
-                while let Some(ch) = chars.next() {
-                    if ch == 'q' && chars.peek() == Some(&'u') {
-                        chars.next();
-                        out.push("qu".to_string());
-                    } else {
-                        out.push(ch.to_string());
-                    }
-                }
-                out
-            }
-        }
-        let tokenizer = TokenizerRef::new(Arc::new(QuTokenizer));
-        let opts = DictionaryOptions {
-            tokenizer: tokenizer.clone(),
-            ..Default::default()
-        };
-        let gd = GaddagDictionary::from_words_opts(vec!["qu".to_string()], opts);
-        let p = std::env::temp_dir().join("gaddag_test_qu.cbor");
-        gd.to_gaddag_file(&p).unwrap();
-        let gd2 = GaddagDictionary::from_gaddag_file(&p, tokenizer).unwrap();
-        assert!(gd2.step_symbol(gd2.root(), "qu").is_some());
-    }
-
-    #[test]
-    fn gaddag_bytes_roundtrip() {
-        let gd = GaddagDictionary::from_words(vec!["AB".to_string(), "ABC".to_string()], true);
-        let bytes = gd.to_gaddag_bytes().unwrap();
-        let gd2 = GaddagDictionary::from_gaddag_bytes(bytes, TokenizerRef::default()).unwrap();
-        assert!(gd2.contains("ab"));
-        assert!(gd2.contains("abc"));
-        // Transition checks are validated in non-serialized tests
-    }
-
-    #[test]
-    fn plugin_pipeline_composition_and_score_bonus() {
-        use std::collections::HashMap;
-        let tileset = Tileset {
-            tile_kinds: vec![
-                TileKind {
-                    id: "A".into(),
-                    symbol: "A".into(),
-                    score: 1,
-                    is_blank: false,
-                    aliases: vec![],
-                },
-                TileKind {
-                    id: "B".into(),
-                    symbol: "B".into(),
-                    score: 3,
-                    is_blank: false,
-                    aliases: vec![],
-                },
-            ],
-        };
-        let mut counts = HashMap::new();
-        counts.insert("A".to_string(), 10);
-        counts.insert("B".to_string(), 10);
-        let cfg = GameConfig {
-            tileset,
-            rack_size: 7,
-            board_layout: RectBoardLayout {
-                width: 5,
-                height: 5,
-            },
-            ruleset_id: "cross".into(),
-            dictionary_id: "en".into(),
-            rng_seed: 1,
-            tile_counts: counts,
-        };
-        let mut st = GameState::new(&cfg, 2).unwrap();
-        st.dictionary = Some(Box::new(FstDictionary::from_words(
-            vec!["AB".to_string()],
-            true,
-        )));
-        let base = CrosswordRules {
-            free_word_mode: false,
-            ..Default::default()
-        };
-        let rules = PluginRules::new(
-            base,
-            vec![
-                Box::new(BasicActionsPlugin),
-                Box::new(ScoreBonusPlugin { bonus: 5 }),
-            ],
-        );
-        // Actions equivalent to placing AB on center row
-        let c = CrosswordRules::center_cell(&st.board.geom);
-        let cc = st.board.geom.from_cell_id(c).unwrap();
-        let mut mv = UserMove::default();
-        mv.actions.push(Action::Place {
-            x: cc.x,
-            y: cc.y,
-            kind_id: "A".into(),
-            mark: None,
-        });
-        mv.actions.push(Action::Place {
-            x: cc.x + 1,
-            y: cc.y,
-            kind_id: "B".into(),
-            mark: None,
-        });
-        let v = rules.validate_user_move(&st, mv).unwrap();
-        let sc = rules.score_user_move(&st, &v);
-        // base score: AB => 1 + 3 = 4; plugin bonus adds +5
-        assert_eq!(sc.total, 9);
-        rules.commit_user_move(&mut st, v, &sc).unwrap();
-    }
-
-    #[test]
-    fn plugin_rejects_unsupported_action() {
-        let tileset = Tileset {
-            tile_kinds: vec![TileKind {
-                id: "A".into(),
-                symbol: "A".into(),
-                score: 1,
-                is_blank: false,
-                aliases: vec![],
-            }],
-        };
-        let mut counts = std::collections::HashMap::new();
-        counts.insert("A".to_string(), 10);
-        let cfg = GameConfig {
-            tileset,
-            rack_size: 7,
-            board_layout: RectBoardLayout {
-                width: 3,
-                height: 3,
-            },
-            ruleset_id: "cross".into(),
-            dictionary_id: "en".into(),
-            rng_seed: 1,
-            tile_counts: counts,
-        };
-        let st = GameState::new(&cfg, 2).unwrap();
-        let base = CrosswordRules::default();
-        let rules = PluginRules::new(base, vec![Box::new(BasicActionsPlugin)]);
-        let mut mv = UserMove::default();
-        mv.actions.push(Action::SwapRack {
-            give: vec!["A".into()],
-        });
-        let err = rules.validate_user_move(&st, mv).unwrap_err();
-        match err {
-            EngineError::Config(_) => {}
-            _ => panic!("expected config error"),
-        }
     }
 
     #[test]
@@ -5476,243 +3575,5 @@ mod tests {
         let v2 = rules.validate(&st, &mv2).unwrap();
         let sc2 = rules.score(&st, &v2);
         assert!(sc2.total > 0);
-    }
-
-    #[test]
-    fn rtl_hebrew_word_validates() {
-        use std::collections::HashMap;
-        let tileset = Tileset {
-            tile_kinds: vec![
-                TileKind {
-                    id: "SHIN".into(),
-                    symbol: "ש".into(),
-                    score: 1,
-                    is_blank: false,
-                    aliases: vec![],
-                },
-                TileKind {
-                    id: "LAMED".into(),
-                    symbol: "ל".into(),
-                    score: 1,
-                    is_blank: false,
-                    aliases: vec![],
-                },
-                TileKind {
-                    id: "VAV".into(),
-                    symbol: "ו".into(),
-                    score: 1,
-                    is_blank: false,
-                    aliases: vec![],
-                },
-                TileKind {
-                    id: "MEMF".into(),
-                    symbol: "ם".into(),
-                    score: 1,
-                    is_blank: false,
-                    aliases: vec![],
-                },
-            ],
-        };
-        let mut counts = HashMap::new();
-        counts.insert("SHIN".to_string(), 4);
-        counts.insert("LAMED".to_string(), 4);
-        counts.insert("VAV".to_string(), 4);
-        counts.insert("MEMF".to_string(), 4);
-        let cfg = GameConfig {
-            tileset,
-            rack_size: 7,
-            board_layout: RectBoardLayout {
-                width: 7,
-                height: 7,
-            },
-            ruleset_id: "cross".into(),
-            dictionary_id: "he".into(),
-            rng_seed: 7,
-            tile_counts: counts,
-        };
-        let mut st = GameState::new(&cfg, 2).unwrap();
-        st.dictionary = Some(Box::new(FstDictionary::from_words(
-            vec!["שלום".to_string()],
-            false,
-        )));
-        let rules = CrosswordRules {
-            free_word_mode: false,
-            reading_dir: ReadingDirection::RTL,
-            ..Default::default()
-        };
-        let center = CrosswordRules::center_cell(&st.board.geom);
-        let base = st.board.geom.from_cell_id(center).unwrap();
-        let placements = vec![
-            (
-                st.board
-                    .geom
-                    .to_cell_id(Coord2D {
-                        x: base.x - 2,
-                        y: base.y,
-                    })
-                    .unwrap(),
-                Tile {
-                    kind_id: "MEMF".into(),
-                    mark: None,
-                },
-            ),
-            (
-                st.board
-                    .geom
-                    .to_cell_id(Coord2D {
-                        x: base.x - 1,
-                        y: base.y,
-                    })
-                    .unwrap(),
-                Tile {
-                    kind_id: "VAV".into(),
-                    mark: None,
-                },
-            ),
-            (
-                center,
-                Tile {
-                    kind_id: "LAMED".into(),
-                    mark: None,
-                },
-            ),
-            (
-                st.board
-                    .geom
-                    .to_cell_id(Coord2D {
-                        x: base.x + 1,
-                        y: base.y,
-                    })
-                    .unwrap(),
-                Tile {
-                    kind_id: "SHIN".into(),
-                    mark: None,
-                },
-            ),
-        ];
-        let mv = MoveDraft { placements };
-        let validated = rules.validate(&st, &mv).unwrap();
-        let sc = rules.score(&st, &validated);
-        assert_eq!(sc.main_word, "שלום");
-        assert!(sc.main_score > 0);
-    }
-
-    #[test]
-    fn rtl_arabic_word_validates() {
-        use std::collections::HashMap;
-        let tileset = Tileset {
-            tile_kinds: vec![
-                TileKind {
-                    id: "SEEN".into(),
-                    symbol: "س".into(),
-                    score: 1,
-                    is_blank: false,
-                    aliases: vec![],
-                },
-                TileKind {
-                    id: "LAM".into(),
-                    symbol: "ل".into(),
-                    score: 1,
-                    is_blank: false,
-                    aliases: vec![],
-                },
-                TileKind {
-                    id: "ALEF".into(),
-                    symbol: "ا".into(),
-                    score: 1,
-                    is_blank: false,
-                    aliases: vec![],
-                },
-                TileKind {
-                    id: "MEEM".into(),
-                    symbol: "م".into(),
-                    score: 1,
-                    is_blank: false,
-                    aliases: vec![],
-                },
-            ],
-        };
-        let mut counts = HashMap::new();
-        counts.insert("SEEN".to_string(), 4);
-        counts.insert("LAM".to_string(), 4);
-        counts.insert("ALEF".to_string(), 4);
-        counts.insert("MEEM".to_string(), 4);
-        let cfg = GameConfig {
-            tileset,
-            rack_size: 7,
-            board_layout: RectBoardLayout {
-                width: 7,
-                height: 7,
-            },
-            ruleset_id: "cross".into(),
-            dictionary_id: "ar".into(),
-            rng_seed: 11,
-            tile_counts: counts,
-        };
-        let mut st = GameState::new(&cfg, 2).unwrap();
-        st.dictionary = Some(Box::new(FstDictionary::from_words(
-            vec!["سلام".to_string()],
-            false,
-        )));
-        let rules = CrosswordRules {
-            free_word_mode: false,
-            reading_dir: ReadingDirection::RTL,
-            ..Default::default()
-        };
-        let center = CrosswordRules::center_cell(&st.board.geom);
-        let base = st.board.geom.from_cell_id(center).unwrap();
-        let placements = vec![
-            (
-                st.board
-                    .geom
-                    .to_cell_id(Coord2D {
-                        x: base.x - 2,
-                        y: base.y,
-                    })
-                    .unwrap(),
-                Tile {
-                    kind_id: "MEEM".into(),
-                    mark: None,
-                },
-            ),
-            (
-                st.board
-                    .geom
-                    .to_cell_id(Coord2D {
-                        x: base.x - 1,
-                        y: base.y,
-                    })
-                    .unwrap(),
-                Tile {
-                    kind_id: "ALEF".into(),
-                    mark: None,
-                },
-            ),
-            (
-                center,
-                Tile {
-                    kind_id: "LAM".into(),
-                    mark: None,
-                },
-            ),
-            (
-                st.board
-                    .geom
-                    .to_cell_id(Coord2D {
-                        x: base.x + 1,
-                        y: base.y,
-                    })
-                    .unwrap(),
-                Tile {
-                    kind_id: "SEEN".into(),
-                    mark: None,
-                },
-            ),
-        ];
-        let mv = MoveDraft { placements };
-        let validated = rules.validate(&st, &mv).unwrap();
-        let sc = rules.score(&st, &validated);
-        assert_eq!(sc.main_word, "سلام");
-        assert!(sc.main_score > 0);
     }
 }
