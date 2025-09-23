@@ -108,7 +108,7 @@ impl GaddagDictionary {
         // Build small symbol table
         let mut sym2id: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
         let mut id2sym: Vec<String> = Vec::new();
-        let mut intern = |sym: &str,
+        let intern = |sym: &str,
                           map: &mut std::collections::HashMap<String, u16>,
                           vec: &mut Vec<String>| -> u16 {
             if let Some(&id) = map.get(sym) { return id; }
@@ -447,7 +447,7 @@ impl Dictionary for GaddagDictionary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::text::{TokenizerRef, Tokenizer, NormalizationMode};
+    use crate::text::{TokenizerRef, Tokenizer};
 
     #[test]
     fn gaddag_dictionary_basic() {

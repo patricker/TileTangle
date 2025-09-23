@@ -100,7 +100,7 @@ mod tests {
         dict::{FstDictionary},
         game::{GameConfig, RectBoardLayout},
         inventory::{Tileset},
-        TileKind, Tile, Coord2D,
+        TileKind,
     };
 
     #[test]

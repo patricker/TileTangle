@@ -801,3 +801,99 @@ mod tests {
         assert!(sc.main_score > 0);
     }
 }
+
+#[cfg(test)]
+mod more_rule_tests {
+    use super::*;
+    use crate::{dict::{FstDictionary, SetDictionary}, GameConfig, RectBoardLayout};
+    use std::collections::{HashMap, BTreeSet};
+
+    #[test]
+    fn first_move_must_cover_center_and_contiguous() {
+        let tileset = Tileset { tile_kinds: vec![TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] }] };
+        let mut counts = HashMap::new(); counts.insert("A".to_string(), 10);
+        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 5, height: 5 }, ruleset_id: "crossword_classic".into(), dictionary_id: "en".into(), rng_seed: 1, tile_counts: counts };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        let rules = CrosswordRules::default();
+        let off = st.board.geom.to_cell_id(Coord2D { x: 0, y: 0 }).unwrap();
+        let mv = MoveDraft { placements: vec![(off, Tile { kind_id: "A".into(), mark: None })] };
+        assert!(rules.validate(&st, &mv).is_err());
+        let cen = CrosswordRules::center_cell(&st.board.geom);
+        let mv = MoveDraft { placements: vec![(cen, Tile { kind_id: "A".into(), mark: None })] };
+        let v = rules.validate(&st, &mv).unwrap();
+        let sc = rules.score(&st, &v);
+        assert!(sc.total >= 1);
+        rules.commit(&mut st, v, &sc).unwrap();
+    }
+
+
+    #[test]
+    fn emoji_grapheme_word_scoring() {
+        let emoji = "👩‍🚀";
+        let tileset = Tileset { tile_kinds: vec![
+            TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
+            TileKind { id: "EM".into(), symbol: emoji.into(), score: 5, is_blank: false, aliases: vec![] },
+        ]};
+        let mut counts = HashMap::new(); counts.insert("A".to_string(), 10); counts.insert("EM".to_string(), 10);
+        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 5, height: 5 }, ruleset_id: "cross".into(), dictionary_id: "en".into(), rng_seed: 11, tile_counts: counts };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        let word = format!("A{}", emoji);
+        st.dictionary = Some(Box::new(FstDictionary::from_words(vec![word.clone()], false)));
+        let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
+        let c = CrosswordRules::center_cell(&st.board.geom);
+        let cc = st.board.geom.from_cell_id(c).unwrap();
+        let right = st.board.geom.to_cell_id(Coord2D { x: cc.x + 1, y: cc.y }).unwrap();
+        let mv = MoveDraft { placements: vec![(c, Tile { kind_id: "A".into(), mark: None }), (right, Tile { kind_id: "EM".into(), mark: None })] };
+        let v = rules.validate(&st, &mv).unwrap();
+        let sc = rules.score(&st, &v);
+        assert_eq!(sc.main_word, word);
+        assert_eq!(sc.total, 1 + 5);
+    }
+
+    #[test]
+    fn emoji_skin_tone_grapheme_mixed_with_letter() {
+        let thumbs = "👍🏽";
+        let tileset = Tileset { tile_kinds: vec![
+            TileKind { id: "EM2".into(), symbol: thumbs.into(), score: 4, is_blank: false, aliases: vec![] },
+            TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
+        ]};
+        let mut counts = HashMap::new(); counts.insert("EM2".to_string(), 10); counts.insert("A".to_string(), 10);
+        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 5, height: 5 }, ruleset_id: "cross".into(), dictionary_id: "en".into(), rng_seed: 13, tile_counts: counts };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        let word = format!("{}A", thumbs);
+        st.dictionary = Some(Box::new(FstDictionary::from_words(vec![word.clone()], false)));
+        let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
+        let c = CrosswordRules::center_cell(&st.board.geom);
+        let cc = st.board.geom.from_cell_id(c).unwrap();
+        let right = st.board.geom.to_cell_id(Coord2D { x: cc.x + 1, y: cc.y }).unwrap();
+        let mv = MoveDraft { placements: vec![(c, Tile { kind_id: "EM2".into(), mark: None }), (right, Tile { kind_id: "A".into(), mark: None })] };
+        let v = rules.validate(&st, &mv).unwrap();
+        let sc = rules.score(&st, &v);
+        assert_eq!(sc.main_word, word);
+        assert_eq!(sc.total, 4 + 1);
+    }
+
+
+    #[test]
+    fn dictionary_integration_in_rules() {
+        let tileset = Tileset { tile_kinds: vec![
+            TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
+            TileKind { id: "B".into(), symbol: "B".into(), score: 3, is_blank: false, aliases: vec![] },
+        ]};
+        let mut counts = HashMap::new(); counts.insert("A".to_string(), 10); counts.insert("B".to_string(), 10);
+        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 5, height: 5 }, ruleset_id: "cross".into(), dictionary_id: "en".into(), rng_seed: 5, tile_counts: counts };
+        let mut st = GameState::new(&cfg, 2).unwrap();
+        st.dictionary = Some(Box::new(SetDictionary::from_words(vec!["AB".to_string()], true)));
+        let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
+        let c = CrosswordRules::center_cell(&st.board.geom);
+        let mv1 = MoveDraft { placements: vec![(c, Tile { kind_id: "A".into(), mark: None })] };
+        let v1 = rules.validate(&st, &mv1).unwrap();
+        let sc1 = rules.score(&st, &v1);
+        assert_eq!(sc1.main_score, -1);
+        let right = st.board.geom.to_cell_id(Coord2D { x: st.board.geom.from_cell_id(c).unwrap().x + 1, y: st.board.geom.from_cell_id(c).unwrap().y }).unwrap();
+        let mv2 = MoveDraft { placements: vec![(c, Tile { kind_id: "A".into(), mark: None }), (right, Tile { kind_id: "B".into(), mark: None })] };
+        let v2 = rules.validate(&st, &mv2).unwrap();
+        let sc2 = rules.score(&st, &v2);
+        assert!(sc2.total > 0);
+    }
+}

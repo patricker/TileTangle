@@ -35,3 +35,15 @@ impl<G: BoardGeometry> Board<G> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bonus_default_is_identity() {
+        let b = Bonus::default();
+        assert_eq!(b.letter_mul, 1);
+        assert_eq!(b.word_mul, 1);
+        assert!(b.tags.is_empty());
+    }
+}

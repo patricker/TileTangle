@@ -146,3 +146,34 @@ pub struct GraphOverlay {
     pub nodes: Vec<Coord2D>,
     pub edges: Vec<(usize, usize, String)>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(w: u32, h: u32) -> RectGridGeometry { RectGridGeometry::new(w, h) }
+
+    #[test]
+    fn geometry_neighbors_edges_and_corners() {
+        let g = rect(3, 3);
+        let center = g.to_cell_id(Coord2D { x: 1, y: 1 }).unwrap();
+        assert_eq!(g.neighbors(center).len(), 4);
+        let c00 = g.to_cell_id(Coord2D { x: 0, y: 0 }).unwrap();
+        assert_eq!(g.neighbors(c00).len(), 2);
+        let e01 = g.to_cell_id(Coord2D { x: 0, y: 1 }).unwrap();
+        assert_eq!(g.neighbors(e01).len(), 3);
+    }
+
+    #[test]
+    fn index_roundtrip() {
+        let g = rect(10, 7);
+        for y in 0..7i32 {
+            for x in 0..10i32 {
+                let c = Coord2D { x, y };
+                let id = g.to_cell_id(c).unwrap();
+                let back = g.from_cell_id(id).unwrap();
+                assert_eq!(back, c);
+            }
+        }
+    }
+}

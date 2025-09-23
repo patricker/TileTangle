@@ -29,7 +29,7 @@ pub enum GameEventKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GameEvent {
+pub struct GameEvent { 
     pub turn: u32,
     pub player: usize,
     pub kind: GameEventKind,
@@ -53,3 +53,7 @@ pub struct GameConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MoveDraft { pub placements: Vec<(CellId, Tile)> }
+
+// Split: GameState and its impl moved to a submodule.
+mod state;
+pub use state::GameState;

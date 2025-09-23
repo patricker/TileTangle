@@ -13,7 +13,7 @@ pub struct DawgDictionary {
 }
 
 #[derive(Debug, Clone, Default)]
-struct DawgNode {
+pub(crate) struct DawgNode {
     edges: std::collections::HashMap<String, usize>,
     terminal: bool,
 }
