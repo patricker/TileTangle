@@ -806,7 +806,7 @@ mod tests {
 mod more_rule_tests {
     use super::*;
     use crate::{dict::{FstDictionary, SetDictionary}, GameConfig, RectBoardLayout};
-    use std::collections::{HashMap, BTreeSet};
+    use std::collections::HashMap;
 
     #[test]
     fn first_move_must_cover_center_and_contiguous() {

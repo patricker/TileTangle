@@ -1,4 +1,4 @@
-//! TileTangle Engine — Core Model (Phase 1)
+//! TileTangle Engine — Core Model
 
 use serde::{Deserialize, Serialize};
 //

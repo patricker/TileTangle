@@ -42,6 +42,15 @@ impl FstDictionary {
         let set = fst::Set::new(bytes.as_ref().to_vec())?;
         Ok(Self { set, case_fold, norm: NormalizationMode::NFC })
     }
+
+    pub fn from_bytes_with_norm<D: AsRef<[u8]>>(
+        bytes: D,
+        case_fold: bool,
+        norm: NormalizationMode,
+    ) -> Result<Self, fst::Error> {
+        let set = fst::Set::new(bytes.as_ref().to_vec())?;
+        Ok(Self { set, case_fold, norm })
+    }
     pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
     where
         I: IntoIterator<Item = S>,

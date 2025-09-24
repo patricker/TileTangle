@@ -27,6 +27,8 @@ unicode-segmentation = "1"
 ciborium = { version = "0.2", default-features = true }
 rayon = { version = "1", optional = true }
 wide = { version = "0.7", optional = true }
+flate2 = { version = "1", features = ["rust_backend"], default-features = false }
+zstd = { version = "0.13", default-features = true }
 
 [features]
 default = []

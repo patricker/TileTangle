@@ -97,3 +97,5 @@ cargo run --bin gaddag_cache -- \
 Details:
 - `docs/static/dictionaries/TWL06.fst` is an FST set generated from the text list.
 - `docs/static/dictionaries/TWL06.gaddag.cbor` is a CBOR snapshot of the GADDAG automaton with metadata for normalized words.
+- The GADDAG image stores packed nodes/arcs with a compact symbol table; load it with a `TokenizerRef` to enable grapheme‑aware traversal.
+  The loader auto‑detects gzip (`.gz`) and Zstandard (`.zst`) compression.

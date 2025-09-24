@@ -1,6 +1,7 @@
 use std::any::Any;
+use std::io::Read;
 
-use fst::Automaton;
+// use fst::Automaton; // no longer needed here
 use serde::{Deserialize, Serialize};
 
 use crate::{normalize_with_mode, NormalizationMode, TokenizerRef};
@@ -67,13 +68,38 @@ struct GaddagDiskImage {
     id2sym: Vec<String>,
     nodes: Vec<PackedNodeDisk>,
     arcs: Vec<PackedArcDisk>,
-    words: Vec<String>,
+    // Compact forward dictionary bytes (FST Set), replaces the large words list
+    fst_bytes: Vec<u8>,
     case_fold: bool,
     // 0 = NFC, 1 = NFKC
     norm_mode: u8,
 }
 
 impl GaddagDictionary {
+    fn decode_image_from_bytes(bytes: &[u8]) -> std::io::Result<GaddagDiskImage> {
+        // gzip magic: 1f 8b; zstd magic: 28 b5 2f fd
+        if bytes.len() >= 2 && bytes[0] == 0x1F && bytes[1] == 0x8B {
+            let mut dec = flate2::read::GzDecoder::new(std::io::Cursor::new(bytes));
+            let mut out = Vec::new();
+            dec.read_to_end(&mut out)?;
+            let cur = std::io::Cursor::new(out);
+            let image: GaddagDiskImage = ciborium::de::from_reader(cur)
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+            return Ok(image);
+        }
+        if bytes.len() >= 4 && bytes[0] == 0x28 && bytes[1] == 0xB5 && bytes[2] == 0x2F && bytes[3] == 0xFD {
+            let out = zstd::stream::decode_all(std::io::Cursor::new(bytes))
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+            let cur = std::io::Cursor::new(out);
+            let image: GaddagDiskImage = ciborium::de::from_reader(cur)
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+            return Ok(image);
+        }
+        let cur = std::io::Cursor::new(bytes);
+        let image: GaddagDiskImage = ciborium::de::from_reader(cur)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        Ok(image)
+    }
     pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -100,8 +126,8 @@ impl GaddagDictionary {
             let tks = tokenizer.segment(&s);
             if tks.is_empty() { continue; }
             let len = tks.len();
-            if let Some(min) = min_len { if len < min { continue; } }
-            if let Some(max) = max_len { if len > max { continue; } }
+            if let Some(min) = min_len && len < min { continue; }
+            if let Some(max) = max_len && len > max { continue; }
             words.push(s);
         }
 
@@ -188,19 +214,8 @@ impl GaddagDictionary {
     pub fn to_gaddag_file<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
         use std::io::BufWriter;
         let norm_mode: u8 = match self.forward.norm { NormalizationMode::NFC => 0, NormalizationMode::NFKC => 1 };
-        // Collect all words from FST using an empty prefix automaton.
-        let mut words: Vec<String> = Vec::new();
-        {
-            use fst::{IntoStreamer, Streamer, automaton::Str};
-            let aut = Str::new("").starts_with();
-            let mut stream = self.forward.set.search(aut).into_stream();
-            while let Some(bytes) = stream.next() {
-                let s = std::str::from_utf8(bytes)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("invalid utf8 in FST: {}", e)))?
-                    .to_string();
-                words.push(s);
-            }
-        }
+        // Persist compact FST bytes instead of the full word list
+        let fst_bytes: Vec<u8> = self.forward.set.as_fst().to_vec();
         let nodes: Vec<PackedNodeDisk> = self
             .g_nodes
             .iter()
@@ -217,30 +232,19 @@ impl GaddagDictionary {
             id2sym: self.id2sym.clone(),
             nodes,
             arcs,
-            words,
+            fst_bytes,
             case_fold: self.forward.case_fold,
             norm_mode,
         };
         let f = std::fs::File::create(path)?;
         let mut w = BufWriter::new(f);
         ciborium::ser::into_writer(&image, &mut w)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            .map_err(|e| std::io::Error::other(e.to_string()))
     }
 
     pub fn to_gaddag_bytes(&self) -> std::io::Result<Vec<u8>> {
         let norm_mode: u8 = match self.forward.norm { NormalizationMode::NFC => 0, NormalizationMode::NFKC => 1 };
-        let mut words: Vec<String> = Vec::new();
-        {
-            use fst::{IntoStreamer, Streamer, automaton::Str};
-            let aut = Str::new("").starts_with();
-            let mut stream = self.forward.set.search(aut).into_stream();
-            while let Some(bytes) = stream.next() {
-                let s = std::str::from_utf8(bytes)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("invalid utf8 in FST: {}", e)))?
-                    .to_string();
-                words.push(s);
-            }
-        }
+        let fst_bytes: Vec<u8> = self.forward.set.as_fst().to_vec();
         let nodes: Vec<PackedNodeDisk> = self
             .g_nodes
             .iter()
@@ -251,19 +255,17 @@ impl GaddagDictionary {
             .iter()
             .map(|a| PackedArcDisk { label: a.label, target: a.target })
             .collect();
-        let image = GaddagDiskImage { sep: self.sep.clone(), sep_id: self.sep_id, id2sym: self.id2sym.clone(), nodes, arcs, words, case_fold: self.forward.case_fold, norm_mode };
+        let image = GaddagDiskImage { sep: self.sep.clone(), sep_id: self.sep_id, id2sym: self.id2sym.clone(), nodes, arcs, fst_bytes, case_fold: self.forward.case_fold, norm_mode };
         let mut buf = Vec::new();
         ciborium::ser::into_writer(&image, &mut buf)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(buf)
     }
 
     pub fn from_gaddag_file<P: AsRef<std::path::Path>>(path: P, tokenizer: TokenizerRef) -> std::io::Result<Self> {
-        use std::io::BufReader;
-        let f = std::fs::File::open(path)?;
-        let r = BufReader::new(f);
-        let image: GaddagDiskImage =
-            ciborium::de::from_reader(r).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        // Read file and auto-detect compression (plain CBOR, gzip, zstd)
+        let bytes = std::fs::read(path)?;
+        let image = Self::decode_image_from_bytes(&bytes)?;
         let g_nodes: Vec<PackedNode> = image
             .nodes
             .iter()
@@ -277,15 +279,13 @@ impl GaddagDictionary {
         let mut sym2id: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
         for (i, s) in image.id2sym.iter().enumerate() { sym2id.insert(s.clone(), i as u16); }
         let norm = match image.norm_mode { 0 => NormalizationMode::NFC, 1 => NormalizationMode::NFKC, _ => NormalizationMode::NFC };
-        let forward_opts = DictionaryOptions { case_fold: image.case_fold, min_len: None, max_len: None, norm, tokenizer: tokenizer.clone() };
-        let forward = FstDictionary::from_words_opts(image.words, forward_opts.clone());
+        let forward = FstDictionary::from_bytes_with_norm(&image.fst_bytes, image.case_fold, norm)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(Self { forward, g_nodes, g_arcs, sym2id, id2sym: image.id2sym, sep: image.sep, sep_id: image.sep_id, tokenizer })
     }
 
     pub fn from_gaddag_bytes<D: AsRef<[u8]>>(bytes: D, tokenizer: TokenizerRef) -> std::io::Result<Self> {
-        let cursor = std::io::Cursor::new(bytes.as_ref());
-        let image: GaddagDiskImage =
-            ciborium::de::from_reader(cursor).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        let image = Self::decode_image_from_bytes(bytes.as_ref())?;
         let g_nodes: Vec<PackedNode> = image
             .nodes
             .iter()
@@ -299,8 +299,8 @@ impl GaddagDictionary {
         let mut sym2id: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
         for (i, s) in image.id2sym.iter().enumerate() { sym2id.insert(s.clone(), i as u16); }
         let norm = match image.norm_mode { 0 => NormalizationMode::NFC, 1 => NormalizationMode::NFKC, _ => NormalizationMode::NFC };
-        let forward_opts = DictionaryOptions { case_fold: image.case_fold, min_len: None, max_len: None, norm, tokenizer: tokenizer.clone() };
-        let forward = FstDictionary::from_words_opts(image.words, forward_opts.clone());
+        let forward = FstDictionary::from_bytes_with_norm(&image.fst_bytes, image.case_fold, norm)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(Self { forward, g_nodes, g_arcs, sym2id, id2sym: image.id2sym, sep: image.sep, sep_id: image.sep_id, tokenizer })
     }
 
@@ -506,9 +506,8 @@ mod tests {
 
     #[test]
     fn gaddag_serialize_roundtrip_default() {
-        use std::path::PathBuf;
         let gd = GaddagDictionary::from_words(vec!["CARE".to_string(), "CARES".to_string()], true);
-        let path = PathBuf::from(std::env::temp_dir()).join("gaddag_test_default.cbor");
+        let path = std::env::temp_dir().join("gaddag_test_default.cbor");
         gd.to_gaddag_file(&path).unwrap();
         let gd2 = GaddagDictionary::from_gaddag_file(&path, TokenizerRef::default()).unwrap();
         assert!(gd2.contains("cares"));

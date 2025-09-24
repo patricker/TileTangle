@@ -1,4 +1,6 @@
 use rand::{rngs::StdRng, Rng, SeedableRng};
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 

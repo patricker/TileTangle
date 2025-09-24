@@ -177,8 +177,19 @@ pub fn generate_moves(
             let mut cand_syms: Set<String> = Set::new();
             if let Some(set) = xchecks.get(&id) { for s in set { cand_syms.insert(s.clone()); } }
             else if let Some(dict) = &state.dictionary {
-                for tk in &state.tileset.tile_kinds { if tk.is_blank { continue; } if dict.has_prefix(&tk.symbol) { cand_syms.insert(tk.symbol.clone()); } }
-            } else { for tk in &state.tileset.tile_kinds { if !tk.is_blank { cand_syms.insert(tk.symbol.clone()); } } }
+                for tk in &state.tileset.tile_kinds {
+                    if tk.is_blank { continue; }
+                    if dict.has_prefix(&tk.symbol) {
+                        cand_syms.insert(tk.symbol.clone());
+                    }
+                }
+            } else {
+                for tk in &state.tileset.tile_kinds {
+                    if !tk.is_blank {
+                        cand_syms.insert(tk.symbol.clone());
+                    }
+                }
+            }
             if let Some((gd, node)) = gaddag { cand_syms = cand_syms.into_iter().filter(|s| gd.step_symbol(node, s).is_some()).collect(); }
             let mut blank_syms = cand_syms.clone();
             if let Some(dict) = &state.dictionary { for ch in 'A'..='Z' { let s = ch.to_string(); if dict.has_prefix(&s) { blank_syms.insert(s); } } }
@@ -280,8 +291,18 @@ pub fn generate_moves(
             let mut cand_syms: Set<String> = Set::new();
             if let Some(set) = xchecks.get(&left_id) { for s in set { cand_syms.insert(s.clone()); } }
             else if let Some(dict) = &state.dictionary {
-                for tk in &state.tileset.tile_kinds { if !tk.is_blank && dict.has_prefix(&tk.symbol) { cand_syms.insert(tk.symbol.clone()); } }
-            } else { for tk in &state.tileset.tile_kinds { if !tk.is_blank { cand_syms.insert(tk.symbol.clone()); } } }
+                for tk in &state.tileset.tile_kinds {
+                    if tk.is_blank { continue; }
+                    if dict.has_prefix(&tk.symbol) {
+                        cand_syms.insert(tk.symbol.clone());
+                    }
+                }
+            } else {
+                for tk in &state.tileset.tile_kinds {
+                    if tk.is_blank { continue; }
+                    cand_syms.insert(tk.symbol.clone());
+                }
+            }
             if let Some((gd, base)) = gaddag_pre { cand_syms = cand_syms.into_iter().filter(|s| gd.step_symbol(base, s).is_some()).collect(); }
             let mut blank_syms = cand_syms.clone();
             if let Some(dict) = &state.dictionary { for ch in 'A'..='Z' { let s = ch.to_string(); if dict.has_prefix(&s) { blank_syms.insert(s); } } }
@@ -329,7 +350,9 @@ pub fn generate_moves(
     let blank_kinds: Vec<String> = state.tileset.tile_kinds.iter().filter(|tk| tk.is_blank).map(|tk| tk.id.clone()).collect();
     // Seed optional GADDAG pruning from dictionary if present
     let mut gaddag_pre_seed: Option<&GaddagDictionary> = None;
-    if let Some(dict) = &state.dictionary { if let Some(gd) = dict.as_any().downcast_ref::<GaddagDictionary>() { gaddag_pre_seed = Some(gd); } }
+    if let Some(dict) = &state.dictionary && let Some(gd) = dict.as_any().downcast_ref::<GaddagDictionary>() {
+        gaddag_pre_seed = Some(gd);
+    }
 
     for &a in &anchors {
         if !state.board.cells[a.0 as usize].stack.is_empty() { continue; }
@@ -416,7 +439,7 @@ fn generate_moves_graph_basic(
     fn allowed_for_cell_on_axis(state: &GameState, cell: CellId, ctag: &str, alphabet: &HashSet<String>) -> HashSet<String> {
         let mut sides: Vec<CellId> = Vec::with_capacity(2);
         for (n, t) in state.board.geom.neighbors_with_tags(cell) { if t == ctag { sides.push(n); } }
-        let (left_syms, right_syms) = match (sides.get(0), sides.get(1)) {
+        let (left_syms, right_syms) = match (sides.first(), sides.get(1)) {
             (None, None) => return alphabet.clone(),
             (Some(&a), None) | (None, Some(&a)) => { let rs = collect_chain_symbols_from(state, a, cell, ctag); if rs.is_empty() { return alphabet.clone(); } (Vec::new(), rs) }
             (Some(&a), Some(&b)) => { let ls = collect_chain_symbols_from(state, a, cell, ctag); let rs = collect_chain_symbols_from(state, b, cell, ctag); if ls.is_empty() && rs.is_empty() { return alphabet.clone(); } (ls, rs) }
