@@ -87,13 +87,21 @@ impl GaddagDictionary {
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
             return Ok(image);
         }
-        if bytes.len() >= 4 && bytes[0] == 0x28 && bytes[1] == 0xB5 && bytes[2] == 0x2F && bytes[3] == 0xFD {
-            let out = zstd::stream::decode_all(std::io::Cursor::new(bytes))
-                .map_err(|e| std::io::Error::other(e.to_string()))?;
-            let cur = std::io::Cursor::new(out);
-            let image: GaddagDiskImage = ciborium::de::from_reader(cur)
-                .map_err(|e| std::io::Error::other(e.to_string()))?;
-            return Ok(image);
+        #[cfg(feature = "zstd")]
+        {
+            if bytes.len() >= 4
+                && bytes[0] == 0x28
+                && bytes[1] == 0xB5
+                && bytes[2] == 0x2F
+                && bytes[3] == 0xFD
+            {
+                let out = zstd::stream::decode_all(std::io::Cursor::new(bytes))
+                    .map_err(|e| std::io::Error::other(e.to_string()))?;
+                let cur = std::io::Cursor::new(out);
+                let image: GaddagDiskImage = ciborium::de::from_reader(cur)
+                    .map_err(|e| std::io::Error::other(e.to_string()))?;
+                return Ok(image);
+            }
         }
         let cur = std::io::Cursor::new(bytes);
         let image: GaddagDiskImage = ciborium::de::from_reader(cur)

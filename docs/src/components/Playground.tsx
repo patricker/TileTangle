@@ -32,6 +32,7 @@ const fallbackDictionaryText = fallbackDictionaryWords.join('\n');
 
 type DictionaryPayload =
   | {kind: 'fst'; bytes: Uint8Array}
+  | {kind: 'gaddag'; bytes: Uint8Array}
   | {kind: 'text'; text: string};
 
 
@@ -116,6 +117,7 @@ export default function Playground({initial, compact}: PlaygroundProps = {}): JS
   const {colorMode} = useColorMode();
   const wasmModuleUrl = useBaseUrl('wasm/engine/pkg/tiletangle_wasm.js');
   const dictFstUrl = useBaseUrl('dictionaries/TWL06.fst');
+  const dictGaddagGzUrl = useBaseUrl('dictionaries/TWL06.gaddag.cbor.gz');
   const dictTxtUrl1 = useBaseUrl('dictionaries/TWL06.txt');
   const dictTxtUrl2 = useBaseUrl('dictionaries/demo.txt');
 
@@ -378,6 +380,18 @@ export default function Playground({initial, compact}: PlaygroundProps = {}): JS
           console.warn('FST dictionary fetch failed', err);
         }
       }
+      if (engine === 'gaddag') {
+        try {
+          const resp = await fetch(dictGaddagGzUrl);
+          if (resp.ok) {
+            const bytes = new Uint8Array(await resp.arrayBuffer());
+            return {kind: 'gaddag', bytes};
+          }
+          console.warn('GADDAG gz fetch returned status', resp.status);
+        } catch (err) {
+          console.warn('GADDAG gz dictionary fetch failed', err);
+        }
+      }
 
       for (const url of [dictTxtUrl1, dictTxtUrl2]) {
         try {
@@ -395,7 +409,7 @@ export default function Playground({initial, compact}: PlaygroundProps = {}): JS
 
       return {kind: 'text', text: fallbackDictionaryText};
     },
-    [dictFstUrl, dictTxtUrl1, dictTxtUrl2],
+    [dictFstUrl, dictGaddagGzUrl, dictTxtUrl1, dictTxtUrl2],
   );
 
   const applyDictionaryToWorker = useCallback(
@@ -412,6 +426,8 @@ export default function Playground({initial, compact}: PlaygroundProps = {}): JS
         const payload = await fetchDictionaryPayload(engine);
         if (engine === 'fst' && payload.kind === 'fst') {
           await call('set_dictionary_from_fst_bytes', {bytes: payload.bytes, case_fold: true});
+        } else if (engine === 'gaddag' && payload.kind === 'gaddag') {
+          await call('set_dictionary_from_gaddag_bytes', {bytes: payload.bytes, case_fold: true});
         } else {
           const text = payload.kind === 'text' ? payload.text : fallbackDictionaryText;
           await call('set_dictionary_engine', {text, engine, case_fold: true});
@@ -446,6 +462,8 @@ export default function Playground({initial, compact}: PlaygroundProps = {}): JS
         const payload = await fetchDictionaryPayload(engine);
         if (engine === 'fst' && payload.kind === 'fst') {
           mod.set_dictionary_from_fst_bytes(g, payload.bytes, true);
+        } else if (engine === 'gaddag' && payload.kind === 'gaddag') {
+          mod.set_dictionary_from_gaddag_bytes(g, payload.bytes, true);
         } else {
           const text = payload.kind === 'text' ? payload.text : fallbackDictionaryText;
           mod.set_dictionary_from_text_engine(g, text, engine, true);

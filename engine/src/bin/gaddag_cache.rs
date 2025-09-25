@@ -88,7 +88,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         enc.write_all(&bytes)?;
         enc.finish()?;
     } else if use_zstd {
-        std::fs::write(&output, zstd::stream::encode_all(std::io::Cursor::new(&bytes), 10)?)?;
+        #[cfg(feature = "zstd")]
+        {
+            std::fs::write(&output, zstd::stream::encode_all(std::io::Cursor::new(&bytes), 10)?)?;
+        }
+        #[cfg(not(feature = "zstd"))]
+        {
+            eprintln!("--zstd requested but 'zstd' feature not enabled; re-run with: cargo run -p tiletangle-engine --features zstd --bin gaddag_cache ...");
+            std::process::exit(2);
+        }
     } else {
         std::fs::write(&output, &bytes)?;
     }

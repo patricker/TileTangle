@@ -28,7 +28,7 @@ ciborium = { version = "0.2", default-features = true }
 rayon = { version = "1", optional = true }
 wide = { version = "0.7", optional = true }
 flate2 = { version = "1", features = ["rust_backend"], default-features = false }
-zstd = { version = "0.13", default-features = true }
+zstd = { version = "0.13", default-features = true, optional = true }
 
 [features]
 default = []
@@ -45,6 +45,10 @@ harness = false
 
 [[bench]]
 name = "dict_engines"
+harness = false
+
+[[bench]]
+name = "movegen_graph"
 harness = false
 
 

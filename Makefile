@@ -41,7 +41,7 @@ wasm:
 	which wasm-pack >/dev/null 2>&1 || cargo install wasm-pack --locked
 	cargo run -q -p dict-build -- assets/dictionaries/TWL06.txt docs/static/dictionaries/TWL06.fst --min-len 2 --case-fold
 	# Also precompute a cached GADDAG next to the text and FST assets
-	cargo run -q -p tiletangle-engine --bin gaddag_cache -- docs/static/dictionaries/TWL06.txt docs/static/dictionaries/TWL06.gaddag.cbor --case-fold --norm nfc
+	cargo run -q -p tiletangle-engine --bin gaddag_cache -- docs/static/dictionaries/TWL06.txt docs/static/dictionaries/TWL06.gaddag.cbor.gz --case-fold --norm nfc --gzip
 	cd wasm && wasm-pack build --target web --out-dir pkg
 	mkdir -p docs/static/wasm/engine
 	rm -rf docs/static/wasm/engine/pkg && cp -r wasm/pkg docs/static/wasm/engine/

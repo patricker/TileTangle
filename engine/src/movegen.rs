@@ -164,7 +164,12 @@ pub fn generate_moves(
                 let (_, sym) = CrosswordRules::tile_symbol_and_score(&state.tileset, t);
                 nb.push_str(&sym);
                 if let Some((gd, node)) = gaddag {
-                    if let Some(n2) = gd.step_symbol(node, &sym) { gaddag = Some((gd, n2)); } else { return; }
+                    let ns = {
+                        let mut s = crate::normalize_with_mode(sym.clone(), gd.forward.norm);
+                        if gd.forward.case_fold { s = s.to_lowercase(); }
+                        s
+                    };
+                    if let Some(n2) = gd.step_symbol(node, &ns) { gaddag = Some((gd, n2)); } else { return; }
                 } else if let Some(dict) = &state.dictionary { if !dict.has_prefix(&nb) { return; } }
                 let next = Coord2D { x: pos.x + dir.0, y: pos.y + dir.1 };
                 dfs_right(state, rules, anchor, rack, nb, next, used, out, max_len, dir, pdir, gaddag, xchecks, blank_kinds);
@@ -190,7 +195,16 @@ pub fn generate_moves(
                     }
                 }
             }
-            if let Some((gd, node)) = gaddag { cand_syms = cand_syms.into_iter().filter(|s| gd.step_symbol(node, s).is_some()).collect(); }
+            if let Some((gd, node)) = gaddag {
+                cand_syms = cand_syms
+                    .into_iter()
+                    .filter(|s| {
+                        let mut ns = crate::normalize_with_mode(s.clone(), gd.forward.norm);
+                        if gd.forward.case_fold { ns = ns.to_lowercase(); }
+                        gd.step_symbol(node, &ns).is_some()
+                    })
+                    .collect();
+            }
             let mut blank_syms = cand_syms.clone();
             if let Some(dict) = &state.dictionary { for ch in 'A'..='Z' { let s = ch.to_string(); if dict.has_prefix(&s) { blank_syms.insert(s); } } }
             for sym in blank_syms.into_iter() {
@@ -213,7 +227,11 @@ pub fn generate_moves(
                     if vtiles > 1 { if let Some(dict) = &state.dictionary { if !dict.contains(&vword) { continue; } } }
                     let mut nb = built.clone(); nb.push_str(&sym);
                     let mut next_gaddag = gaddag;
-                    if let Some((gd, node)) = next_gaddag { if let Some(n2) = gd.step_symbol(node, &sym) { next_gaddag = Some((gd, n2)); } else { continue; } }
+                    if let Some((gd, node)) = next_gaddag {
+                        let mut ns = crate::normalize_with_mode(sym.clone(), gd.forward.norm);
+                        if gd.forward.case_fold { ns = ns.to_lowercase(); }
+                        if let Some(n2) = gd.step_symbol(node, &ns) { next_gaddag = Some((gd, n2)); } else { continue; }
+                    }
                     *rack.get_mut(&bid).unwrap() -= 1;
                     used.push((id, Tile { kind_id: bid.clone(), mark: Some(sym.clone()) }));
                     if used.iter().any(|(cid, _)| *cid == anchor) || state.board.cells[anchor.0 as usize].stack.last().is_some() {
@@ -243,7 +261,11 @@ pub fn generate_moves(
                 if vtiles > 1 { if let Some(dict) = &state.dictionary { if !dict.contains(&vword) { continue; } } }
                 let mut nb = built.clone(); nb.push_str(sym);
                 let mut next_gaddag = gaddag;
-                if let Some((gd, node)) = next_gaddag { if let Some(n2) = gd.step_symbol(node, sym) { next_gaddag = Some((gd, n2)); } else { continue; } }
+                if let Some((gd, node)) = next_gaddag {
+                    let mut ns = crate::normalize_with_mode(sym.to_string(), gd.forward.norm);
+                    if gd.forward.case_fold { ns = ns.to_lowercase(); }
+                    if let Some(n2) = gd.step_symbol(node, &ns) { next_gaddag = Some((gd, n2)); } else { continue; }
+                }
                 *rack.get_mut(&kind_id).unwrap() -= 1;
                 used.push((id, Tile { kind_id: kind_id.clone(), mark: None }));
                 if used.iter().any(|(cid, _)| *cid == anchor) || state.board.cells[anchor.0 as usize].stack.last().is_some() {
@@ -282,6 +304,13 @@ pub fn generate_moves(
         xchecks: &Map<CellId, Set<String>>,
         blank_kinds: &[String],
     ) {
+        // Helper: normalize a tile symbol for dictionary lookup (norm + case-fold)
+        let norm_sym = |gd: &GaddagDictionary, s: &str| -> String {
+            let mut out = crate::normalize_with_mode(s.to_string(), gd.forward.norm);
+            if gd.forward.case_fold { out = out.to_lowercase(); }
+            out
+        };
+
         let mut post_sep = None;
         if let Some((gd, node)) = gaddag_pre { if let Some(n2) = gd.step_token(node, gd.sep_token()) { post_sep = Some((gd, n2)); } }
         dfs_right(state, rules, anchor, rack, built.clone(), start, used, out, max_len, dir, pdir, post_sep, xchecks, blank_kinds);
@@ -303,7 +332,15 @@ pub fn generate_moves(
                     cand_syms.insert(tk.symbol.clone());
                 }
             }
-            if let Some((gd, base)) = gaddag_pre { cand_syms = cand_syms.into_iter().filter(|s| gd.step_symbol(base, s).is_some()).collect(); }
+            if let Some((gd, base)) = gaddag_pre {
+                cand_syms = cand_syms
+                    .into_iter()
+                    .filter(|s| {
+                        let ns = norm_sym(gd, s);
+                        gd.step_symbol(base, &ns).is_some()
+                    })
+                    .collect();
+            }
             let mut blank_syms = cand_syms.clone();
             if let Some(dict) = &state.dictionary { for ch in 'A'..='Z' { let s = ch.to_string(); if dict.has_prefix(&s) { blank_syms.insert(s); } } }
             for sym in blank_syms.into_iter() {
@@ -315,7 +352,10 @@ pub fn generate_moves(
                 if let Some(bid) = chosen_blank {
                     let mut nb = String::new(); nb.push_str(&sym); nb.push_str(&built);
                     let mut next_g_pre2 = gaddag_pre;
-                    if let Some((gd, base2)) = next_g_pre2 { if let Some(n2) = gd.step_symbol(base2, &sym) { next_g_pre2 = Some((gd, n2)); } else { continue; } }
+                    if let Some((gd, base2)) = next_g_pre2 {
+                        let ns = norm_sym(gd, &sym);
+                        if let Some(n2) = gd.step_symbol(base2, &ns) { next_g_pre2 = Some((gd, n2)); } else { continue; }
+                    }
                     *rack.get_mut(&bid).unwrap() -= 1;
                     used.push((left_id, Tile { kind_id: bid.clone(), mark: Some(sym.clone()) }));
                     dfs_left_then_right(state, rules, anchor, rack, nb, left, used, out, max_len, dir, pdir, next_g_pre2, xchecks, blank_kinds);
@@ -338,7 +378,10 @@ pub fn generate_moves(
                 if vtiles > 1 { if let Some(dict) = &state.dictionary { if !dict.contains(&vword) { continue; } } }
                 let mut nb = String::new(); nb.push_str(sym); nb.push_str(&built);
                 let mut next_g_pre = gaddag_pre;
-                if let Some((gd, base)) = next_g_pre { if let Some(n2) = gd.step_symbol(base, sym) { next_g_pre = Some((gd, n2)); } else { continue; } }
+                if let Some((gd, base)) = next_g_pre {
+                    let ns = norm_sym(gd, sym);
+                    if let Some(n2) = gd.step_symbol(base, &ns) { next_g_pre = Some((gd, n2)); } else { continue; }
+                }
                 *rack.get_mut(&kind_id).unwrap() -= 1;
                 used.push((left_id, Tile { kind_id: kind_id.clone(), mark: None }));
                 dfs_left_then_right(state, rules, anchor, rack, nb, left, used, out, max_len, dir, pdir, next_g_pre, xchecks, blank_kinds);

@@ -16,6 +16,7 @@ declare module '/wasm/engine/pkg/tiletangle_wasm.js' {
   export const set_stacking: (...args: any[]) => void;
   export const set_free_word_mode: (...args: any[]) => void;
   export const set_dictionary_from_fst_bytes: (...args: any[]) => void;
+  export const set_dictionary_from_gaddag_bytes: (...args: any[]) => void;
   export const set_dictionary_from_text_engine: (...args: any[]) => void;
   export const set_dictionary_from_text: (...args: any[]) => void;
   export const set_rack: (...args: any[]) => void;

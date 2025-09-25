@@ -661,6 +661,23 @@ pub fn set_dictionary_from_fst_bytes(
     Ok(())
 }
 
+#[wasm_bindgen]
+pub fn set_dictionary_from_gaddag_bytes(
+    game: &mut JsGame,
+    bytes: &[u8],
+    case_fold: bool,
+) -> Result<(), JsValue> {
+    let tokenizer = engine::TokenizerRef::default();
+    // The on-disk image already encodes normalization and case-fold metadata; case_fold here is kept for parity.
+    // The loader auto-detects raw CBOR and gzip. For zstd-compressed images, pre-decompress in JS before calling.
+    let dict = engine::GaddagDictionary::from_gaddag_bytes(bytes, tokenizer).map_err(to_js_err)?;
+    if case_fold {
+        // No-op: stored metadata governs normalization/folding; we keep the param for API symmetry.
+    }
+    game.state.dictionary = Some(Box::new(dict));
+    Ok(())
+}
+
 fn collect_words_from_text(text: &str, case_fold: bool) -> Vec<String> {
     let mut words: Vec<String> = Vec::new();
     for line in text.lines() {

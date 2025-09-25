@@ -121,6 +121,10 @@ self.onmessage = async (e) => {
       if (!game) throw new Error('no game');
       mod.set_dictionary_from_text(game, payload.text, !!payload.case_fold);
       self.postMessage({ id, ok: true });
+    } else if (action === 'set_dictionary_from_gaddag_bytes') {
+      if (!game) throw new Error('no game');
+      mod.set_dictionary_from_gaddag_bytes(game, payload.bytes, !!payload.case_fold);
+      self.postMessage({ id, ok: true });
     } else if (action === 'set_dictionary_engine') {
       if (!game) throw new Error('no game');
       mod.set_dictionary_from_text_engine(game, payload.text, payload.engine, !!payload.case_fold);
