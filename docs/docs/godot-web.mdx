@@ -1,0 +1,52 @@
+---
+sidebar_position: 11
+---
+
+# Godot Web Export
+
+This page embeds the Godot example as a web build. The export uses the WASM engine and a small JavaScript shim; it does not load the native GDExtension library in the browser.
+
+Dictionary
+
+- The export bundles a dictionary (GADDAG/FST/text fallback) and loads it automatically, so CPU hint and “Show candidates” use real lexicon constraints.
+
+## Try it
+
+<div style={{height: '720px', border: '1px solid var(--ifm-toc-border-color)'}}>
+  {/* eslint-disable-next-line @docusaurus/no-untranslated-text */}
+  <iframe
+    title="TileTangle – Godot Web"
+    src={require('@docusaurus/useBaseUrl').default('/playground/index.html')}
+    style={{width: '100%', height: '100%', border: 0}}
+    loading="lazy"
+    allow="fullscreen"
+  />
+  
+</div>
+
+## Reproduce locally
+
+- Build and publish the export to the docs static folder:
+
+```
+make docs-godot
+```
+
+- Start the docs site and open this page:
+
+```
+cd docs
+npm run start
+```
+
+## How it works
+
+- Export preset: `bindings/godot/examples/export_presets.cfg` → “Web”.
+- WASM shim: `tools/web/web_engine.js` loads `wasm/pkg/tiletangle_wasm.js` and exposes `window.TT`.
+- Dictionary: the shim fetches `dictionaries/TWL06.gaddag.cbor.gz` (or `.fst`/`.txt` fallback) and sets it via the WASM API.
+- Engine bridge: `bindings/godot/examples/scripts/playground/EngineBridge.gd` routes engine calls to `window.TT` on web, and to the GDExtension class on native platforms.
+
+Notes
+
+- Preview on web computes an approximate highlight by snapshot → play → restore. Native builds preview from the engine directly.
+- Free‑word mode remains on for flexible placements; move generation and CPU still use the dictionary when available.

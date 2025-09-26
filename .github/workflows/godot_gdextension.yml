@@ -1,0 +1,60 @@
+name: Build Godot GDExtension
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Linux .so
+        run: |
+          cargo build -p tiletangle-godot --release
+          ls -la target/release
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiletangle-godot-linux
+          path: |
+            target/release/libtiletangle_godot.so
+            bindings/godot/examples/tiletangle_godot.gdextension
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Windows .dll
+        run: |
+          cargo build -p tiletangle-godot --release
+          dir target\release
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiletangle-godot-windows
+          path: |
+            target/release/tiletangle_godot.dll
+            bindings/godot/examples/tiletangle_godot.gdextension
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build macOS .dylib (universal not required for demo)
+        run: |
+          cargo build -p tiletangle-godot --release
+          ls -la target/release
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiletangle-godot-macos
+          path: |
+            target/release/libtiletangle_godot.dylib
+            bindings/godot/examples/tiletangle_godot.gdextension
+

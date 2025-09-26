@@ -78,7 +78,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Playgrounds & Demos',
-      items: ['playground', 'classic-demo', 'python-demo', 'showcase'],
+      items: ['playground', 'godot-web', 'classic-demo', 'python-demo', 'showcase'],
     },
     {
       type: 'category',

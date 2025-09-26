@@ -17,7 +17,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  godot-export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+      - name: Build WASM (for web shim)
+        run: make wasm
+      - name: Download Godot 4.5 CLI
+        run: |
+          mkdir -p tools/godot-4.5
+          curl -L "https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_linux.x86_64.zip" -o /tmp/godot.zip
+          unzip -q /tmp/godot.zip -d tools/godot-4.5
+          chmod +x tools/godot-4.5/Godot_v4.5-stable_linux.x86_64
+          ln -sf Godot_v4.5-stable_linux.x86_64 tools/godot-4.5/godot4
+      - name: Install Godot 4.5 export templates
+        run: |
+          mkdir -p ~/.local/share/godot/export_templates/4.5.stable
+          curl -L "https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_export_templates.tpz" -o /tmp/templates.tpz
+          unzip -q /tmp/templates.tpz -d ~/.local/share/godot/export_templates/4.5.stable
+      - name: Godot Web export
+        run: make web-export
+      - name: Wire WASM shim into export
+        run: make web-wire
+      - name: Upload playground artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: playground
+          path: bindings/godot/examples/dist/web
+
   build:
+    needs: godot-export
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +60,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Download playground artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: playground
+          path: docs/static/playground
       - name: Setup Rust (stable)
         uses: dtolnay/rust-toolchain@master
         with:
@@ -57,4 +97,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-

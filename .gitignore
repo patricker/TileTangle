@@ -1,4 +1,3 @@
-OLD
 target
 fuzz/target
 fuzz/artifacts
@@ -11,3 +10,14 @@ docs/playwright-report
 bindings/godot/examples/.godot/
 bindings/godot/examples/**/*.gd.uid
 bindings/godot/examples/**/*.uid
+
+# Godot editor/CLI (local only)
+tools/godot-4.5/*
+!tools/godot-4.5/README.md
+
+# Godot example build outputs
+bindings/godot/examples/bin/
+bindings/godot/examples/dist/
+
+# Docs embed of the Godot web export (built by `make docs-godot`)
+docs/static/playground/*

@@ -1,10 +1,7 @@
 extends Node
-
 class_name PlaygroundConfig
-
 const BOARD_SHAPES := ["rect", "diamond", "triangle", "ring", "cross", "hexagon"]
 const ADJACENCY_MODES := ["orthogonal", "diagonal", "hex"]
-
 static func classic_tileset() -> Dictionary:
   var entries := [
     {"id": "A", "symbol": "A", "score": 1, "count": 9},
@@ -51,7 +48,6 @@ static func classic_tileset() -> Dictionary:
     "tile_kinds": tile_kinds,
     "tile_counts": tile_counts,
   }
-
 static func presets() -> Dictionary:
   return {
     "classic": {
@@ -91,20 +87,17 @@ static func presets() -> Dictionary:
       "bonus": "triangle",
     },
   }
-
 static func preset_options() -> Array:
   var out := []
   for key in presets().keys():
-    var data := presets()[key]
+    var data: Dictionary = presets()[key]
     out.append({"value": key, "label": data.label})
   return out
-
 static func resolve_preset(key: String) -> Dictionary:
-  var data := presets().get(key, null)
+  var data: Variant = presets().get(key, null)
   if data == null:
     return presets()["classic"]
   return data.duplicate(true)
-
 static func build_mask(width: int, height: int, shape: String) -> Dictionary:
   var mask := {}
   var mid_x := (width - 1) / 2.0
@@ -135,16 +128,15 @@ static func build_mask(width: int, height: int, shape: String) -> Dictionary:
         "ring":
           var dx2 := x - mid_x
           var dy2 := y - mid_y
-          var dist := sqrt(dx2 * dx2 + dy2 * dy2)
-          var outer := min(mid_x, mid_y) + 0.5
-          var inner := max(outer - 2.0, 0.0)
+          var dist: float = sqrt(dx2 * dx2 + dy2 * dy2)
+          var outer: float = min(mid_x, mid_y) + 0.5
+          var inner: float = max(outer - 2.0, 0.0)
           include = dist <= outer and dist >= inner
         _:
           include = true
       if include:
         mask[key] = true
   return mask
-
 static func build_overlay(width: int, height: int, mask: Dictionary, adjacency: String) -> Dictionary:
   var nodes := []
   var index_for := {}
@@ -172,34 +164,32 @@ static func build_overlay(width: int, height: int, mask: Dictionary, adjacency: 
       if not mask.has(_key(x, y)):
         continue
       if adjacency == "orthogonal" or adjacency == "diagonal":
-        add_edge(x, y, x + 1, y, "E")
-        add_edge(x, y, x, y + 1, "S")
+        add_edge.call(x, y, x + 1, y, "E")
+        add_edge.call(x, y, x, y + 1, "S")
         if adjacency == "diagonal":
-          add_edge(x, y, x + 1, y + 1, "SE")
-          add_edge(x, y, x - 1, y + 1, "SW")
+          add_edge.call(x, y, x + 1, y + 1, "SE")
+          add_edge.call(x, y, x - 1, y + 1, "SW")
       elif adjacency == "hex":
-        add_edge(x, y, x + 1, y, "E")
+        add_edge.call(x, y, x + 1, y, "E")
         var even := (y % 2) == 0
         var up_x := x + (0 if even else 1)
         var down_x := x + (0 if even else 1)
-        add_edge(x, y, up_x, y - 1, "NE")
-        add_edge(x, y, down_x, y + 1, "SE")
+        add_edge.call(x, y, up_x, y - 1, "NE")
+        add_edge.call(x, y, down_x, y + 1, "SE")
       else:
-        add_edge(x, y, x + 1, y, "E")
-        add_edge(x, y, x, y + 1, "S")
+        add_edge.call(x, y, x + 1, y, "E")
+        add_edge.call(x, y, x, y + 1, "S")
   return {"nodes": nodes, "edges": edges}
-
 static func build_bonus_layout(width: int, height: int, shape: String, adjacency: String, preset: String) -> Array:
   var kind := _resolve_bonus_kind(preset, shape, adjacency)
   if kind == "none":
     return []
-  var map := _build_bonus_map(kind, width, height)
+  var map: Dictionary = _build_bonus_map(kind, width, height)
   var out := []
   for cell in map.values():
     if cell.x >= 0 and cell.x < width and cell.y >= 0 and cell.y < height:
       out.append(cell)
   return out
-
 static func build_config(settings: Dictionary) -> Dictionary:
   var preset_data := resolve_preset(settings.get("preset", "classic"))
   var width := int(settings.get("width", preset_data.width))
@@ -214,7 +204,7 @@ static func build_config(settings: Dictionary) -> Dictionary:
   if not ADJACENCY_MODES.has(adjacency):
     adjacency = "orthogonal"
   var bonus_preset := String(settings.get("bonus", preset_data.bonus))
-  var tileset := settings.get("tileset", classic_tileset())
+  var tileset: Dictionary = settings.get("tileset", classic_tileset())
   var mask := build_mask(width, height, shape)
   var overlay := build_overlay(width, height, mask, adjacency)
   var bonuses := build_bonus_layout(width, height, shape, adjacency, bonus_preset)
@@ -246,7 +236,6 @@ static func build_config(settings: Dictionary) -> Dictionary:
     },
     "tileset": tileset,
   }
-
 static func _resolve_bonus_kind(preset: String, shape: String, adjacency: String) -> String:
   match preset:
     "none":
@@ -267,7 +256,6 @@ static func _resolve_bonus_kind(preset: String, shape: String, adjacency: String
       if shape == "ring":
         return "ring"
       return "classic"
-
 static func _build_bonus_map(kind: String, width: int, height: int) -> Dictionary:
   var map := _baseline_bonus(width, height)
   match kind:
@@ -280,21 +268,20 @@ static func _build_bonus_map(kind: String, width: int, height: int) -> Dictionar
     _:
       pass
   return map
-
 static func _baseline_bonus(width: int, height: int) -> Dictionary:
   var map := {}
   var center_x := (width - 1) / 2.0
   var center_y := (height - 1) / 2.0
   for y in range(height):
     for x in range(width):
-      var edge := min(min(x, width - 1 - x), min(y, height - 1 - y))
+      var edge: int = min(min(x, width - 1 - x), min(y, height - 1 - y))
       if edge == 0:
         _set_word(map, x, y, 3, [])
         continue
       if edge == 1:
         _set_word(map, x, y, 2, [])
         continue
-      var manhattan := abs(x - center_x) + abs(y - center_y)
+      var manhattan: float = abs(x - center_x) + abs(y - center_y)
       if manhattan == 0:
         continue
       if int(manhattan) % 4 == 0:
@@ -306,7 +293,6 @@ static func _baseline_bonus(width: int, height: int) -> Dictionary:
   if mid_x >= 0 and mid_x < width and mid_y >= 0 and mid_y < height:
     _set_word(map, mid_x, mid_y, 2, ["center"])
   return map
-
 static func _apply_hex_accents(map: Dictionary, width: int, height: int) -> void:
   var cx := (width - 1) / 2.0
   var cy := (height - 1) / 2.0
@@ -315,12 +301,11 @@ static func _apply_hex_accents(map: Dictionary, width: int, height: int) -> void
       var axial_q := x - cx
       var axial_r := y - cy
       var axial_s := -axial_q - axial_r
-      var radius := max(abs(axial_q), max(abs(axial_r), abs(axial_s)))
+      var radius: float = max(abs(axial_q), max(abs(axial_r), abs(axial_s)))
       if radius == 2:
         _set_letter(map, x, y, 3, ["hex"])
       elif radius == 3:
         _set_letter(map, x, y, 2, ["hex"])
-
 static func _apply_triangle_accents(map: Dictionary, width: int, height: int) -> void:
   for y in range(height):
     for x in range(width):
@@ -329,33 +314,29 @@ static func _apply_triangle_accents(map: Dictionary, width: int, height: int) ->
         _set_letter(map, x, y, 3, ["diag"])
       elif abs(diag) == 1:
         _set_letter(map, x, y, 2, ["diag"])
-
 static func _apply_ring_accents(map: Dictionary, width: int, height: int) -> void:
   var cx := (width - 1) / 2.0
   var cy := (height - 1) / 2.0
   for y in range(height):
     for x in range(width):
-      var dist := max(abs(x - cx), abs(y - cy))
+      var dist: float = max(abs(x - cx), abs(y - cy))
       if dist == 2:
         _set_word(map, x, y, 3, ["ring"])
       elif dist == 3:
         _set_word(map, x, y, 2, ["ring"])
-
 static func _set_word(map: Dictionary, x: int, y: int, mul: int, tags: Array) -> void:
   var key := _key(x, y)
   if map.has(key) and map[key].has("word_mul") and map[key].word_mul >= mul:
     return
   map[key] = {"x": x, "y": y, "word_mul": mul, "tags": tags.duplicate()}
-
 static func _set_letter(map: Dictionary, x: int, y: int, mul: int, tags: Array) -> void:
   var key := _key(x, y)
   if map.has(key):
-    var entry := map[key]
+    var entry: Dictionary = map[key]
     if entry.has("word_mul"):
       return
     if entry.has("letter_mul") and entry.letter_mul >= mul:
       return
   map[key] = {"x": x, "y": y, "letter_mul": mul, "tags": tags.duplicate()}
-
 static func _key(x: int, y: int) -> String:
   return "%d,%d" % [x, y]

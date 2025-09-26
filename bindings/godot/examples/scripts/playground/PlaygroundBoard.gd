@@ -61,10 +61,10 @@ func _rebuild_cells() -> void:
       var cell: PlaygroundBoardCell = PlaygroundBoardCell.new()
       cell.set_coord(x, y)
       cell.set_shape("hex" if hex_mode else "square")
-      cell.set_bonus(bonus_map.get(key, {}))
       cell.connect("cell_clicked", Callable(self, "_on_cell_clicked"))
       cell.connect("tile_dropped", Callable(self, "_on_tile_dropped"))
       add_child(cell)
+      cell.set_bonus(bonus_map.get(key, {}))
       cells[key] = cell
   _position_cells()
   _refresh_cells()
