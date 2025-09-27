@@ -204,3 +204,62 @@ fn ai_hint_is_legal_under_strict_budget() {
         .commit(&mut clone, validated, &score)
         .expect("commit should succeed");
 }
+
+#[test]
+fn ai_bag_sampling_hides_opponent_rack() {
+    let tileset = eng::Tileset {
+        tile_kinds: vec![
+            eng::TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
+            eng::TileKind { id: "B".into(), symbol: "B".into(), score: 3, is_blank: false, aliases: vec![] },
+        ],
+    };
+    let mut counts = std::collections::HashMap::new();
+    counts.insert("A".to_string(), 20u32);
+    counts.insert("B".to_string(), 0u32);
+    let cfg = eng::GameConfig {
+        tileset,
+        rack_size: 1,
+        board_layout: eng::RectBoardLayout { width: 5, height: 5 },
+        ruleset_id: "cross".into(),
+        dictionary_id: "en".into(),
+        rng_seed: 123,
+        tile_counts: counts,
+    };
+    let mut st = eng::GameState::new(&cfg, 2).unwrap();
+    // Dictionary allows the reply "BA" only
+    let dict = eng::FstDictionary::from_words(vec!["BA".to_string()], true);
+    st.dictionary = Some(Box::new(dict));
+
+    // Seed center A to create an anchor
+    let center = eng::CrosswordRules::center_cell(&st.board.geom);
+    let free_rules = eng::CrosswordRules { free_word_mode: true, ..Default::default() };
+    let mv = eng::MoveDraft { placements: vec![(center, eng::Tile { kind_id: "A".into(), mark: None })] };
+    let v = free_rules.validate(&st, &mv).unwrap();
+    let sc = free_rules.score(&st, &v);
+    free_rules.commit(&mut st, v, &sc).unwrap();
+
+    // Player 0 to move with rack B; opponent also has B (perfect info case would see a strong reply "BA")
+    st.to_move = eng::PlayerId(0);
+    set_rack(&mut st, &["B"]);
+    st.players[1].rack.tiles.clear();
+    st.players[1].rack.tiles.push(eng::Tile { kind_id: "B".into(), mark: None });
+
+    // Non-free rules with dictionary for evaluation
+    let rules = eng::CrosswordRules { free_word_mode: false, ..Default::default() };
+
+    // Perfect information: opponent reply uses known rack B
+    let mut cfg_pi = AiConfig { lookahead_depth: 1, max_move_len: 7, ..Default::default() };
+    cfg_pi.rack_leave.clear();
+    cfg_pi.opponent_model = eng::OpponentModel::PerfectInfo;
+    let eval_pi = eng::best_move_greedy(&st, &rules, &cfg_pi).expect("move available");
+
+    // Bag sampling: opponent rack resampled from bag that has only A's
+    let mut cfg_bag = AiConfig { lookahead_depth: 1, max_move_len: 7, ..Default::default() };
+    cfg_bag.rack_leave.clear();
+    cfg_bag.opponent_model = eng::OpponentModel::BagSampling;
+    let eval_bag = eng::best_move_greedy(&st, &rules, &cfg_bag).expect("move available");
+
+    // With bag sampling, the reply cannot rely on the opponent's original B,
+    // so the penalty from reply should be no worse than perfect-info case.
+    assert!(eval_bag.total >= eval_pi.total, "bag-sampled opponent should not penalize more than perfect-info");
+}

@@ -16,6 +16,9 @@ API (excerpt):
 - `tt_get_board(const GameHandle* game) -> char*` (JSON board)
 - `tt_string_free(char* s)`
 - `tt_last_error_message() -> const char*`
+- `tt_best_move(GameHandle* game, const char* difficulty, unsigned long long seed, unsigned int seed_is_some) -> char*` (JSON hint or "null")
+- `tt_best_move_with_model(GameHandle* game, const char* difficulty, unsigned long long seed, unsigned int seed_is_some, unsigned int opponent_model) -> char*`
+  - `opponent_model`: `0` = omniscient, `1` = hidden (bag sampling)
 
 Lifecycle:
 
@@ -28,4 +31,3 @@ Lifecycle:
 Error handling:
 
 - On failure, functions return `NULL`. Call `tt_last_error_message()` and copy the string immediately.
-

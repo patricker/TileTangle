@@ -541,6 +541,7 @@ export default function Playground({initial, compact}: PlaygroundProps = {}): JS
   const [turnNumber, setTurnNumber] = useState(0);
   const [bagSummary, setBagSummary] = useState<BagSummary>({counts: {}, total: 0});
   const [cpuDifficulty, setCpuDifficulty] = useState<'off' | 'easy' | 'medium' | 'hard'>(initial?.cpuDifficulty ?? 'off');
+  const [opponentModel, setOpponentModel] = useState<'perfect' | 'bag'>('perfect');
   const [cpuThinking, setCpuThinking] = useState(false);
   const [cpuSuggestion, setCpuSuggestion] = useState<AiSuggestion | null>(null);
   const [lastCpu, setLastCpu] = useState<AiSuggestion | null>(null);
@@ -1290,10 +1291,12 @@ export default function Playground({initial, compact}: PlaygroundProps = {}): JS
     try {
       let bestJson: string;
       if (useWorker) {
-        const resp = await game.call('best_move', {difficulty: cpuDifficulty, seed: BigInt(42)});
+        const resp = await game.call('best_move', {difficulty: cpuDifficulty, seed: BigInt(42), opponent: opponentModel});
         bestJson = resp.best as string;
       } else {
-        bestJson = game.mod.best_move(game.g, cpuDifficulty, BigInt(42));
+        // Use configurable greedy path to pass opponent model
+        const opts = {difficulty: cpuDifficulty, opponent: opponentModel};
+        bestJson = game.mod.best_move_greedy(game.g, undefined, undefined, BigInt(42), opts);
       }
       const payload = JSON.parse(bestJson);
       const placements: Placement[] = (payload.placements || []).map((p: any) => ({
@@ -2075,6 +2078,15 @@ export default function Playground({initial, compact}: PlaygroundProps = {}): JS
           {value: 'easy', label: 'Easy'},
           {value: 'medium', label: 'Medium'},
           {value: 'hard', label: 'Hard'},
+        ]}
+      />
+      <SegmentedControl
+        name="Opponent Visibility"
+        value={opponentModel}
+        onChange={value => setOpponentModel(value as 'perfect' | 'bag')}
+        options={[
+          {value: 'perfect', label: 'Omniscient'},
+          {value: 'bag', label: 'Hidden (bag)'}
         ]}
       />
       <ButtonRow

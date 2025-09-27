@@ -37,6 +37,10 @@ Use `bindings/unity/Runtime/TileTangle.cs` directly in your project. It exposes:
 - `Engine.NewGame(configJson, players)`
 - `Engine.PlayMove(placementsJson) -> string?`
 - `Engine.GetBoardJson() -> string?`
+- `Engine.BestMove(difficulty, seed?) -> string?`
+- `Engine.BestMoveWithModel(difficulty, seed?, opponent) -> string?` where `opponent` is `"perfect" | "bag"` for reply look‑ahead.
+- `Engine.GenerateMovesJson(maxLen, limit) -> string?` (array of candidates)
+- `Engine.EvaluateCandidate(placementsJson, difficulty?) -> string?` (heuristic breakdown)
 - `Engine.LastError() -> string?`
 
 ### Example

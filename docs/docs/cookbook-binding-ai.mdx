@@ -1,0 +1,105 @@
+---
+title: Build an AI in Bindings
+description: Rank candidates and compute heuristic breakdowns directly from JavaScript (WASM) and Python.
+---
+
+This page shows how to build simple AI logic outside Rust using the bindings. The core loop is:
+
+- Generate legal candidates for the current rack.
+- Evaluate each candidate to get raw score and heuristic breakdown.
+- Rank by a metric (the default `total` works well for greedy picks).
+
+Examples run with a small tileset and `free_word_mode: true` so you can copy and execute them without a dictionary.
+
+## JavaScript (WASM)
+
+```js
+import init, { new_game, set_free_word_mode, generate_moves, evaluate_candidate } from '/wasm/engine/pkg/tiletangle_wasm.js';
+await init();
+
+// Minimal 5×5 board, free-word mode, two letters
+const config = {
+  tileset: { tile_kinds: [
+    { id: 'A', symbol: 'A', score: 1 },
+    { id: 'B', symbol: 'B', score: 3 },
+  ]},
+  rack_size: 7,
+  board_layout: { width: 5, height: 5 },
+  ruleset_id: 'cross',
+  dictionary_id: 'demo',
+  rng_seed: 42,
+  tile_counts: { A: 10, B: 10 },
+  free_word_mode: true,
+};
+
+const game = new_game(JSON.stringify(config), 2);
+set_free_word_mode(game, true);
+
+// Generate a handful of moves and score them with the engine's heuristic
+const maxLen = 7, limit = 30;
+const moves = JSON.parse(generate_moves(game, maxLen, limit));
+
+let best = null;
+for (const mv of moves) {
+  const evalJson = evaluate_candidate(game, JSON.stringify(mv.placements), { difficulty: 'medium' });
+  const ev = JSON.parse(evalJson);
+  if (!ev) continue; // invalid under current rules
+  if (!best || ev.total > best.total) best = ev;
+}
+
+console.log('Best move:', best);
+```
+
+Notes
+
+- To keep the main thread responsive, use the worker helper at `wasm/engine/worker.js`. Post the `evaluate_candidate` action with `{placements, difficulty}`.
+- For one‑ply reply planning handled by the engine, call `best_move_greedy(game, undefined, 1, seed, { opponent: 'bag' })`.
+
+## Python
+
+```python
+from tiletangle import Game
+import json
+
+cfg = {
+  "tileset": {"tile_kinds": [
+    {"id": "A", "symbol": "A", "score": 1},
+    {"id": "B", "symbol": "B", "score": 3},
+  ]},
+  "rack_size": 7,
+  "board_layout": {"width": 5, "height": 5},
+  "ruleset_id": "cross",
+  "dictionary_id": "demo",
+  "rng_seed": 42,
+  "tile_counts": {"A": 10, "B": 10},
+  "free_word_mode": True,
+}
+
+g = Game(json.dumps(cfg), 2)
+
+# Greedy pick: generate, evaluate, rank
+cands = g.generate_moves(max_len=7, limit=30)
+best = None
+for mv in cands:
+  ev = g.evaluate_candidate(json.dumps(mv["placements"]), difficulty="medium")
+  if ev is None:
+    continue
+  if best is None or ev["total"] > best["total"]:
+    best = ev
+
+print("Best move:", best)
+
+# Optional: one‑ply reply planning (engine‑managed)
+hint = g.best_move_greedy(lookahead_depth=1, opponent="bag")
+print("One‑ply hint (bag‑sampled opponent):", hint)
+```
+
+## Tips
+
+- Determinism: pass a seed to `best_move`/`best_move_greedy` to stabilize tie‑breaking; your own loops can seed any randomness you introduce.
+- Budgets: cap work with `node_limit`/`time_limit_ms` in WASM and `node_limit`/`time_limit_ms` in Python (`best_move_greedy`).
+- Dictionaries: set `free_word_mode` off and load a dictionary when you want lexical filtering. Keep it on for self‑contained demos.
+- Heuristic knobs: `difficulty` adjusts budgets and noise; use it when calling `evaluate_candidate` to match the UI’s expectations.
+
+For the Rust strategy seam and reusable internals, see the AI Framework page.
+

@@ -1,14 +1,16 @@
-use rand::{rngs::StdRng, Rng, SeedableRng};
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::collections::HashMap;
+use std::time::Duration;
 
-use crate::{
-    geometry::{BoardGeometry, CellId},
-    movegen::{generate_moves, CandidateMove},
-    GameState, MoveDraft, Rules, Tile, Tileset,
-};
+use crate::{GameState, Rules};
+
+// The AI module now follows a strategy pattern. The existing greedy implementation
+// is preserved in `greedy.rs`, and public functions here dispatch to that default.
+
+mod types;
+mod heuristics;
+mod greedy;
+pub use types::EvaluatedMove;
+pub use heuristics::evaluate_candidate_move;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiDifficulty {
@@ -29,6 +31,7 @@ pub struct AiConfig {
     pub reply_move_limit: usize,
     pub noise_range: i32,
     pub parallel_eval: bool,
+    pub opponent_model: OpponentModel,
 }
 
 impl Default for AiConfig {
@@ -44,6 +47,7 @@ impl Default for AiConfig {
             reply_move_limit: usize::MAX,
             noise_range: 0,
             parallel_eval: false,
+            opponent_model: OpponentModel::PerfectInfo,
         }
     }
 }
@@ -90,6 +94,15 @@ impl AiConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpponentModel {
+    /// Use the actual opponent rack from the state (perfect information).
+    PerfectInfo,
+    /// Treat the opponent rack as hidden: return their tiles to the bag and draw a fresh rack from the bag
+    /// for reply simulation. This is a simple bag-sampling model (single sample).
+    BagSampling,
+}
+
 fn default_rack_leave_table() -> HashMap<String, i32> {
     HashMap::from([
         ("A".into(), 1),
@@ -121,194 +134,18 @@ fn default_rack_leave_table() -> HashMap<String, i32> {
     ])
 }
 
-fn tileset_symbol_for_kind(tileset: &Tileset, kind_id: &str) -> String {
-    tileset
-        .tile_kinds
-        .iter()
-        .find(|tk| tk.id == kind_id)
-        .map(|tk| tk.symbol.clone())
-        .unwrap_or_else(|| kind_id.to_string())
+// Strategy interface for pluggable AI implementations.
+pub trait AiStrategy {
+    fn id(&self) -> &'static str;
+    fn best_move(&self, state: &GameState, rules: &dyn Rules, config: &AiConfig) -> Option<EvaluatedMove>;
 }
 
-fn leftover_counts_from_rack(rack: &[String], placements: &[(CellId, Tile)]) -> HashMap<String, usize> {
-    let mut counts: HashMap<String, usize> = HashMap::new();
-    for kid in rack { *counts.entry(kid.clone()).or_default() += 1; }
-    for (_, tile) in placements {
-        if let Some(entry) = counts.get_mut(&tile.kind_id) && *entry > 0 { *entry -= 1; }
-    }
-    counts.retain(|_, v| *v > 0);
-    counts
-}
-
-fn rack_leave_score(config: &AiConfig, tileset: &Tileset, leftover: &HashMap<String, usize>) -> i32 {
-    leftover
-        .iter()
-        .map(|(kid, count)| {
-            let sym = tileset_symbol_for_kind(tileset, kid).to_uppercase();
-            let val = config
-                .rack_leave
-                .get(&sym)
-                .or_else(|| config.rack_leave.get(kid))
-                .copied()
-                .unwrap_or(0);
-            val * (*count as i32)
-        })
-        .sum()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EvaluatedMove {
-    pub candidate: CandidateMove,
-    pub rack_leave: i32,
-    pub board_equity: i32,
-    pub endgame_penalty: i32,
-    pub total: i32,
-}
-
-fn board_equity_bonus(state: &GameState, candidate: &CandidateMove) -> i32 {
-    let mut bonus = 0;
-    let placed: HashSet<CellId> = candidate.placements.iter().map(|(cid, _)| *cid).collect();
-    for (cid, _) in &candidate.placements {
-        for neigh in state.board.geom.neighbors(*cid) {
-            if placed.contains(&neigh) { continue; }
-            if state.board.cells[neigh.0 as usize].stack.is_empty() { bonus += 1; }
-        }
-    }
-    bonus
-}
-
-fn endgame_penalty(state: &GameState, leftover: &HashMap<String, usize>) -> i32 {
-    if state.bag.remaining() > 0 { return 0; }
-    let mut penalty = 0;
-    for (kind_id, count) in leftover {
-        if *count == 0 { continue; }
-        if let Some(kind) = state.tileset.tile_kinds.iter().find(|tk| tk.id == *kind_id) {
-            penalty -= (*count as i32) * (kind.score as i32);
-        }
-    }
-    penalty
-}
-
-pub fn evaluate_candidate_move(
-    state: &GameState,
-    candidate: CandidateMove,
-    rack: &[String],
-    config: &AiConfig,
-) -> EvaluatedMove {
-    let leftover = leftover_counts_from_rack(rack, &candidate.placements);
-    let leave_score = rack_leave_score(config, &state.tileset, &leftover);
-    let board_eq = board_equity_bonus(state, &candidate);
-    let end_pen = endgame_penalty(state, &leftover);
-    let total = candidate.score + leave_score + board_eq + end_pen;
-    EvaluatedMove { candidate, rack_leave: leave_score, board_equity: board_eq, endgame_penalty: end_pen, total }
-}
-
-pub fn best_move_greedy(
-    state: &GameState,
-    rules: &impl Rules,
-    config: &AiConfig,
-) -> Option<EvaluatedMove> {
-    let mut ctx = SearchContext::new(config);
-    best_move_inner(state, rules, config.lookahead_depth, &mut ctx)
+// Public API remains stable: these call into the default strategy.
+pub fn best_move_greedy(state: &GameState, rules: &impl Rules, config: &AiConfig) -> Option<EvaluatedMove> {
+    greedy::best_move_default(state, rules, config)
 }
 
 pub fn best_move(state: &GameState, rules: &impl Rules, level: AiDifficulty) -> Option<EvaluatedMove> {
     let cfg = AiConfig::for_difficulty(level);
     best_move_greedy(state, rules, &cfg)
-}
-
-#[derive(Debug)]
-struct BestCandidate { eval: EvaluatedMove, adjusted_total: i32 }
-
-struct SearchContext<'a> {
-    config: &'a AiConfig,
-    rng: Option<StdRng>,
-    nodes: usize,
-    deadline: Option<Instant>,
-}
-
-impl<'a> SearchContext<'a> {
-    fn new(config: &'a AiConfig) -> Self {
-        let mut rng = config.randomness.map(StdRng::seed_from_u64);
-        if rng.is_none() && config.requires_rng() { rng = Some(StdRng::from_entropy()); }
-        Self { config, rng, nodes: 0, deadline: config.max_duration.map(|d| Instant::now().checked_add(d).unwrap_or(Instant::now())) }
-    }
-    fn rng_mut(&mut self) -> Option<&mut StdRng> {
-        if self.rng.is_none() && (self.config.randomness.is_some() || self.config.requires_rng()) {
-            self.rng = Some(match self.config.randomness { Some(seed) => StdRng::seed_from_u64(seed), None => StdRng::from_entropy() });
-        }
-        self.rng.as_mut()
-    }
-    fn record_node(&mut self) { self.nodes = self.nodes.saturating_add(1); }
-    fn node_limit_hit(&self) -> bool { self.config.max_nodes.map(|limit| self.nodes >= limit).unwrap_or(false) }
-    fn time_limit_hit(&self) -> bool { self.deadline.map(|deadline| Instant::now() >= deadline).unwrap_or(false) }
-    fn sample_noise(&mut self) -> i32 { let range = self.config.noise_range; if range <= 0 { 0 } else { self.rng_mut().map(|rng| rng.gen_range(-range..=range)).unwrap_or(0) } }
-    fn random_bool(&mut self, p: f64) -> bool { if p <= 0.0 { return false; } let p = p.min(1.0); self.rng_mut().map(|rng| rng.gen_bool(p)).unwrap_or(false) }
-}
-
-fn best_move_inner(
-    state: &GameState,
-    rules: &impl Rules,
-    depth: usize,
-    ctx: &mut SearchContext<'_>,
-) -> Option<EvaluatedMove> {
-    let pid = state.to_move.0;
-    let rack: Vec<String> = state.players[pid].rack.tiles.iter().map(|t| t.kind_id.clone()).collect();
-    let mut candidates = generate_moves(state, rules, &rack, ctx.config.max_move_len);
-    if let Some(limit) = ctx.config.candidate_limit { if candidates.len() > limit { candidates.truncate(limit); } }
-    else if ctx.config.reply_move_limit != usize::MAX && candidates.len() > ctx.config.reply_move_limit { candidates.truncate(ctx.config.reply_move_limit); }
-
-    let mut best: Option<BestCandidate> = None;
-    if ctx.config.parallel_eval && depth == ctx.config.lookahead_depth && ctx.config.lookahead_depth == 0 {
-        #[cfg(feature = "parallel")]
-        {
-            let evals: Vec<(CandidateMove, EvaluatedMove)> = candidates
-                .into_par_iter()
-                .map(|cand| {
-                    let eval = evaluate_candidate_move(state, cand.clone(), &rack, ctx.config);
-                    (cand, eval)
-                })
-                .collect();
-            for (_cand, eval) in evals {
-                let adjusted = eval.total + ctx.sample_noise();
-                match &mut best {
-                    None => best = Some(BestCandidate { eval, adjusted_total: adjusted }),
-                    Some(current) => {
-                        if adjusted > current.adjusted_total { *current = BestCandidate { eval, adjusted_total: adjusted }; }
-                    }
-                }
-            }
-            return best.map(|b| b.eval);
-        }
-    }
-
-    for cand in candidates {
-        if ctx.node_limit_hit() && best.is_some() { break; }
-        if ctx.time_limit_hit() && best.is_some() { break; }
-        ctx.record_node();
-        let mut eval = evaluate_candidate_move(state, cand.clone(), &rack, ctx.config);
-        if depth > 0 && !ctx.node_limit_hit() && !ctx.time_limit_hit() {
-            let draft = MoveDraft { placements: cand.placements.clone() };
-            if let Ok(validated) = rules.validate(state, &draft) {
-                let score = rules.score(state, &validated);
-                let mut next_state = state.clone();
-                if rules.commit(&mut next_state, validated, &score).is_ok() &&
-                    let Some(reply) = best_move_inner(&next_state, rules, depth.saturating_sub(1), ctx)
-                { eval.total -= reply.total; }
-            }
-        }
-        let adjusted = eval.total + ctx.sample_noise();
-        match &mut best {
-            None => best = Some(BestCandidate { eval, adjusted_total: adjusted }),
-            Some(current) => {
-                let better = adjusted > current.adjusted_total
-                    || (adjusted == current.adjusted_total && eval.total > current.eval.total)
-                    || (adjusted == current.adjusted_total && eval.total == current.eval.total && eval.rack_leave > current.eval.rack_leave)
-                    || (adjusted == current.adjusted_total && eval.total == current.eval.total && eval.rack_leave == current.eval.rack_leave && ctx.random_bool(0.5));
-                if better { *current = BestCandidate { eval, adjusted_total: adjusted }; }
-            }
-        }
-        if ctx.time_limit_hit() && best.is_some() { break; }
-    }
-    best.map(|b| b.eval)
 }

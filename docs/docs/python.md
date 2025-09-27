@@ -36,3 +36,22 @@ print(g.play_move(json.dumps([
 ])))
 ```
 
+Hints and difficulty:
+
+```python
+# Quick difficulty preset
+best = g.best_move("medium", seed=12345)
+if best:
+    print(best)
+
+# Tuned greedy with budgets
+hint = g.best_move_greedy(max_len=7, lookahead_depth=1, node_limit=64, time_limit_ms=25)
+
+# Opponent visibility for look-ahead (omniscient vs. hidden via bag sampling)
+best_hidden = g.best_move("hard", seed=1, opponent="bag")
+hint_hidden = g.best_move_greedy(lookahead_depth=1, opponent="bag")
+
+# Heuristic breakdown for a manual placement
+eval = g.evaluate_candidate('[{"x":2,"y":2,"kind_id":"A"}]', difficulty="medium")
+print(eval)
+```

@@ -41,6 +41,10 @@ const placements = [{ x: 3, y: 3, kind_id: 'A' }];
 const result = play_move(game, JSON.stringify(placements));
 console.log('score', JSON.parse(result));
 console.log('board after', get_board(game));
+
+// Evaluate a candidate (heuristic breakdown)
+const evalJson = evaluate_candidate(game, JSON.stringify(placements), { difficulty: 'medium' });
+console.log('eval', JSON.parse(evalJson));
 ```
 
   </TabItem>
@@ -74,6 +78,11 @@ function call(action, payload) {
 }
 await call('new_game', { config, players: 2 });
 const { board } = await call('get_board');
+const { eval: evaluation } = await call('evaluate_candidate', {
+  placements: [{ x: 3, y: 3, kind_id: 'A' }],
+  difficulty: 'medium',
+});
+console.log(JSON.parse(evaluation));
 ```
 
   </TabItem>

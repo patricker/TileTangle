@@ -76,7 +76,7 @@ pub use movegen::{CandidateMove, generate_moves};
 
 // -------- AI --------
 pub mod ai;
-pub use ai::{AiConfig, AiDifficulty, EvaluatedMove, evaluate_candidate_move, best_move, best_move_greedy};
+pub use ai::{AiConfig, AiDifficulty, EvaluatedMove, evaluate_candidate_move, best_move, best_move_greedy, AiStrategy, OpponentModel};
 
 impl Player {
     fn rack_size(&self) -> Option<usize> {
@@ -97,4 +97,3 @@ mod tests {
     #[test]
     fn version_smoke() { assert_eq!(engine_version().major, 0); }
 }
-

@@ -291,7 +291,7 @@ impl Game {
         Ok(list.into_pyobject(py)?.into_any().unbind())
     }
 
-    #[pyo3(signature = (max_len=None, lookahead_depth=None, seed=None, node_limit=None, time_limit_ms=None, difficulty=None, noise_range=None, candidate_limit=None, reply_limit=None, parallel_eval=None))]
+    #[pyo3(signature = (max_len=None, lookahead_depth=None, seed=None, node_limit=None, time_limit_ms=None, difficulty=None, noise_range=None, candidate_limit=None, reply_limit=None, parallel_eval=None, opponent=None))]
     #[allow(clippy::too_many_arguments)]
     fn best_move_greedy(
         &self,
@@ -305,6 +305,7 @@ impl Game {
         candidate_limit: Option<usize>,
         reply_limit: Option<usize>,
         parallel_eval: Option<bool>,
+        opponent: Option<&str>,
         py: Python<'_>,
     ) -> PyResult<Option<PyObject>> {
         let mut cfg = AiConfig::default();
@@ -337,22 +338,35 @@ impl Game {
         if let Some(parallel) = parallel_eval {
             cfg.parallel_eval = parallel;
         }
+        if let Some(model) = opponent {
+            cfg.opponent_model = match model {
+                "bag" => engine::OpponentModel::BagSampling,
+                _ => engine::OpponentModel::PerfectInfo,
+            };
+        }
         let Some(eval) = engine::best_move_greedy(&self.state, &self.rules, &cfg) else {
             return Ok(None);
         };
         self.evaluated_move_to_py(eval, py).map(Some)
     }
 
-    #[pyo3(signature = (difficulty, seed=None))]
+    #[pyo3(signature = (difficulty, seed=None, opponent=None))]
     fn best_move(
         &self,
         difficulty: &str,
         seed: Option<u64>,
+        opponent: Option<&str>,
         py: Python<'_>,
     ) -> PyResult<Option<PyObject>> {
         let level = parse_difficulty_tag(difficulty)?;
         let mut cfg = AiConfig::for_difficulty(level);
         cfg.randomness = seed;
+        if let Some(model) = opponent {
+            cfg.opponent_model = match model {
+                "bag" => engine::OpponentModel::BagSampling,
+                _ => engine::OpponentModel::PerfectInfo,
+            };
+        }
         let Some(eval) = engine::best_move_greedy(&self.state, &self.rules, &cfg) else {
             return Ok(None);
         };
@@ -371,6 +385,36 @@ impl Game {
             .snapshot_cbor()
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(PyBytes::new(py, &bytes).into_pyobject(py)?.into_any().unbind())
+    }
+
+    #[pyo3(text_signature = "(self, placements_json, difficulty=None)")]
+    fn evaluate_candidate(&self, placements_json: &str, difficulty: Option<&str>, py: Python<'_>) -> PyResult<PyObject> {
+        let items: Vec<JsPlacement> = serde_json::from_str(placements_json)
+            .map_err(|e| PyValueError::new_err(format!("placements parse error: {}", e)))?;
+        let mut mv = engine::MoveDraft { placements: vec![] };
+        for p in &items {
+            let Some(cid) = self.state.board.geom.to_cell_id(engine::Coord2D { x: p.x, y: p.y }) else {
+                return Err(PyValueError::new_err("invalid coordinates"));
+            };
+            mv.placements.push((cid, engine::Tile { kind_id: p.kind_id.clone(), mark: None }));
+        }
+        let validated = self.rules.validate(&self.state, &mv).map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+        let sc = self.rules.score(&self.state, &validated);
+        if sc.main_score < 0 { return Ok(py.None()); }
+        let candidate = engine::CandidateMove { placements: validated.placements.clone(), word: sc.main_word.clone(), score: sc.total };
+        let pid = self.state.to_move.0;
+        let rack: Vec<String> = self.state.players[pid].rack.tiles.iter().map(|t| t.kind_id.clone()).collect();
+        let mut cfg = AiConfig::default();
+        if let Some(level) = difficulty { cfg.apply_difficulty(parse_difficulty_tag(level)?); }
+        let eval = engine::evaluate_candidate_move(&self.state, candidate, &rack, &cfg);
+        let out = PyDict::new(py);
+        out.set_item("word", eval.candidate.word)?;
+        out.set_item("score", eval.candidate.score)?;
+        out.set_item("rack_leave", eval.rack_leave)?;
+        out.set_item("board_equity", eval.board_equity)?;
+        out.set_item("endgame_penalty", eval.endgame_penalty)?;
+        out.set_item("total", eval.total)?;
+        Ok(out.into_pyobject(py)?.into_any().unbind())
     }
 
     fn load_snapshot_json(&mut self, json: &str) -> PyResult<()> {

@@ -76,6 +76,10 @@ This target copies the export into `docs/static/playground/`, and the page “Go
 - `WordEngine.play_move(placements_json: String) -> String` (empty on error)
 - `WordEngine.get_board_json() -> String`
 - `WordEngine.set_free_word_mode(on: bool)`
+- `WordEngine.best_move(difficulty: String, seed: int) -> String`
+- `WordEngine.best_move_with_opts(difficulty: String, seed: int, opponent: String) -> String` where `opponent` is `"perfect" | "bag"` for reply look‑ahead.
+- `WordEngine.generate_moves(max_len: int, limit: int) -> String` (array of candidates)
+- `WordEngine.evaluate_candidate(placements_json: String, difficulty: String) -> String` (heuristic breakdown)
 
 ## Toggle rules mid-session
 

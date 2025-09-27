@@ -67,6 +67,8 @@ const tuned = JSON.parse(
     node_limit: 64,
     time_limit_ms: 25,
     noise_range: 4,
+    // Opponent visibility: 'perfect' (omniscient) or 'bag' (sample from bag)
+    opponent: 'bag',
   }),
 );
 ```
@@ -109,3 +111,12 @@ to ship fast hints on mobile while still letting desktop builds think longer.
 
 Contributions to the rack-leave table are welcome—tweak `AiConfig::rack_leave` for your language or
 tile distribution, or swap it entirely for variant-specific heuristics.
+
+## Opponent visibility
+
+When `lookahead_depth > 0`, the AI can simulate an opponent reply. Two models are available:
+
+- Omniscient: uses the opponent’s actual rack in state (fastest; strongest but “perfect‑info”).
+- Hidden (bag): samples a fresh rack from the remaining bag before simulating a reply (models uncertainty).
+
+In Rust, set `config.opponent_model` accordingly. In WASM, pass `opponent: 'perfect' | 'bag'` in the options object for `best_move_greedy`.

@@ -1,5 +1,5 @@
 use console_error_panic_hook as panic_hook;
-use engine::{self, AiConfig, AiDifficulty, BoardGeometry, Rules};
+use engine::{self, AiConfig, AiDifficulty, BoardGeometry, Rules, OpponentModel};
 use js_sys::Reflect;
 use serde::Deserialize;
 use serde_json::json;
@@ -870,6 +870,12 @@ pub fn best_move_greedy(
         if let Some(par) = js_get_bool(&opts, "parallel_eval")? {
             cfg.parallel_eval = par;
         }
+        if let Some(model) = js_get_string(&opts, "opponent")? {
+            cfg.opponent_model = match model.as_str() {
+                "bag" => OpponentModel::BagSampling,
+                _ => OpponentModel::PerfectInfo,
+            };
+        }
     }
     if let Some(m) = max_len {
         cfg.max_move_len = m as usize;
@@ -890,6 +896,36 @@ pub fn best_move(game: &JsGame, difficulty: &str, seed: Option<u64>) -> Result<S
     cfg.randomness = seed;
     let eval = engine::best_move_greedy(&game.state, &game.rules, &cfg)
         .ok_or_else(|| to_js_err("no moves available"))?;
+    evaluated_move_to_json(game, eval)
+}
+
+#[wasm_bindgen]
+pub fn evaluate_candidate(game: &JsGame, placements_json: &str, opts: JsValue) -> Result<String, JsValue> {
+    let items: Vec<JsPlacement> = serde_json::from_str(placements_json).map_err(to_js_err)?;
+    let mut mv = engine::MoveDraft { placements: vec![] };
+    for p in &items {
+        let cid = game
+            .state
+            .board
+            .geom
+            .to_cell_id(engine::Coord2D { x: p.x, y: p.y })
+            .ok_or_else(|| to_js_err("invalid coordinates"))?;
+        mv.placements.push((cid, engine::Tile { kind_id: p.kind_id.clone(), mark: None }));
+    }
+    let validated = game.rules.validate(&game.state, &mv).map_err(to_js_err)?;
+    let sc = game.rules.score(&game.state, &validated);
+    if sc.main_score < 0 { return Ok(String::from("null")); }
+    let candidate = engine::CandidateMove { placements: validated.placements.clone(), word: sc.main_word.clone(), score: sc.total };
+    let pid = game.state.to_move.0;
+    let rack: Vec<String> = game.state.players[pid].rack.tiles.iter().map(|t| t.kind_id.clone()).collect();
+    let mut cfg = AiConfig::default();
+    if !opts.is_null() && !opts.is_undefined() {
+        if let Some(level) = js_get_string(&opts, "difficulty")? {
+            let diff = parse_difficulty_tag(&level)?;
+            cfg.apply_difficulty(diff);
+        }
+    }
+    let eval = engine::evaluate_candidate_move(&game.state, candidate, &rack, &cfg);
     evaluated_move_to_json(game, eval)
 }
 

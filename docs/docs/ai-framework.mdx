@@ -1,0 +1,63 @@
+---
+title: AI Framework
+description: Strategy interface, reusable heuristics, and configuration knobs for building AIs.
+---
+
+TileTangle’s AI layer uses a small strategy interface with shared building blocks so you can reuse core pieces while experimenting with new approaches.
+
+## Strategy interface
+
+- `AiStrategy`: minimal trait with `id()` and `best_move(state, rules, config)`.
+- Default implementation: a greedy evaluator that scores candidates with rack‑leave, board equity, and endgame heuristics, with optional one‑ply reply search.
+
+The public helpers (`best_move`, `best_move_greedy`) dispatch to the default strategy and remain stable.
+
+## Reusable pieces
+
+- Types: `EvaluatedMove` (final pick with `total`, `rack_leave`, `board_equity`, `endgame_penalty`).
+- Heuristics:
+  - `evaluate_candidate_move(state, candidate, rack, config)`
+  - `rack_leave_score(...)`, `board_equity_bonus(...)`, `endgame_penalty(...)`
+
+These live under `engine::ai` and are exported for use in custom strategies.
+
+## Configuration knobs
+
+- Depth and budgets: `lookahead_depth`, `max_nodes`, `max_duration`, `candidate_limit`, `reply_move_limit`, `parallel_eval`.
+- Evaluation: `rack_leave` table, `max_move_len`.
+- Randomness: `randomness` (seed), `noise_range` (± window applied for tie‑breaking).
+- Opponent visibility: `opponent_model` chooses between omniscient and hidden (bag‑sampled) reply when `lookahead_depth > 0`.
+
+### Rust
+
+```rust
+use tiletangle_engine::{AiConfig, OpponentModel, best_move_greedy, CrosswordRules};
+
+let rules = CrosswordRules { free_word_mode: false, ..Default::default() };
+let mut cfg = AiConfig::default();
+cfg.lookahead_depth = 1;                 // one-ply reply
+cfg.max_nodes = Some(64);                // budget
+cfg.opponent_model = OpponentModel::BagSampling; // hidden opponent
+let eval = best_move_greedy(&state, &rules, &cfg);
+```
+
+### WASM
+
+```ts
+const json = mod.best_move_greedy(game, undefined, undefined, 1234, {
+  difficulty: 'medium',
+  node_limit: 64,
+  opponent: 'bag', // 'perfect' | 'bag'
+});
+const best = JSON.parse(json);
+```
+
+## Default greedy strategy
+
+- Move generation: enumerate legal plays for the active rack.
+- Scoring: `raw + rack_leave + board_equity + endgame_penalty`.
+- Look‑ahead: optional one‑ply reply; subtracts the opponent’s best reply `total`.
+- Tie‑breaking: noise window for easier presets; deterministic with a seed.
+
+You can start from this and swap in a different search controller or heuristic while keeping the shared helpers.
+

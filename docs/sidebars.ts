@@ -46,7 +46,7 @@ const sidebars: SidebarsConfig = {
         {
           type: 'category',
           label: 'AI',
-          items: ['concepts/ai', 'ai-overview'],
+          items: ['concepts/ai', 'ai-overview', 'ai-framework'],
         },
       ],
     },
@@ -83,7 +83,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Cookbook',
-      items: ['cookbook'],
+      items: ['cookbook', 'cookbook-binding-ai'],
     },
   ],
 };

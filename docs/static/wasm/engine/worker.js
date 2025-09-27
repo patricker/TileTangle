@@ -85,6 +85,7 @@ self.onmessage = async (e) => {
         candidate_limit: payload?.candidate_limit,
         reply_limit: payload?.reply_limit,
         parallel_eval: payload?.parallel_eval,
+        opponent: payload?.opponent,
       };
       const opts = Object.fromEntries(
         Object.entries(optsRaw).filter(([, value]) => value !== undefined && value !== null),
@@ -97,6 +98,12 @@ self.onmessage = async (e) => {
         Object.keys(opts).length ? opts : undefined,
       );
       self.postMessage({ id, ok: true, best: res });
+    } else if (action === 'evaluate_candidate') {
+      if (!game) throw new Error('no game');
+      const optsRaw = { difficulty: payload?.difficulty };
+      const opts = Object.fromEntries(Object.entries(optsRaw).filter(([,v]) => v != null));
+      const res = mod.evaluate_candidate(game, JSON.stringify(payload?.placements || []), opts);
+      self.postMessage({ id, ok: true, eval: res });
     } else if (action === 'pass_turn') {
       if (!game) throw new Error('no game');
       mod.pass_turn(game);

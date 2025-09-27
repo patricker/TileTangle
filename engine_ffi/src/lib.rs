@@ -811,6 +811,81 @@ pub extern "C" fn tt_preview_move(
     take_cstring(serde_json::to_string(&val).unwrap())
 }
 
+/// Evaluate a candidate move with heuristic components.
+///
+/// `placements_json` is an array of objects with `{x, y, kind_id}`.
+/// `difficulty` may be null; when provided it accepts "easy", "medium", or "hard" (affects config knobs, not scoring table).
+/// Returns a JSON blob with `{ word, score, rack_leave, board_equity, endgame_penalty, total }` or null on error.
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn tt_evaluate_candidate(
+    game: *const GameHandle,
+    placements_json: *const c_char,
+    difficulty: *const c_char,
+) -> *mut c_char {
+    LAST_ERROR.with(|e| *e.borrow_mut() = None);
+    if game.is_null() {
+        set_error("game is null");
+        return std::ptr::null_mut();
+    }
+    if placements_json.is_null() {
+        set_error("placements_json is null");
+        return std::ptr::null_mut();
+    }
+    let g = unsafe { &*(game as *const FfiGame) };
+    let p_str = unsafe { CStr::from_ptr(placements_json) };
+    let p_val = match p_str.to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_error("placements_json is not valid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+    let items: Vec<JsPlacement> = match serde_json::from_str(p_val) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(format!("placements parse error: {}", e));
+            return std::ptr::null_mut();
+        }
+    };
+    let mut mv = engine::MoveDraft { placements: vec![] };
+    for p in &items {
+        let Some(cid) = g.state.board.geom.to_cell_id(engine::geometry::Coord2D { x: p.x, y: p.y }) else {
+            set_error("invalid coordinates");
+            return std::ptr::null_mut();
+        };
+        mv.placements.push((cid, engine::Tile { kind_id: p.kind_id.clone(), mark: None }));
+    }
+    let validated = match g.rules.validate(&g.state, &mv) {
+        Ok(v) => v,
+        Err(e) => { set_error(format!("{}", e)); return std::ptr::null_mut(); }
+    };
+    let sc = g.rules.score(&g.state, &validated);
+    if sc.main_score < 0 { return take_cstring("null".to_string()); }
+    let mut cand = engine::CandidateMove { placements: validated.placements.clone(), word: sc.main_word.clone(), score: sc.total };
+    // Build rack kinds for the active player
+    let pid = g.state.to_move.0;
+    let rack: Vec<String> = g.state.players[pid].rack.tiles.iter().map(|t| t.kind_id.clone()).collect();
+    // Configure AI for evaluation
+    let mut cfg = AiConfig::default();
+    if !difficulty.is_null() {
+        let dstr = unsafe { CStr::from_ptr(difficulty) };
+        if let Ok(ds) = dstr.to_str() {
+            if let Ok(level) = parse_difficulty_tag(ds) { cfg.apply_difficulty(level); }
+        }
+    }
+    let eval = engine::evaluate_candidate_move(&g.state, cand, &rack, &cfg);
+    let val = serde_json::json!({
+        "word": eval.candidate.word,
+        "score": eval.candidate.score,
+        "rack_leave": eval.rack_leave,
+        "board_equity": eval.board_equity,
+        "endgame_penalty": eval.endgame_penalty,
+        "total": eval.total,
+    });
+    take_cstring(val.to_string())
+}
+
 /// Compute the engine's best move for the current player.
 ///
 /// `difficulty` accepts "easy", "medium", or "hard".
@@ -872,6 +947,73 @@ pub extern "C" fn tt_best_move(
         if let Some(mark) = &tile.mark {
             obj.insert("mark".into(), serde_json::Value::String(mark.clone()));
         }
+        placements_json.push(serde_json::Value::Object(obj));
+    }
+    let val = serde_json::json!({
+        "word": eval.candidate.word,
+        "score": eval.candidate.score,
+        "total": eval.total,
+        "rack_leave": eval.rack_leave,
+        "board_equity": eval.board_equity,
+        "endgame_penalty": eval.endgame_penalty,
+        "placements": placements_json,
+    });
+    take_cstring(val.to_string())
+}
+
+/// Compute best move with an explicit opponent visibility model.
+/// `opponent_model`: 0 => perfect info, 1 => bag sampling.
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn tt_best_move_with_model(
+    game: *mut GameHandle,
+    difficulty: *const c_char,
+    seed: u64,
+    seed_is_some: c_uint,
+    opponent_model: c_uint,
+) -> *mut c_char {
+    LAST_ERROR.with(|e| *e.borrow_mut() = None);
+    if game.is_null() {
+        set_error("game is null");
+        return std::ptr::null_mut();
+    }
+    let g = unsafe { &mut *(game as *mut FfiGame) };
+    if difficulty.is_null() {
+        set_error("difficulty is null");
+        return std::ptr::null_mut();
+    }
+    let diff_cstr = unsafe { CStr::from_ptr(difficulty) };
+    let diff_str = match diff_cstr.to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_error("difficulty is not valid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+    let level = match parse_difficulty_tag(diff_str) {
+        Ok(lvl) => lvl,
+        Err(_) => {
+            set_error("unknown difficulty");
+            return std::ptr::null_mut();
+        }
+    };
+    let mut cfg = AiConfig::for_difficulty(level);
+    if seed_is_some != 0 { cfg.randomness = Some(seed); }
+    cfg.opponent_model = if opponent_model == 1 { engine::OpponentModel::BagSampling } else { engine::OpponentModel::PerfectInfo };
+    let Some(eval) = engine::best_move_greedy(&g.state, &g.rules, &cfg) else {
+        return take_cstring("null".to_string());
+    };
+    let mut placements_json = Vec::with_capacity(eval.candidate.placements.len());
+    for (cid, tile) in &eval.candidate.placements {
+        let Some(coord) = g.state.board.geom.from_cell_id(*cid) else {
+            set_error("invalid placement coordinate");
+            return std::ptr::null_mut();
+        };
+        let mut obj = serde_json::Map::new();
+        obj.insert("x".into(), coord.x.into());
+        obj.insert("y".into(), coord.y.into());
+        obj.insert("kind_id".into(), serde_json::Value::String(tile.kind_id.clone()));
+        if let Some(mark) = &tile.mark { obj.insert("mark".into(), serde_json::Value::String(mark.clone())); }
         placements_json.push(serde_json::Value::Object(obj));
     }
     let val = serde_json::json!({

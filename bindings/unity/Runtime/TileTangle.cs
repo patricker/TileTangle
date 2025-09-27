@@ -32,6 +32,9 @@ namespace TileTangle
         public static extern IntPtr tt_best_move(IntPtr game, IntPtr difficulty, ulong seed, uint seedIsSome);
 
         [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr tt_best_move_with_model(IntPtr game, IntPtr difficulty, ulong seed, uint seedIsSome, uint opponentModel);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
         public static extern uint tt_set_bonuses(IntPtr game, IntPtr bonusesJson);
 
         [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
@@ -63,6 +66,9 @@ namespace TileTangle
 
         [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr tt_generate_moves(IntPtr game, uint maxLen, uint limit);
+
+        [DllImport(LIB, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr tt_evaluate_candidate(IntPtr game, IntPtr placementsJson, IntPtr difficulty);
     }
 
     public sealed class Engine : IDisposable
@@ -138,6 +144,30 @@ namespace TileTangle
             }
         }
 
+        public string? EvaluateCandidate(string placementsJson, string? difficulty = null)
+        {
+            EnsureHandle();
+            var pPtr = StringToUtf8(placementsJson);
+            IntPtr dPtr = difficulty != null ? StringToUtf8(difficulty) : IntPtr.Zero;
+            try
+            {
+                var res = Native.tt_evaluate_candidate(handle, pPtr, dPtr);
+                return TakeString(res);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(pPtr);
+                if (dPtr != IntPtr.Zero) Marshal.FreeHGlobal(dPtr);
+            }
+        }
+
+        public string? GenerateMovesJson(uint maxLen, uint limit)
+        {
+            EnsureHandle();
+            var res = Native.tt_generate_moves(handle, maxLen, limit);
+            return TakeString(res);
+        }
+
         public string? BestMove(string difficulty, ulong? seed = null)
         {
             EnsureHandle();
@@ -145,6 +175,22 @@ namespace TileTangle
             try
             {
                 var res = Native.tt_best_move(handle, diffPtr, seed ?? 0, seed.HasValue ? 1u : 0u);
+                return TakeString(res);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(diffPtr);
+            }
+        }
+
+        public string? BestMoveWithModel(string difficulty, ulong? seed = null, string opponent = "perfect")
+        {
+            EnsureHandle();
+            var diffPtr = StringToUtf8(difficulty);
+            try
+            {
+                uint model = opponent == "bag" ? 1u : 0u;
+                var res = Native.tt_best_move_with_model(handle, diffPtr, seed ?? 0, seed.HasValue ? 1u : 0u, model);
                 return TakeString(res);
             }
             finally
