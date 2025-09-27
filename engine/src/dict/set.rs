@@ -1,6 +1,6 @@
 use std::any::Any;
 
-use crate::{nfc, normalize_with_mode, NormalizationMode};
+use crate::{NormalizationMode, nfc, normalize_with_mode};
 
 use super::{Dictionary, DictionaryOptions};
 
@@ -43,7 +43,11 @@ impl SetDictionary {
             }
             set.insert(w);
         }
-        Ok(Self { words: set, case_fold: opts.case_fold, norm: opts.norm })
+        Ok(Self {
+            words: set,
+            case_fold: opts.case_fold,
+            norm: opts.norm,
+        })
     }
 
     pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
@@ -59,7 +63,11 @@ impl SetDictionary {
             }
             set.insert(s);
         }
-        Self { words: set, case_fold, norm: NormalizationMode::NFC }
+        Self {
+            words: set,
+            case_fold,
+            norm: NormalizationMode::NFC,
+        }
     }
 
     pub fn from_words_opts<I, S>(iter: I, opts: DictionaryOptions) -> Self
@@ -75,7 +83,11 @@ impl SetDictionary {
             }
             set.insert(s);
         }
-        Self { words: set, case_fold: opts.case_fold, norm: opts.norm }
+        Self {
+            words: set,
+            case_fold: opts.case_fold,
+            norm: opts.norm,
+        }
     }
 }
 
@@ -87,8 +99,12 @@ impl Dictionary for SetDictionary {
         }
         self.words.contains(&s)
     }
-    fn as_any(&self) -> &dyn Any { self }
-    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> { Box::new(self.clone()) }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> {
+        Box::new(self.clone())
+    }
 }
 
 #[cfg(test)]
@@ -114,8 +130,14 @@ mod tests {
         std::fs::write(&path, content).unwrap();
         let dict = SetDictionary::from_file(
             &path,
-            super::DictionaryOptions { case_fold: true, min_len: Some(2), max_len: None, ..Default::default() },
-        ).unwrap();
+            super::DictionaryOptions {
+                case_fold: true,
+                min_len: Some(2),
+                max_len: None,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(dict.contains("hello"));
         assert!(dict.contains("WORLD"));
         assert!(dict.contains("cafe\u{301}"));

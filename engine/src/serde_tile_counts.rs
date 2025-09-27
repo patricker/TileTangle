@@ -17,4 +17,3 @@ where
     let vec = Vec::<(TileKind, u32)>::deserialize(deserializer)?;
     Ok(vec.into_iter().collect())
 }
-

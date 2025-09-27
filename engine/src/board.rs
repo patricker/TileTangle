@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
-use crate::{geometry::BoardGeometry, serde_cell_bonus, CellId, Tile};
+use crate::{CellId, Tile, geometry::BoardGeometry, serde_cell_bonus};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bonus {
@@ -11,7 +11,13 @@ pub struct Bonus {
 }
 
 impl Default for Bonus {
-    fn default() -> Self { Self { letter_mul: 1, word_mul: 1, tags: BTreeSet::new() } }
+    fn default() -> Self {
+        Self {
+            letter_mul: 1,
+            word_mul: 1,
+            tags: BTreeSet::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,7 +37,11 @@ pub struct Board<G: BoardGeometry> {
 impl<G: BoardGeometry> Board<G> {
     pub fn new(geom: G) -> Self {
         let len = geom.len();
-        Self { geom, cells: vec![Cell::default(); len], bonuses: HashMap::new() }
+        Self {
+            geom,
+            cells: vec![Cell::default(); len],
+            bonuses: HashMap::new(),
+        }
     }
 }
 

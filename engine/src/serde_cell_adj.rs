@@ -14,7 +14,10 @@ where
         let mut entries: Vec<RawAdjEntry> = map
             .iter()
             .map(|(cid, vec)| {
-                let inner = vec.iter().map(|(other, dir)| (other.0, dir.clone())).collect();
+                let inner = vec
+                    .iter()
+                    .map(|(other, dir)| (other.0, dir.clone()))
+                    .collect();
                 (cid.0, inner)
             })
             .collect();
@@ -35,10 +38,11 @@ where
             .map(|(id, vec)| {
                 (
                     CellId(id),
-                    vec.into_iter().map(|(other, dir)| (CellId(other), dir)).collect(),
+                    vec.into_iter()
+                        .map(|(other, dir)| (CellId(other), dir))
+                        .collect(),
                 )
             })
             .collect()
     }))
 }
-

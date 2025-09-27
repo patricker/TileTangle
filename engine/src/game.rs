@@ -1,6 +1,6 @@
+use crate::{CellId, Rack, Tile, Tileset};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::{CellId, Rack, Tile, Tileset};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PlayerId(pub usize);
@@ -15,21 +15,40 @@ pub struct Player {
 }
 
 impl Default for Player {
-    fn default() -> Self { Self { rack: Rack::default(), score: 0, rack_capacity: Self::default_rack_capacity() } }
+    fn default() -> Self {
+        Self {
+            rack: Rack::default(),
+            score: 0,
+            rack_capacity: Self::default_rack_capacity(),
+        }
+    }
 }
 
-impl Player { const fn default_rack_capacity() -> usize { 7 } }
+impl Player {
+    const fn default_rack_capacity() -> usize {
+        7
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GameEventKind {
-    Play { placements: Vec<(CellId, Tile)>, score: i32, total: i32 },
-    Draw { tiles: Vec<String> },
-    Exchange { give: Vec<String>, take: Vec<String> },
+    Play {
+        placements: Vec<(CellId, Tile)>,
+        score: i32,
+        total: i32,
+    },
+    Draw {
+        tiles: Vec<String>,
+    },
+    Exchange {
+        give: Vec<String>,
+        take: Vec<String>,
+    },
     Pass,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GameEvent { 
+pub struct GameEvent {
     pub turn: u32,
     pub player: usize,
     pub kind: GameEventKind,
@@ -37,7 +56,10 @@ pub struct GameEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RectBoardLayout { pub width: u32, pub height: u32 }
+pub struct RectBoardLayout {
+    pub width: u32,
+    pub height: u32,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameConfig {
@@ -52,7 +74,9 @@ pub struct GameConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MoveDraft { pub placements: Vec<(CellId, Tile)> }
+pub struct MoveDraft {
+    pub placements: Vec<(CellId, Tile)>,
+}
 
 // Split: GameState and its impl moved to a submodule.
 mod state;

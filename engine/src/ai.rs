@@ -6,11 +6,11 @@ use crate::{GameState, Rules};
 // The AI module now follows a strategy pattern. The existing greedy implementation
 // is preserved in `greedy.rs`, and public functions here dispatch to that default.
 
-mod types;
-mod heuristics;
 mod greedy;
-pub use types::EvaluatedMove;
+mod heuristics;
+mod types;
 pub use heuristics::evaluate_candidate_move;
+pub use types::EvaluatedMove;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiDifficulty {
@@ -53,7 +53,9 @@ impl Default for AiConfig {
 }
 
 impl AiConfig {
-    fn requires_rng(&self) -> bool { self.noise_range > 0 }
+    fn requires_rng(&self) -> bool {
+        self.noise_range > 0
+    }
 
     pub fn for_difficulty(level: AiDifficulty) -> Self {
         let mut cfg = Self::default();
@@ -137,15 +139,28 @@ fn default_rack_leave_table() -> HashMap<String, i32> {
 // Strategy interface for pluggable AI implementations.
 pub trait AiStrategy {
     fn id(&self) -> &'static str;
-    fn best_move(&self, state: &GameState, rules: &dyn Rules, config: &AiConfig) -> Option<EvaluatedMove>;
+    fn best_move(
+        &self,
+        state: &GameState,
+        rules: &dyn Rules,
+        config: &AiConfig,
+    ) -> Option<EvaluatedMove>;
 }
 
 // Public API remains stable: these call into the default strategy.
-pub fn best_move_greedy(state: &GameState, rules: &impl Rules, config: &AiConfig) -> Option<EvaluatedMove> {
+pub fn best_move_greedy(
+    state: &GameState,
+    rules: &impl Rules,
+    config: &AiConfig,
+) -> Option<EvaluatedMove> {
     greedy::best_move_default(state, rules, config)
 }
 
-pub fn best_move(state: &GameState, rules: &impl Rules, level: AiDifficulty) -> Option<EvaluatedMove> {
+pub fn best_move(
+    state: &GameState,
+    rules: &impl Rules,
+    level: AiDifficulty,
+) -> Option<EvaluatedMove> {
     let cfg = AiConfig::for_difficulty(level);
     best_move_greedy(state, rules, &cfg)
 }

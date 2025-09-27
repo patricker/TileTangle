@@ -8,4 +8,3 @@ pub struct EvaluatedMove {
     pub endgame_penalty: i32,
     pub total: i32,
 }
-

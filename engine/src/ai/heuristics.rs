@@ -1,13 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{
-    geometry::CellId,
-    movegen::CandidateMove,
-    GameState, Tile, Tileset,
-};
 use crate::geometry::BoardGeometry;
+use crate::{GameState, Tile, Tileset, geometry::CellId, movegen::CandidateMove};
 
-use super::{AiConfig};
+use super::AiConfig;
 use super::types::EvaluatedMove;
 
 fn tileset_symbol_for_kind(tileset: &Tileset, kind_id: &str) -> String {
@@ -19,17 +15,30 @@ fn tileset_symbol_for_kind(tileset: &Tileset, kind_id: &str) -> String {
         .unwrap_or_else(|| kind_id.to_string())
 }
 
-pub(crate) fn leftover_counts_from_rack(rack: &[String], placements: &[(CellId, Tile)]) -> HashMap<String, usize> {
+pub(crate) fn leftover_counts_from_rack(
+    rack: &[String],
+    placements: &[(CellId, Tile)],
+) -> HashMap<String, usize> {
     let mut counts: HashMap<String, usize> = HashMap::new();
-    for kid in rack { *counts.entry(kid.clone()).or_default() += 1; }
+    for kid in rack {
+        *counts.entry(kid.clone()).or_default() += 1;
+    }
     for (_, tile) in placements {
-        if let Some(entry) = counts.get_mut(&tile.kind_id) && *entry > 0 { *entry -= 1; }
+        if let Some(entry) = counts.get_mut(&tile.kind_id)
+            && *entry > 0
+        {
+            *entry -= 1;
+        }
     }
     counts.retain(|_, v| *v > 0);
     counts
 }
 
-pub fn rack_leave_score(config: &AiConfig, tileset: &Tileset, leftover: &HashMap<String, usize>) -> i32 {
+pub fn rack_leave_score(
+    config: &AiConfig,
+    tileset: &Tileset,
+    leftover: &HashMap<String, usize>,
+) -> i32 {
     leftover
         .iter()
         .map(|(kid, count)| {
@@ -51,18 +60,26 @@ pub fn board_equity_bonus(state: &GameState, candidate: &CandidateMove) -> i32 {
     let placed: HashSet<CellId> = candidate.placements.iter().map(|(cid, _)| *cid).collect();
     for (cid, _) in &candidate.placements {
         for neigh in state.board.geom.neighbors(*cid) {
-            if placed.contains(&neigh) { continue; }
-            if state.board.cells[neigh.0 as usize].stack.is_empty() { bonus += 1; }
+            if placed.contains(&neigh) {
+                continue;
+            }
+            if state.board.cells[neigh.0 as usize].stack.is_empty() {
+                bonus += 1;
+            }
         }
     }
     bonus
 }
 
 pub fn endgame_penalty(state: &GameState, leftover: &HashMap<String, usize>) -> i32 {
-    if state.bag.remaining() > 0 { return 0; }
+    if state.bag.remaining() > 0 {
+        return 0;
+    }
     let mut penalty = 0;
     for (kind_id, count) in leftover {
-        if *count == 0 { continue; }
+        if *count == 0 {
+            continue;
+        }
         if let Some(kind) = state.tileset.tile_kinds.iter().find(|tk| tk.id == *kind_id) {
             penalty -= (*count as i32) * (kind.score as i32);
         }
@@ -81,21 +98,51 @@ pub fn evaluate_candidate_move(
     let board_eq = board_equity_bonus(state, &candidate);
     let end_pen = endgame_penalty(state, &leftover);
     let total = candidate.score + leave_score + board_eq + end_pen;
-    EvaluatedMove { candidate, rack_leave: leave_score, board_equity: board_eq, endgame_penalty: end_pen, total }
+    EvaluatedMove {
+        candidate,
+        rack_leave: leave_score,
+        board_equity: board_eq,
+        endgame_penalty: end_pen,
+        total,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GameConfig, RectBoardLayout, Tileset, TileKind};
+    use crate::{GameConfig, RectBoardLayout, TileKind, Tileset};
 
     fn basic_config() -> GameConfig {
         let tileset = Tileset {
             tile_kinds: vec![
-                TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
-                TileKind { id: "B".into(), symbol: "B".into(), score: 3, is_blank: false, aliases: vec![] },
-                TileKind { id: "Q".into(), symbol: "Q".into(), score: 10, is_blank: false, aliases: vec![] },
-                TileKind { id: "?".into(), symbol: "?".into(), score: 0, is_blank: true, aliases: vec![] },
+                TileKind {
+                    id: "A".into(),
+                    symbol: "A".into(),
+                    score: 1,
+                    is_blank: false,
+                    aliases: vec![],
+                },
+                TileKind {
+                    id: "B".into(),
+                    symbol: "B".into(),
+                    score: 3,
+                    is_blank: false,
+                    aliases: vec![],
+                },
+                TileKind {
+                    id: "Q".into(),
+                    symbol: "Q".into(),
+                    score: 10,
+                    is_blank: false,
+                    aliases: vec![],
+                },
+                TileKind {
+                    id: "?".into(),
+                    symbol: "?".into(),
+                    score: 0,
+                    is_blank: true,
+                    aliases: vec![],
+                },
             ],
         };
         let mut counts = std::collections::HashMap::new();
@@ -106,7 +153,10 @@ mod tests {
         GameConfig {
             tileset,
             rack_size: 7,
-            board_layout: RectBoardLayout { width: 5, height: 5 },
+            board_layout: RectBoardLayout {
+                width: 5,
+                height: 5,
+            },
             ruleset_id: "cross".into(),
             dictionary_id: "en".into(),
             rng_seed: 1,
@@ -139,7 +189,9 @@ mod tests {
     fn endgame_penalty_applies_when_bag_empty() {
         let cfg = basic_config();
         let mut st = crate::GameState::new(&cfg, 1).unwrap();
-        for v in st.bag.counts.values_mut() { *v = 0; }
+        for v in st.bag.counts.values_mut() {
+            *v = 0;
+        }
         let mut leftover = HashMap::new();
         leftover.insert("Q".to_string(), 1);
         let pen = endgame_penalty(&st, &leftover);
@@ -153,7 +205,13 @@ mod tests {
         // Place a single tile at center as candidate; empty board otherwise.
         let center = crate::CrosswordRules::center_cell(&st.board.geom);
         let candidate = crate::movegen::CandidateMove {
-            placements: vec![(center, crate::Tile { kind_id: "A".into(), mark: None })],
+            placements: vec![(
+                center,
+                crate::Tile {
+                    kind_id: "A".into(),
+                    mark: None,
+                },
+            )],
             word: "A".into(),
             score: 0,
         };

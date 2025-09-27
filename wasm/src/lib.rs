@@ -1,5 +1,5 @@
 use console_error_panic_hook as panic_hook;
-use engine::{self, AiConfig, AiDifficulty, BoardGeometry, Rules, OpponentModel};
+use engine::{self, AiConfig, AiDifficulty, BoardGeometry, OpponentModel, Rules};
 use js_sys::Reflect;
 use serde::Deserialize;
 use serde_json::json;
@@ -900,7 +900,11 @@ pub fn best_move(game: &JsGame, difficulty: &str, seed: Option<u64>) -> Result<S
 }
 
 #[wasm_bindgen]
-pub fn evaluate_candidate(game: &JsGame, placements_json: &str, opts: JsValue) -> Result<String, JsValue> {
+pub fn evaluate_candidate(
+    game: &JsGame,
+    placements_json: &str,
+    opts: JsValue,
+) -> Result<String, JsValue> {
     let items: Vec<JsPlacement> = serde_json::from_str(placements_json).map_err(to_js_err)?;
     let mut mv = engine::MoveDraft { placements: vec![] };
     for p in &items {
@@ -910,14 +914,31 @@ pub fn evaluate_candidate(game: &JsGame, placements_json: &str, opts: JsValue) -
             .geom
             .to_cell_id(engine::Coord2D { x: p.x, y: p.y })
             .ok_or_else(|| to_js_err("invalid coordinates"))?;
-        mv.placements.push((cid, engine::Tile { kind_id: p.kind_id.clone(), mark: None }));
+        mv.placements.push((
+            cid,
+            engine::Tile {
+                kind_id: p.kind_id.clone(),
+                mark: None,
+            },
+        ));
     }
     let validated = game.rules.validate(&game.state, &mv).map_err(to_js_err)?;
     let sc = game.rules.score(&game.state, &validated);
-    if sc.main_score < 0 { return Ok(String::from("null")); }
-    let candidate = engine::CandidateMove { placements: validated.placements.clone(), word: sc.main_word.clone(), score: sc.total };
+    if sc.main_score < 0 {
+        return Ok(String::from("null"));
+    }
+    let candidate = engine::CandidateMove {
+        placements: validated.placements.clone(),
+        word: sc.main_word.clone(),
+        score: sc.total,
+    };
     let pid = game.state.to_move.0;
-    let rack: Vec<String> = game.state.players[pid].rack.tiles.iter().map(|t| t.kind_id.clone()).collect();
+    let rack: Vec<String> = game.state.players[pid]
+        .rack
+        .tiles
+        .iter()
+        .map(|t| t.kind_id.clone())
+        .collect();
     let mut cfg = AiConfig::default();
     if !opts.is_null() && !opts.is_undefined() {
         if let Some(level) = js_get_string(&opts, "difficulty")? {

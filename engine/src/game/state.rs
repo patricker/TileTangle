@@ -6,10 +6,10 @@ use std::hash::{Hash, Hasher};
 use crate::dict::Dictionary;
 use crate::text::nfc;
 use crate::{
+    EngineError, GameConfig, GameEvent, GameEventKind, Player, PlayerId, Tile, TileKind,
     board::Board,
     geometry::RectGridGeometry,
     inventory::{Bag, Tileset},
-    EngineError, GameConfig, GameEvent, GameEventKind, Player, PlayerId, Tile, TileKind,
 };
 
 // Zobrist hashing helpers used by GameState
@@ -129,7 +129,10 @@ impl GameState {
     }
 
     /// Place tiles without validation onto a cloned board and return it (does not mutate state)
-    pub fn preview(&self, draft: &crate::game::MoveDraft) -> Result<Board<RectGridGeometry>, EngineError> {
+    pub fn preview(
+        &self,
+        draft: &crate::game::MoveDraft,
+    ) -> Result<Board<RectGridGeometry>, EngineError> {
         let mut nb = self.board.clone();
         for (cid, tile) in &draft.placements {
             let idx = cid.0 as usize;
@@ -143,7 +146,10 @@ impl GameState {
     }
 
     /// Apply a graph overlay (custom adjacency and present cells) to the current rectangular geometry.
-    pub fn apply_graph_overlay(&mut self, overlay: crate::geometry::GraphOverlay) -> Result<(), EngineError> {
+    pub fn apply_graph_overlay(
+        &mut self,
+        overlay: crate::geometry::GraphOverlay,
+    ) -> Result<(), EngineError> {
         self.board.geom.apply_graph_overlay(overlay)
     }
 
@@ -305,24 +311,62 @@ impl GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{game::{GameConfig, RectBoardLayout, MoveDraft}, inventory::Tileset, TileKind, Tile, geometry::{Coord2D, BoardGeometry}};
+    use crate::{
+        Tile, TileKind,
+        game::{GameConfig, MoveDraft, RectBoardLayout},
+        geometry::{BoardGeometry, Coord2D},
+        inventory::Tileset,
+    };
     use std::collections::HashMap;
 
     #[test]
     fn state_new_and_preview() {
-        let tileset = Tileset { tile_kinds: vec![
-            TileKind { id: "A".into(), symbol: "A".into(), score: 1, is_blank: false, aliases: vec![] },
-            TileKind { id: "B".into(), symbol: "B".into(), score: 3, is_blank: false, aliases: vec![] },
-        ]};
+        let tileset = Tileset {
+            tile_kinds: vec![
+                TileKind {
+                    id: "A".into(),
+                    symbol: "A".into(),
+                    score: 1,
+                    is_blank: false,
+                    aliases: vec![],
+                },
+                TileKind {
+                    id: "B".into(),
+                    symbol: "B".into(),
+                    score: 3,
+                    is_blank: false,
+                    aliases: vec![],
+                },
+            ],
+        };
         let mut counts = HashMap::new();
         counts.insert("A".to_string(), 2);
         counts.insert("B".to_string(), 1);
-        let cfg = GameConfig { tileset, rack_size: 7, board_layout: RectBoardLayout { width: 3, height: 3 }, ruleset_id: "crossword_classic".into(), dictionary_id: "en_test".into(), rng_seed: 1, tile_counts: counts };
+        let cfg = GameConfig {
+            tileset,
+            rack_size: 7,
+            board_layout: RectBoardLayout {
+                width: 3,
+                height: 3,
+            },
+            ruleset_id: "crossword_classic".into(),
+            dictionary_id: "en_test".into(),
+            rng_seed: 1,
+            tile_counts: counts,
+        };
         let state = GameState::new(&cfg, 2).unwrap();
         assert_eq!(state.board.geom.width, 3);
         assert_eq!(state.players.len(), 2);
         let c = state.board.geom.to_cell_id(Coord2D { x: 1, y: 1 }).unwrap();
-        let draft = MoveDraft { placements: vec![(c, Tile { kind_id: "A".into(), mark: None })] };
+        let draft = MoveDraft {
+            placements: vec![(
+                c,
+                Tile {
+                    kind_id: "A".into(),
+                    mark: None,
+                },
+            )],
+        };
         let nb = state.preview(&draft).unwrap();
         assert_eq!(nb.cells[c.0 as usize].stack.len(), 1);
     }

@@ -384,28 +384,63 @@ impl Game {
             .state
             .snapshot_cbor()
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(PyBytes::new(py, &bytes).into_pyobject(py)?.into_any().unbind())
+        Ok(PyBytes::new(py, &bytes)
+            .into_pyobject(py)?
+            .into_any()
+            .unbind())
     }
 
     #[pyo3(text_signature = "(self, placements_json, difficulty=None)")]
-    fn evaluate_candidate(&self, placements_json: &str, difficulty: Option<&str>, py: Python<'_>) -> PyResult<PyObject> {
+    fn evaluate_candidate(
+        &self,
+        placements_json: &str,
+        difficulty: Option<&str>,
+        py: Python<'_>,
+    ) -> PyResult<PyObject> {
         let items: Vec<JsPlacement> = serde_json::from_str(placements_json)
             .map_err(|e| PyValueError::new_err(format!("placements parse error: {}", e)))?;
         let mut mv = engine::MoveDraft { placements: vec![] };
         for p in &items {
-            let Some(cid) = self.state.board.geom.to_cell_id(engine::Coord2D { x: p.x, y: p.y }) else {
+            let Some(cid) = self
+                .state
+                .board
+                .geom
+                .to_cell_id(engine::Coord2D { x: p.x, y: p.y })
+            else {
                 return Err(PyValueError::new_err("invalid coordinates"));
             };
-            mv.placements.push((cid, engine::Tile { kind_id: p.kind_id.clone(), mark: None }));
+            mv.placements.push((
+                cid,
+                engine::Tile {
+                    kind_id: p.kind_id.clone(),
+                    mark: None,
+                },
+            ));
         }
-        let validated = self.rules.validate(&self.state, &mv).map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+        let validated = self
+            .rules
+            .validate(&self.state, &mv)
+            .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
         let sc = self.rules.score(&self.state, &validated);
-        if sc.main_score < 0 { return Ok(py.None()); }
-        let candidate = engine::CandidateMove { placements: validated.placements.clone(), word: sc.main_word.clone(), score: sc.total };
+        if sc.main_score < 0 {
+            return Ok(py.None());
+        }
+        let candidate = engine::CandidateMove {
+            placements: validated.placements.clone(),
+            word: sc.main_word.clone(),
+            score: sc.total,
+        };
         let pid = self.state.to_move.0;
-        let rack: Vec<String> = self.state.players[pid].rack.tiles.iter().map(|t| t.kind_id.clone()).collect();
+        let rack: Vec<String> = self.state.players[pid]
+            .rack
+            .tiles
+            .iter()
+            .map(|t| t.kind_id.clone())
+            .collect();
         let mut cfg = AiConfig::default();
-        if let Some(level) = difficulty { cfg.apply_difficulty(parse_difficulty_tag(level)?); }
+        if let Some(level) = difficulty {
+            cfg.apply_difficulty(parse_difficulty_tag(level)?);
+        }
         let eval = engine::evaluate_candidate_move(&self.state, candidate, &rack, &cfg);
         let out = PyDict::new(py);
         out.set_item("word", eval.candidate.word)?;

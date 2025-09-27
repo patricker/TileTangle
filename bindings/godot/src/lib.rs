@@ -705,17 +705,46 @@ impl WordEngine {
             Err(_) => return GString::from(""),
         };
         for p in &items {
-            if let Some(cid) = state.board.geom.to_cell_id(engine::Coord2D { x: p.x, y: p.y }) {
-                mv.placements.push((cid, engine::Tile { kind_id: p.kind_id.clone(), mark: None }));
+            if let Some(cid) = state
+                .board
+                .geom
+                .to_cell_id(engine::Coord2D { x: p.x, y: p.y })
+            {
+                mv.placements.push((
+                    cid,
+                    engine::Tile {
+                        kind_id: p.kind_id.clone(),
+                        mark: None,
+                    },
+                ));
             }
         }
-        let validated = match self.rules.validate(state, &mv) { Ok(v) => v, Err(_) => return GString::from("") };
+        let validated = match self.rules.validate(state, &mv) {
+            Ok(v) => v,
+            Err(_) => return GString::from(""),
+        };
         let sc = self.rules.score(state, &validated);
-        if sc.main_score < 0 { return GString::from("null"); }
-        let candidate = engine::CandidateMove { placements: validated.placements.clone(), word: sc.main_word.clone(), score: sc.total };
+        if sc.main_score < 0 {
+            return GString::from("null");
+        }
+        let candidate = engine::CandidateMove {
+            placements: validated.placements.clone(),
+            word: sc.main_word.clone(),
+            score: sc.total,
+        };
         let pid = state.to_move.0;
-        let rack: Vec<String> = state.players[pid].rack.tiles.iter().map(|t| t.kind_id.clone()).collect();
-        let level = match difficulty.to_string().to_ascii_lowercase().as_str() { "easy" => engine::AiDifficulty::Easy, "medium" => engine::AiDifficulty::Medium, "hard" => engine::AiDifficulty::Hard, _ => engine::AiDifficulty::Medium };
+        let rack: Vec<String> = state.players[pid]
+            .rack
+            .tiles
+            .iter()
+            .map(|t| t.kind_id.clone())
+            .collect();
+        let level = match difficulty.to_string().to_ascii_lowercase().as_str() {
+            "easy" => engine::AiDifficulty::Easy,
+            "medium" => engine::AiDifficulty::Medium,
+            "hard" => engine::AiDifficulty::Hard,
+            _ => engine::AiDifficulty::Medium,
+        };
         let mut cfg = engine::AiConfig::for_difficulty(level);
         let eval = engine::evaluate_candidate_move(state, candidate, &rack, &cfg);
         let json = serde_json::json!({
@@ -733,7 +762,12 @@ impl WordEngine {
 
     /// Compute best move with opponent visibility option: opponent = "perfect" | "bag"
     #[func]
-    pub fn best_move_with_opts(&self, difficulty: GString, seed: Variant, opponent: GString) -> GString {
+    pub fn best_move_with_opts(
+        &self,
+        difficulty: GString,
+        seed: Variant,
+        opponent: GString,
+    ) -> GString {
         let Some(state) = &self.state else {
             godot_error!("best_move_with_opts called before new_game");
             return GString::from("");

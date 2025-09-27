@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use engine as eng;
+use std::path::PathBuf;
 
 fn print_usage() {
     eprintln!(
@@ -74,13 +74,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     eprintln!(
         "Building GADDAG from {} (case_fold={}, norm={:?})",
-        input.display(), case_fold, norm
+        input.display(),
+        case_fold,
+        norm
     );
     let dict = eng::GaddagDictionary::from_file(&input, opts)?;
     // Always get raw CBOR bytes first
     let bytes = dict.to_gaddag_bytes()?;
-    let use_gzip = do_gzip || output.extension().and_then(|s| s.to_str()).map(|e| e.eq_ignore_ascii_case("gz")).unwrap_or(false);
-    let use_zstd = do_zstd || output.extension().and_then(|s| s.to_str()).map(|e| e.eq_ignore_ascii_case("zst")).unwrap_or(false);
+    let use_gzip = do_gzip
+        || output
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|e| e.eq_ignore_ascii_case("gz"))
+            .unwrap_or(false);
+    let use_zstd = do_zstd
+        || output
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|e| e.eq_ignore_ascii_case("zst"))
+            .unwrap_or(false);
     if use_gzip {
         use std::io::Write;
         let f = std::fs::File::create(&output)?;
@@ -90,11 +102,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else if use_zstd {
         #[cfg(feature = "zstd")]
         {
-            std::fs::write(&output, zstd::stream::encode_all(std::io::Cursor::new(&bytes), 10)?)?;
+            std::fs::write(
+                &output,
+                zstd::stream::encode_all(std::io::Cursor::new(&bytes), 10)?,
+            )?;
         }
         #[cfg(not(feature = "zstd"))]
         {
-            eprintln!("--zstd requested but 'zstd' feature not enabled; re-run with: cargo run -p tiletangle-engine --features zstd --bin gaddag_cache ...");
+            eprintln!(
+                "--zstd requested but 'zstd' feature not enabled; re-run with: cargo run -p tiletangle-engine --features zstd --bin gaddag_cache ..."
+            );
             std::process::exit(2);
         }
     } else {

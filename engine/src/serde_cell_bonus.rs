@@ -15,6 +15,8 @@ where
     D: Deserializer<'de>,
 {
     let vec = Vec::<(u32, Bonus)>::deserialize(deserializer)?;
-    Ok(vec.into_iter().map(|(id, bonus)| (CellId(id), bonus)).collect())
+    Ok(vec
+        .into_iter()
+        .map(|(id, bonus)| (CellId(id), bonus))
+        .collect())
 }
-

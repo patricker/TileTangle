@@ -4,10 +4,10 @@ use std::io::Read;
 // use fst::Automaton; // no longer needed here
 use serde::{Deserialize, Serialize};
 
-use crate::{normalize_with_mode, NormalizationMode, TokenizerRef};
+use crate::{NormalizationMode, TokenizerRef, normalize_with_mode};
 
-use super::{Dictionary, DictionaryOptions};
 use super::FstDictionary;
+use super::{Dictionary, DictionaryOptions};
 
 #[derive(Debug, Clone)]
 pub struct GaddagDictionary {
@@ -31,7 +31,9 @@ pub struct PackedNode {
 }
 impl PackedNode {
     #[inline]
-    pub fn terminal(&self) -> bool { (self.flags & 1) != 0 }
+    pub fn terminal(&self) -> bool {
+        (self.flags & 1) != 0
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -83,8 +85,8 @@ impl GaddagDictionary {
             let mut out = Vec::new();
             dec.read_to_end(&mut out)?;
             let cur = std::io::Cursor::new(out);
-            let image: GaddagDiskImage = ciborium::de::from_reader(cur)
-                .map_err(|e| std::io::Error::other(e.to_string()))?;
+            let image: GaddagDiskImage =
+                ciborium::de::from_reader(cur).map_err(|e| std::io::Error::other(e.to_string()))?;
             return Ok(image);
         }
         #[cfg(feature = "zstd")]
@@ -104,8 +106,8 @@ impl GaddagDictionary {
             }
         }
         let cur = std::io::Cursor::new(bytes);
-        let image: GaddagDiskImage = ciborium::de::from_reader(cur)
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        let image: GaddagDiskImage =
+            ciborium::de::from_reader(cur).map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(image)
     }
     pub fn from_words<I, S>(iter: I, case_fold: bool) -> Self
@@ -113,7 +115,10 @@ impl GaddagDictionary {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        let opts = DictionaryOptions { case_fold, ..Default::default() };
+        let opts = DictionaryOptions {
+            case_fold,
+            ..Default::default()
+        };
         Self::from_words_opts(iter, opts)
     }
 
@@ -122,20 +127,40 @@ impl GaddagDictionary {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        let DictionaryOptions { case_fold, min_len, max_len, norm, tokenizer } = opts;
+        let DictionaryOptions {
+            case_fold,
+            min_len,
+            max_len,
+            norm,
+            tokenizer,
+        } = opts;
         let sep = "+".to_string();
 
         // Normalize/filter words first
         let mut words: Vec<String> = Vec::new();
         for w in iter.into_iter() {
             let mut s = normalize_with_mode(w.into(), norm);
-            if case_fold { s = s.to_lowercase(); }
-            if s.is_empty() { continue; }
+            if case_fold {
+                s = s.to_lowercase();
+            }
+            if s.is_empty() {
+                continue;
+            }
             let tks = tokenizer.segment(&s);
-            if tks.is_empty() { continue; }
+            if tks.is_empty() {
+                continue;
+            }
             let len = tks.len();
-            if let Some(min) = min_len && len < min { continue; }
-            if let Some(max) = max_len && len > max { continue; }
+            if let Some(min) = min_len
+                && len < min
+            {
+                continue;
+            }
+            if let Some(max) = max_len
+                && len > max
+            {
+                continue;
+            }
             words.push(s);
         }
 
@@ -143,9 +168,12 @@ impl GaddagDictionary {
         let mut sym2id: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
         let mut id2sym: Vec<String> = Vec::new();
         let intern = |sym: &str,
-                          map: &mut std::collections::HashMap<String, u16>,
-                          vec: &mut Vec<String>| -> u16 {
-            if let Some(&id) = map.get(sym) { return id; }
+                      map: &mut std::collections::HashMap<String, u16>,
+                      vec: &mut Vec<String>|
+         -> u16 {
+            if let Some(&id) = map.get(sym) {
+                return id;
+            }
             let id = vec.len() as u16;
             map.insert(sym.to_string(), id);
             vec.push(sym.to_string());
@@ -165,9 +193,13 @@ impl GaddagDictionary {
             let n = tokens.len();
             for split in 0..=n {
                 let mut seq: Vec<u16> = Vec::with_capacity(n + 1);
-                for tk in tokens[..split].iter().rev() { seq.push(*sym2id.get(tk).expect("interned")); }
+                for tk in tokens[..split].iter().rev() {
+                    seq.push(*sym2id.get(tk).expect("interned"));
+                }
                 seq.push(sep_id);
-                for tk in &tokens[split..] { seq.push(*sym2id.get(tk).expect("interned")); }
+                for tk in &tokens[split..] {
+                    seq.push(*sym2id.get(tk).expect("interned"));
+                }
                 let mut node = 0usize;
                 for &lab in &seq {
                     let next = if let Some(&id) = build_nodes[node].edges.get(&lab) {
@@ -191,17 +223,42 @@ impl GaddagDictionary {
             let offset = g_arcs.len() as u32;
             let degree = bn.edges.len() as u16;
             for (&label, &target) in bn.edges.iter() {
-                g_arcs.push(PackedArc { label, target: target as u32 });
+                g_arcs.push(PackedArc {
+                    label,
+                    target: target as u32,
+                });
             }
-            g_nodes.push(PackedNode { offset, degree, flags: if bn.terminal { 1 } else { 0 } });
+            g_nodes.push(PackedNode {
+                offset,
+                degree,
+                flags: if bn.terminal { 1 } else { 0 },
+            });
         }
 
-        let forward_opts = DictionaryOptions { case_fold, min_len, max_len, norm, tokenizer: tokenizer.clone() };
+        let forward_opts = DictionaryOptions {
+            case_fold,
+            min_len,
+            max_len,
+            norm,
+            tokenizer: tokenizer.clone(),
+        };
         let forward = FstDictionary::from_words_opts(words.clone(), forward_opts);
-        Self { forward, g_nodes, g_arcs, sym2id, id2sym, sep, sep_id, tokenizer }
+        Self {
+            forward,
+            g_nodes,
+            g_arcs,
+            sym2id,
+            id2sym,
+            sep,
+            sep_id,
+            tokenizer,
+        }
     }
 
-    pub fn from_file<P: AsRef<std::path::Path>>(path: P, opts: DictionaryOptions) -> std::io::Result<Self> {
+    pub fn from_file<P: AsRef<std::path::Path>>(
+        path: P,
+        opts: DictionaryOptions,
+    ) -> std::io::Result<Self> {
         use std::io::{BufRead, BufReader};
         let f = std::fs::File::open(path)?;
         let reader = BufReader::new(f);
@@ -209,11 +266,23 @@ impl GaddagDictionary {
         for line in reader.lines() {
             let raw = line?;
             let mut s = normalize_with_mode(raw.trim(), opts.norm);
-            if opts.case_fold { s = s.to_lowercase(); }
-            if s.is_empty() { continue; }
+            if opts.case_fold {
+                s = s.to_lowercase();
+            }
+            if s.is_empty() {
+                continue;
+            }
             let len = opts.tokenizer.segment(&s).len();
-            if let Some(min) = opts.min_len && len < min { continue; }
-            if let Some(max) = opts.max_len && len > max { continue; }
+            if let Some(min) = opts.min_len
+                && len < min
+            {
+                continue;
+            }
+            if let Some(max) = opts.max_len
+                && len > max
+            {
+                continue;
+            }
             words.push(s);
         }
         Ok(Self::from_words_opts(words, opts))
@@ -221,18 +290,28 @@ impl GaddagDictionary {
 
     pub fn to_gaddag_file<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
         use std::io::BufWriter;
-        let norm_mode: u8 = match self.forward.norm { NormalizationMode::NFC => 0, NormalizationMode::NFKC => 1 };
+        let norm_mode: u8 = match self.forward.norm {
+            NormalizationMode::NFC => 0,
+            NormalizationMode::NFKC => 1,
+        };
         // Persist compact FST bytes instead of the full word list
         let fst_bytes: Vec<u8> = self.forward.set.as_fst().to_vec();
         let nodes: Vec<PackedNodeDisk> = self
             .g_nodes
             .iter()
-            .map(|n| PackedNodeDisk { offset: n.offset, degree: n.degree, flags: n.flags })
+            .map(|n| PackedNodeDisk {
+                offset: n.offset,
+                degree: n.degree,
+                flags: n.flags,
+            })
             .collect();
         let arcs: Vec<PackedArcDisk> = self
             .g_arcs
             .iter()
-            .map(|a| PackedArcDisk { label: a.label, target: a.target })
+            .map(|a| PackedArcDisk {
+                label: a.label,
+                target: a.target,
+            })
             .collect();
         let image = GaddagDiskImage {
             sep: self.sep.clone(),
@@ -246,74 +325,146 @@ impl GaddagDictionary {
         };
         let f = std::fs::File::create(path)?;
         let mut w = BufWriter::new(f);
-        ciborium::ser::into_writer(&image, &mut w)
-            .map_err(|e| std::io::Error::other(e.to_string()))
+        ciborium::ser::into_writer(&image, &mut w).map_err(|e| std::io::Error::other(e.to_string()))
     }
 
     pub fn to_gaddag_bytes(&self) -> std::io::Result<Vec<u8>> {
-        let norm_mode: u8 = match self.forward.norm { NormalizationMode::NFC => 0, NormalizationMode::NFKC => 1 };
+        let norm_mode: u8 = match self.forward.norm {
+            NormalizationMode::NFC => 0,
+            NormalizationMode::NFKC => 1,
+        };
         let fst_bytes: Vec<u8> = self.forward.set.as_fst().to_vec();
         let nodes: Vec<PackedNodeDisk> = self
             .g_nodes
             .iter()
-            .map(|n| PackedNodeDisk { offset: n.offset, degree: n.degree, flags: n.flags })
+            .map(|n| PackedNodeDisk {
+                offset: n.offset,
+                degree: n.degree,
+                flags: n.flags,
+            })
             .collect();
         let arcs: Vec<PackedArcDisk> = self
             .g_arcs
             .iter()
-            .map(|a| PackedArcDisk { label: a.label, target: a.target })
+            .map(|a| PackedArcDisk {
+                label: a.label,
+                target: a.target,
+            })
             .collect();
-        let image = GaddagDiskImage { sep: self.sep.clone(), sep_id: self.sep_id, id2sym: self.id2sym.clone(), nodes, arcs, fst_bytes, case_fold: self.forward.case_fold, norm_mode };
+        let image = GaddagDiskImage {
+            sep: self.sep.clone(),
+            sep_id: self.sep_id,
+            id2sym: self.id2sym.clone(),
+            nodes,
+            arcs,
+            fst_bytes,
+            case_fold: self.forward.case_fold,
+            norm_mode,
+        };
         let mut buf = Vec::new();
         ciborium::ser::into_writer(&image, &mut buf)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(buf)
     }
 
-    pub fn from_gaddag_file<P: AsRef<std::path::Path>>(path: P, tokenizer: TokenizerRef) -> std::io::Result<Self> {
+    pub fn from_gaddag_file<P: AsRef<std::path::Path>>(
+        path: P,
+        tokenizer: TokenizerRef,
+    ) -> std::io::Result<Self> {
         // Read file and auto-detect compression (plain CBOR, gzip, zstd)
         let bytes = std::fs::read(path)?;
         let image = Self::decode_image_from_bytes(&bytes)?;
         let g_nodes: Vec<PackedNode> = image
             .nodes
             .iter()
-            .map(|n| PackedNode { offset: n.offset, degree: n.degree, flags: n.flags })
+            .map(|n| PackedNode {
+                offset: n.offset,
+                degree: n.degree,
+                flags: n.flags,
+            })
             .collect();
         let g_arcs: Vec<PackedArc> = image
             .arcs
             .iter()
-            .map(|a| PackedArc { label: a.label, target: a.target })
+            .map(|a| PackedArc {
+                label: a.label,
+                target: a.target,
+            })
             .collect();
         let mut sym2id: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
-        for (i, s) in image.id2sym.iter().enumerate() { sym2id.insert(s.clone(), i as u16); }
-        let norm = match image.norm_mode { 0 => NormalizationMode::NFC, 1 => NormalizationMode::NFKC, _ => NormalizationMode::NFC };
+        for (i, s) in image.id2sym.iter().enumerate() {
+            sym2id.insert(s.clone(), i as u16);
+        }
+        let norm = match image.norm_mode {
+            0 => NormalizationMode::NFC,
+            1 => NormalizationMode::NFKC,
+            _ => NormalizationMode::NFC,
+        };
         let forward = FstDictionary::from_bytes_with_norm(&image.fst_bytes, image.case_fold, norm)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
-        Ok(Self { forward, g_nodes, g_arcs, sym2id, id2sym: image.id2sym, sep: image.sep, sep_id: image.sep_id, tokenizer })
+        Ok(Self {
+            forward,
+            g_nodes,
+            g_arcs,
+            sym2id,
+            id2sym: image.id2sym,
+            sep: image.sep,
+            sep_id: image.sep_id,
+            tokenizer,
+        })
     }
 
-    pub fn from_gaddag_bytes<D: AsRef<[u8]>>(bytes: D, tokenizer: TokenizerRef) -> std::io::Result<Self> {
+    pub fn from_gaddag_bytes<D: AsRef<[u8]>>(
+        bytes: D,
+        tokenizer: TokenizerRef,
+    ) -> std::io::Result<Self> {
         let image = Self::decode_image_from_bytes(bytes.as_ref())?;
         let g_nodes: Vec<PackedNode> = image
             .nodes
             .iter()
-            .map(|n| PackedNode { offset: n.offset, degree: n.degree, flags: n.flags })
+            .map(|n| PackedNode {
+                offset: n.offset,
+                degree: n.degree,
+                flags: n.flags,
+            })
             .collect();
         let g_arcs: Vec<PackedArc> = image
             .arcs
             .iter()
-            .map(|a| PackedArc { label: a.label, target: a.target })
+            .map(|a| PackedArc {
+                label: a.label,
+                target: a.target,
+            })
             .collect();
         let mut sym2id: std::collections::HashMap<String, u16> = std::collections::HashMap::new();
-        for (i, s) in image.id2sym.iter().enumerate() { sym2id.insert(s.clone(), i as u16); }
-        let norm = match image.norm_mode { 0 => NormalizationMode::NFC, 1 => NormalizationMode::NFKC, _ => NormalizationMode::NFC };
+        for (i, s) in image.id2sym.iter().enumerate() {
+            sym2id.insert(s.clone(), i as u16);
+        }
+        let norm = match image.norm_mode {
+            0 => NormalizationMode::NFC,
+            1 => NormalizationMode::NFKC,
+            _ => NormalizationMode::NFC,
+        };
         let forward = FstDictionary::from_bytes_with_norm(&image.fst_bytes, image.case_fold, norm)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
-        Ok(Self { forward, g_nodes, g_arcs, sym2id, id2sym: image.id2sym, sep: image.sep, sep_id: image.sep_id, tokenizer })
+        Ok(Self {
+            forward,
+            g_nodes,
+            g_arcs,
+            sym2id,
+            id2sym: image.id2sym,
+            sep: image.sep,
+            sep_id: image.sep_id,
+            tokenizer,
+        })
     }
 
-    pub fn root(&self) -> usize { 0 }
-    pub fn sep_token(&self) -> &str { &self.sep }
+    pub fn root(&self) -> usize {
+        0
+    }
+    pub fn sep_token(&self) -> &str {
+        &self.sep
+    }
 
     pub fn step_token(&self, node: usize, token: &str) -> Option<usize> {
         let &id = self.sym2id.get(token)?;
@@ -323,19 +474,30 @@ impl GaddagDictionary {
     #[inline]
     fn step_by_id(&self, node: usize, sym_id: u16) -> Option<usize> {
         let n = *self.g_nodes.get(node)?;
-        let slice = &self.g_arcs[n.offset as usize .. n.offset as usize + n.degree as usize];
+        let slice = &self.g_arcs[n.offset as usize..n.offset as usize + n.degree as usize];
         let mut lo = 0usize;
         let mut hi = slice.len();
         while lo < hi {
             let mid = (lo + hi) >> 1;
             let m = &slice[mid];
-            if m.label < sym_id { lo = mid + 1; } else { hi = mid; }
+            if m.label < sym_id {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
         }
-        if lo < slice.len() && slice[lo].label == sym_id { Some(slice[lo].target as usize) } else { None }
+        if lo < slice.len() && slice[lo].label == sym_id {
+            Some(slice[lo].target as usize)
+        } else {
+            None
+        }
     }
 
     pub fn is_terminal(&self, node: usize) -> bool {
-        self.g_nodes.get(node).map(|n| n.terminal()).unwrap_or(false)
+        self.g_nodes
+            .get(node)
+            .map(|n| n.terminal())
+            .unwrap_or(false)
     }
 
     /// Enumerate simple rightward suffixes from an anchor with given left context using rack letters.
@@ -348,10 +510,22 @@ impl GaddagDictionary {
         // compute pre node from left_context quickly
         let mut node = self.root();
         for token in self.tokenizer.segment(left_context).into_iter().rev() {
-            let &id = if let Some(id) = self.sym2id.get(&token) { id } else { return vec![]; };
-            if let Some(n2) = self.step_by_id(node, id) { node = n2; } else { return vec![]; }
+            let &id = if let Some(id) = self.sym2id.get(&token) {
+                id
+            } else {
+                return vec![];
+            };
+            if let Some(n2) = self.step_by_id(node, id) {
+                node = n2;
+            } else {
+                return vec![];
+            }
         }
-        if let Some(n2) = self.step_by_id(node, self.sep_id) { node = n2; } else { return vec![]; }
+        if let Some(n2) = self.step_by_id(node, self.sep_id) {
+            node = n2;
+        } else {
+            return vec![];
+        }
 
         // DFS on packed arcs
         let mut out = Vec::new();
@@ -364,36 +538,73 @@ impl GaddagDictionary {
             left_context: &str,
             max_len: usize,
         ) {
-            if built.len() >= max_len { return; }
+            if built.len() >= max_len {
+                return;
+            }
             if !built.is_empty() && g.is_terminal(node) {
                 let suffix = built.join("");
                 out.push(format!("{}{}", left_context, suffix));
             }
             let ninfo = &g.g_nodes[node];
-            let arcs = &g.g_arcs[ninfo.offset as usize .. ninfo.offset as usize + ninfo.degree as usize];
+            let arcs =
+                &g.g_arcs[ninfo.offset as usize..ninfo.offset as usize + ninfo.degree as usize];
             for arc in arcs {
-                if arc.label == g.sep_id { continue; }
+                if arc.label == g.sep_id {
+                    continue;
+                }
                 let sym = &g.id2sym[arc.label as usize];
                 if rack.get(sym).copied().unwrap_or(0) > 0 {
-                    { let c = rack.get_mut(sym).unwrap(); *c -= 1; }
+                    {
+                        let c = rack.get_mut(sym).unwrap();
+                        *c -= 1;
+                    }
                     built.push(sym.clone());
-                    dfs(g, arc.target as usize, built, rack, out, left_context, max_len);
+                    dfs(
+                        g,
+                        arc.target as usize,
+                        built,
+                        rack,
+                        out,
+                        left_context,
+                        max_len,
+                    );
                     built.pop();
-                    { let c = rack.get_mut(sym).unwrap(); *c += 1; }
+                    {
+                        let c = rack.get_mut(sym).unwrap();
+                        *c += 1;
+                    }
                 }
             }
         }
-        dfs(self, node, &mut Vec::new(), rack, &mut out, left_context, max_len);
+        dfs(
+            self,
+            node,
+            &mut Vec::new(),
+            rack,
+            &mut out,
+            left_context,
+            max_len,
+        );
         out
     }
 
-    pub fn step_symbol(&self, node: usize, sym: &str) -> Option<usize> { self.step_token(node, sym) }
-    pub fn tokenizer(&self) -> &TokenizerRef { &self.tokenizer }
+    pub fn step_symbol(&self, node: usize, sym: &str) -> Option<usize> {
+        self.step_token(node, sym)
+    }
+    pub fn tokenizer(&self) -> &TokenizerRef {
+        &self.tokenizer
+    }
 
     // helpers
-    pub fn symbol_id(&self, sym: &str) -> Option<u16> { self.sym2id.get(sym).copied() }
-    pub fn id_to_symbol(&self, id: u16) -> &str { &self.id2sym[id as usize] }
-    pub fn alphabet_len(&self) -> usize { self.id2sym.len() }
+    pub fn symbol_id(&self, sym: &str) -> Option<u16> {
+        self.sym2id.get(sym).copied()
+    }
+    pub fn id_to_symbol(&self, id: u16) -> &str {
+        &self.id2sym[id as usize]
+    }
+    pub fn alphabet_len(&self) -> usize {
+        self.id2sym.len()
+    }
 }
 
 pub struct GaddagCursor<'a> {
@@ -417,49 +628,78 @@ impl<'a> GaddagCursor<'a> {
     // Fast path without tokenization
     pub fn new_from_tokens(dict: &'a GaddagDictionary, left_tokens: &[u16]) -> Option<Self> {
         let mut node = dict.root();
-        for &id in left_tokens.iter().rev() { node = dict.step_by_id(node, id)?; }
+        for &id in left_tokens.iter().rev() {
+            node = dict.step_by_id(node, id)?;
+        }
         Some(Self { dict, pre: node })
     }
     pub fn step_left(&self, sym: &str) -> Option<Self> {
         let n = self.dict.step_token(self.pre, sym)?;
-        Some(Self { dict: self.dict, pre: n })
+        Some(Self {
+            dict: self.dict,
+            pre: n,
+        })
     }
     pub fn branch_right(&self) -> Option<GaddagRight<'a>> {
         let n = self.dict.step_token(self.pre, self.dict.sep_token())?;
-        Some(GaddagRight { dict: self.dict, node: n })
+        Some(GaddagRight {
+            dict: self.dict,
+            node: n,
+        })
     }
-    pub fn pre_node(&self) -> usize { self.pre }
+    pub fn pre_node(&self) -> usize {
+        self.pre
+    }
 }
 
 impl<'a> GaddagRight<'a> {
     pub fn step(&self, sym: &str) -> Option<Self> {
         let n = self.dict.step_token(self.node, sym)?;
-        Some(Self { dict: self.dict, node: n })
+        Some(Self {
+            dict: self.dict,
+            node: n,
+        })
     }
     // Step by symbol id (fast path)
     pub fn step_id(&self, sym_id: u16) -> Option<Self> {
         let n = self.dict.step_by_id(self.node, sym_id)?;
-        Some(Self { dict: self.dict, node: n })
+        Some(Self {
+            dict: self.dict,
+            node: n,
+        })
     }
-    pub fn is_terminal(&self) -> bool { self.dict.is_terminal(self.node) }
-    pub fn node(&self) -> usize { self.node }
+    pub fn is_terminal(&self) -> bool {
+        self.dict.is_terminal(self.node)
+    }
+    pub fn node(&self) -> usize {
+        self.node
+    }
 }
 
 impl Dictionary for GaddagDictionary {
-    fn contains(&self, word: &str) -> bool { self.forward.contains(word) }
-    fn has_prefix(&self, prefix: &str) -> bool { self.forward.has_prefix(prefix) }
-    fn as_any(&self) -> &dyn Any { self }
-    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> { Box::new(self.clone()) }
+    fn contains(&self, word: &str) -> bool {
+        self.forward.contains(word)
+    }
+    fn has_prefix(&self, prefix: &str) -> bool {
+        self.forward.has_prefix(prefix)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn boxed_clone(&self) -> Box<dyn Dictionary + Send + Sync> {
+        Box::new(self.clone())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::text::{TokenizerRef, Tokenizer};
+    use crate::text::{Tokenizer, TokenizerRef};
 
     #[test]
     fn gaddag_dictionary_basic() {
-        let dict = GaddagDictionary::from_words(vec!["CARE".to_string(), "CARES".to_string()], true);
+        let dict =
+            GaddagDictionary::from_words(vec!["CARE".to_string(), "CARES".to_string()], true);
         assert!(dict.contains("care"));
         assert!(dict.has_prefix("ca"));
     }
@@ -470,7 +710,11 @@ mod tests {
         fn has_seq(gd: &GaddagDictionary, s: &str) -> bool {
             let mut node = gd.root();
             for token in gd.tokenizer().segment(s) {
-                if let Some(nxt) = gd.step_token(node, &token) { node = nxt; } else { return false; }
+                if let Some(nxt) = gd.step_token(node, &token) {
+                    node = nxt;
+                } else {
+                    return false;
+                }
             }
             gd.is_terminal(node)
         }
@@ -542,7 +786,10 @@ mod tests {
             }
         }
         let tokenizer = TokenizerRef::new(Arc::new(QuTokenizer));
-        let opts = super::DictionaryOptions { tokenizer: tokenizer.clone(), ..Default::default() };
+        let opts = super::DictionaryOptions {
+            tokenizer: tokenizer.clone(),
+            ..Default::default()
+        };
         let gd = GaddagDictionary::from_words_opts(vec!["qu".to_string()], opts);
         let p = std::env::temp_dir().join("gaddag_test_qu.cbor");
         gd.to_gaddag_file(&p).unwrap();

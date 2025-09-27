@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use engine as eng;
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use eng::Dictionary;
+use engine as eng;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -48,7 +48,10 @@ fn sample_queries(words: &[String], n_in: usize, n_out: usize) -> (Vec<String>, 
 
 fn bench_build(c: &mut Criterion) {
     let words = load_words(10_000);
-    let opts = eng::DictionaryOptions { case_fold: true, ..Default::default() };
+    let opts = eng::DictionaryOptions {
+        case_fold: true,
+        ..Default::default()
+    };
 
     c.bench_function("dict_build_set_10k", |b| {
         b.iter(|| {
@@ -81,7 +84,10 @@ fn bench_build(c: &mut Criterion) {
 
 fn bench_lookup(c: &mut Criterion) {
     let words = load_words(10_000);
-    let opts = eng::DictionaryOptions { case_fold: true, ..Default::default() };
+    let opts = eng::DictionaryOptions {
+        case_fold: true,
+        ..Default::default()
+    };
     let (in_q, out_q) = sample_queries(&words, 2000, 2000);
 
     // Set

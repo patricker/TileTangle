@@ -1,5 +1,9 @@
-pub mod plugins;
 pub mod crossword;
+pub mod plugins;
 
-pub use plugins::{Action, UserMove, RulePlugin, BasicActionsPlugin, ScoreBonusPlugin, PluginRules};
-pub use crossword::{ScoreBreakdown, Rules, ReadingDirection, StackScoring, CrosswordRules, ValidatedMove};
+pub use crossword::{
+    CrosswordRules, ReadingDirection, Rules, ScoreBreakdown, StackScoring, ValidatedMove,
+};
+pub use plugins::{
+    Action, BasicActionsPlugin, PluginRules, RulePlugin, ScoreBonusPlugin, UserMove,
+};

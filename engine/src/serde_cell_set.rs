@@ -21,4 +21,3 @@ where
     let opt = Option::<Vec<u32>>::deserialize(deserializer)?;
     Ok(opt.map(|vec| vec.into_iter().map(CellId).collect()))
 }
-

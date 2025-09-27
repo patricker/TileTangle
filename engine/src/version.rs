@@ -8,6 +8,9 @@ pub struct EngineVersion {
 }
 
 pub fn engine_version() -> EngineVersion {
-    EngineVersion { major: 0, minor: 1, patch: 0 }
+    EngineVersion {
+        major: 0,
+        minor: 1,
+        patch: 0,
+    }
 }
-

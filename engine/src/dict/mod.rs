@@ -34,12 +34,12 @@ impl Default for DictionaryOptions {
     }
 }
 
-mod set;
-mod fst;
 mod dawg;
+mod fst;
 mod gaddag;
+mod set;
 
-pub use set::SetDictionary;
-pub use fst::FstDictionary;
 pub use dawg::DawgDictionary;
-pub use gaddag::{GaddagDictionary, GaddagCursor, GaddagRight};
+pub use fst::FstDictionary;
+pub use gaddag::{GaddagCursor, GaddagDictionary, GaddagRight};
+pub use set::SetDictionary;

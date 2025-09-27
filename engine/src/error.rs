@@ -19,4 +19,3 @@ pub enum EngineError {
     #[error("serialization error: {0}")]
     Serialization(String),
 }
-

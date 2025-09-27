@@ -850,28 +850,55 @@ pub extern "C" fn tt_evaluate_candidate(
     };
     let mut mv = engine::MoveDraft { placements: vec![] };
     for p in &items {
-        let Some(cid) = g.state.board.geom.to_cell_id(engine::geometry::Coord2D { x: p.x, y: p.y }) else {
+        let Some(cid) = g
+            .state
+            .board
+            .geom
+            .to_cell_id(engine::geometry::Coord2D { x: p.x, y: p.y })
+        else {
             set_error("invalid coordinates");
             return std::ptr::null_mut();
         };
-        mv.placements.push((cid, engine::Tile { kind_id: p.kind_id.clone(), mark: None }));
+        mv.placements.push((
+            cid,
+            engine::Tile {
+                kind_id: p.kind_id.clone(),
+                mark: None,
+            },
+        ));
     }
     let validated = match g.rules.validate(&g.state, &mv) {
         Ok(v) => v,
-        Err(e) => { set_error(format!("{}", e)); return std::ptr::null_mut(); }
+        Err(e) => {
+            set_error(format!("{}", e));
+            return std::ptr::null_mut();
+        }
     };
     let sc = g.rules.score(&g.state, &validated);
-    if sc.main_score < 0 { return take_cstring("null".to_string()); }
-    let cand = engine::CandidateMove { placements: validated.placements.clone(), word: sc.main_word.clone(), score: sc.total };
+    if sc.main_score < 0 {
+        return take_cstring("null".to_string());
+    }
+    let cand = engine::CandidateMove {
+        placements: validated.placements.clone(),
+        word: sc.main_word.clone(),
+        score: sc.total,
+    };
     // Build rack kinds for the active player
     let pid = g.state.to_move.0;
-    let rack: Vec<String> = g.state.players[pid].rack.tiles.iter().map(|t| t.kind_id.clone()).collect();
+    let rack: Vec<String> = g.state.players[pid]
+        .rack
+        .tiles
+        .iter()
+        .map(|t| t.kind_id.clone())
+        .collect();
     // Configure AI for evaluation
     let mut cfg = AiConfig::default();
     if !difficulty.is_null() {
         let dstr = unsafe { CStr::from_ptr(difficulty) };
         if let Ok(ds) = dstr.to_str() {
-            if let Ok(level) = parse_difficulty_tag(ds) { cfg.apply_difficulty(level); }
+            if let Ok(level) = parse_difficulty_tag(ds) {
+                cfg.apply_difficulty(level);
+            }
         }
     }
     let eval = engine::evaluate_candidate_move(&g.state, cand, &rack, &cfg);
@@ -998,8 +1025,14 @@ pub extern "C" fn tt_best_move_with_model(
         }
     };
     let mut cfg = AiConfig::for_difficulty(level);
-    if seed_is_some != 0 { cfg.randomness = Some(seed); }
-    cfg.opponent_model = if opponent_model == 1 { engine::OpponentModel::BagSampling } else { engine::OpponentModel::PerfectInfo };
+    if seed_is_some != 0 {
+        cfg.randomness = Some(seed);
+    }
+    cfg.opponent_model = if opponent_model == 1 {
+        engine::OpponentModel::BagSampling
+    } else {
+        engine::OpponentModel::PerfectInfo
+    };
     let Some(eval) = engine::best_move_greedy(&g.state, &g.rules, &cfg) else {
         return take_cstring("null".to_string());
     };
@@ -1012,8 +1045,13 @@ pub extern "C" fn tt_best_move_with_model(
         let mut obj = serde_json::Map::new();
         obj.insert("x".into(), coord.x.into());
         obj.insert("y".into(), coord.y.into());
-        obj.insert("kind_id".into(), serde_json::Value::String(tile.kind_id.clone()));
-        if let Some(mark) = &tile.mark { obj.insert("mark".into(), serde_json::Value::String(mark.clone())); }
+        obj.insert(
+            "kind_id".into(),
+            serde_json::Value::String(tile.kind_id.clone()),
+        );
+        if let Some(mark) = &tile.mark {
+            obj.insert("mark".into(), serde_json::Value::String(mark.clone()));
+        }
         placements_json.push(serde_json::Value::Object(obj));
     }
     let val = serde_json::json!({
