@@ -397,15 +397,13 @@ impl Rules for CrosswordRules {
             let mut total = main_score;
             for (_, s) in &cross_words { total += *s; }
 
-            if !self.free_word_mode {
-                if let Some(dict) = &state.dictionary {
-                    if !dict.contains(&main_word) {
+            if !self.free_word_mode && let Some(dict) = &state.dictionary {
+                if !dict.contains(&main_word) {
+                    return ScoreBreakdown { total: -1, main_word, main_score: -1, cross_words: vec![], bingo: false };
+                }
+                for (w, _) in &cross_words {
+                    if !dict.contains(w) {
                         return ScoreBreakdown { total: -1, main_word, main_score: -1, cross_words: vec![], bingo: false };
-                    }
-                    for (w, _) in &cross_words {
-                        if !dict.contains(w) {
-                            return ScoreBreakdown { total: -1, main_word, main_score: -1, cross_words: vec![], bingo: false };
-                        }
                     }
                 }
             }
@@ -450,15 +448,13 @@ impl Rules for CrosswordRules {
         }
         total += main_score + cross_words.iter().map(|(_, s)| *s).sum::<i32>();
 
-        if !self.free_word_mode {
-            if let Some(dict) = &state.dictionary {
-                if !dict.contains(&main_word) {
+        if !self.free_word_mode && let Some(dict) = &state.dictionary {
+            if !dict.contains(&main_word) {
+                return ScoreBreakdown { total: -1, main_word, main_score: -1, cross_words: vec![], bingo: false };
+            }
+            for (w, _) in &cross_words {
+                if !dict.contains(w) {
                     return ScoreBreakdown { total: -1, main_word, main_score: -1, cross_words: vec![], bingo: false };
-                }
-                for (w, _) in &cross_words {
-                    if !dict.contains(w) {
-                        return ScoreBreakdown { total: -1, main_word, main_score: -1, cross_words: vec![], bingo: false };
-                    }
                 }
             }
         }

@@ -12,6 +12,23 @@ use crate::{
     EngineError, GameConfig, GameEvent, GameEventKind, Player, PlayerId, Tile, TileKind,
 };
 
+// Zobrist hashing helpers used by GameState
+fn splitmix64(mut x: u64) -> u64 {
+    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = x;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+fn zobrist_mix(seed: u64, value: impl Hash) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    let mut hasher = DefaultHasher::new();
+    seed.hash(&mut hasher);
+    value.hash(&mut hasher);
+    splitmix64(hasher.finish())
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct GameState {
     pub board: Board<RectGridGeometry>,
@@ -309,20 +326,4 @@ mod tests {
         let nb = state.preview(&draft).unwrap();
         assert_eq!(nb.cells[c.0 as usize].stack.len(), 1);
     }
-}
-
-fn splitmix64(mut x: u64) -> u64 {
-    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut z = x;
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
-
-fn zobrist_mix(seed: u64, value: impl Hash) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    let mut hasher = DefaultHasher::new();
-    seed.hash(&mut hasher);
-    value.hash(&mut hasher);
-    splitmix64(hasher.finish())
 }

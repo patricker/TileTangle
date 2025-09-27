@@ -114,7 +114,7 @@ fn best_move_inner<R: Rules>(
     best.map(|b| b.eval)
 }
 
-pub(crate) struct GreedyAi;
+// Removed unused GreedyAi marker to satisfy dead-code lint
 
 pub(crate) fn best_move_default<R: Rules>(state: &GameState, rules: &R, config: &AiConfig) -> Option<EvaluatedMove> {
     let mut ctx = SearchContext::new(config);

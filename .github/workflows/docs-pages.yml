@@ -38,9 +38,15 @@ jobs:
           ln -sf Godot_v4.5-stable_linux.x86_64 tools/godot-4.5/godot4
       - name: Install Godot 4.5 export templates
         run: |
-          mkdir -p ~/.local/share/godot/export_templates/4.5.stable
+          BASE="$HOME/.local/share/godot/export_templates"
+          mkdir -p "$BASE"
           curl -L "https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_export_templates.tpz" -o /tmp/templates.tpz
-          unzip -q /tmp/templates.tpz -d ~/.local/share/godot/export_templates/4.5.stable
+          unzip -q /tmp/templates.tpz -d "$BASE"
+          # The tpz extracts into a 'templates' dir; rename to the expected versioned folder
+          rm -rf "$BASE/4.5.stable"
+          if [ -d "$BASE/templates" ]; then
+            mv "$BASE/templates" "$BASE/4.5.stable"
+          fi
       - name: Godot Web export
         run: make web-export
       - name: Wire WASM shim into export

@@ -862,7 +862,7 @@ pub extern "C" fn tt_evaluate_candidate(
     };
     let sc = g.rules.score(&g.state, &validated);
     if sc.main_score < 0 { return take_cstring("null".to_string()); }
-    let mut cand = engine::CandidateMove { placements: validated.placements.clone(), word: sc.main_word.clone(), score: sc.total };
+    let cand = engine::CandidateMove { placements: validated.placements.clone(), word: sc.main_word.clone(), score: sc.total };
     // Build rack kinds for the active player
     let pid = g.state.to_move.0;
     let rack: Vec<String> = g.state.players[pid].rack.tiles.iter().map(|t| t.kind_id.clone()).collect();

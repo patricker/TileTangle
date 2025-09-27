@@ -262,7 +262,7 @@ pub fn generate_moves(
                 let mut nb = built.clone(); nb.push_str(sym);
                 let mut next_gaddag = gaddag;
                 if let Some((gd, node)) = next_gaddag {
-                    let mut ns = crate::normalize_with_mode(sym.to_string(), gd.forward.norm);
+                    let mut ns = crate::normalize_with_mode(sym, gd.forward.norm);
                     if gd.forward.case_fold { ns = ns.to_lowercase(); }
                     if let Some(n2) = gd.step_symbol(node, &ns) { next_gaddag = Some((gd, n2)); } else { continue; }
                 }
@@ -306,7 +306,7 @@ pub fn generate_moves(
     ) {
         // Helper: normalize a tile symbol for dictionary lookup (norm + case-fold)
         let norm_sym = |gd: &GaddagDictionary, s: &str| -> String {
-            let mut out = crate::normalize_with_mode(s.to_string(), gd.forward.norm);
+            let mut out = crate::normalize_with_mode(s, gd.forward.norm);
             if gd.forward.case_fold { out = out.to_lowercase(); }
             out
         };

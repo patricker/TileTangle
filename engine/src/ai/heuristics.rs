@@ -121,7 +121,7 @@ mod tests {
         let counts = leftover_counts_from_rack(&rack, &placements);
         assert_eq!(counts.get("A"), Some(&2));
         assert_eq!(counts.get("B"), Some(&1));
-        assert!(counts.get("Q").is_none());
+        assert!(!counts.contains_key("Q"));
     }
 
     #[test]
