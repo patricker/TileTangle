@@ -105,3 +105,13 @@ ffi-header:
 python-dev:
 	python3 -m pip install --upgrade maturin pytest || true
 	cd bindings/python && maturin develop --release
+
+.PHONY: install-hooks
+install-hooks:
+	@# Ensure pre-commit is available for the active Python without relying on shell shims
+	@python3 -c 'import pre_commit' >/dev/null 2>&1 || { \
+		echo 'Installing pre-commit (user site-packages)...'; \
+		python3 -m pip install --user pre-commit; \
+	}
+	@# Prefer module invocation to bypass problematic shims (pyenv/WSL)
+	python3 -m pre_commit install || pre-commit install
