@@ -1292,6 +1292,56 @@ pub extern "C" fn tt_set_dictionary_from_fst_bytes(
     }
 }
 
+/// Pass the current player's turn without placing tiles.
+#[no_mangle]
+pub extern "C" fn tt_pass_turn(game: *mut GameHandle) {
+    if game.is_null() {
+        return;
+    }
+    let g = unsafe { &mut *(game as *mut FfiGame) };
+    g.state.pass_turn();
+}
+
+/// Exchange tiles from the current player's rack.
+/// `kinds_json` is a JSON array of tile kind IDs to exchange, e.g. `["A","B"]`.
+/// Returns 1 on success, 0 on error (check `tt_last_error_message`).
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn tt_exchange_tiles(game: *mut GameHandle, kinds_json: *const c_char) -> c_uint {
+    LAST_ERROR.with(|e| *e.borrow_mut() = None);
+    if game.is_null() {
+        set_error("game is null");
+        return 0;
+    }
+    if kinds_json.is_null() {
+        set_error("kinds_json is null");
+        return 0;
+    }
+    let g = unsafe { &mut *(game as *mut FfiGame) };
+    let cstr = unsafe { CStr::from_ptr(kinds_json) };
+    let json_str = match cstr.to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            set_error("kinds_json is not valid UTF-8");
+            return 0;
+        }
+    };
+    let kinds: Vec<String> = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(e) => {
+            set_error(format!("invalid JSON: {}", e));
+            return 0;
+        }
+    };
+    match g.state.exchange_tiles(&kinds) {
+        Ok(_) => 1,
+        Err(e) => {
+            set_error(format!("{}", e));
+            0
+        }
+    }
+}
+
 /// Generate naive moves based on current rack. Returns JSON array of candidates.
 #[no_mangle]
 pub extern "C" fn tt_generate_moves(

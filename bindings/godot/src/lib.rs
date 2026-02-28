@@ -598,6 +598,47 @@ impl WordEngine {
         GString::from(serde_json::to_string(&out).unwrap())
     }
 
+    /// Pass the current player's turn without placing tiles.
+    #[func]
+    pub fn pass_turn(&mut self) {
+        let st = match self.state.as_mut() {
+            Some(s) => s,
+            None => {
+                godot_error!("pass_turn called before new_game");
+                return;
+            }
+        };
+        st.pass_turn();
+    }
+
+    /// Exchange tiles from the current player's rack.
+    /// `kinds_json` is a JSON array of tile kind IDs to exchange, e.g. `["A","B"]`.
+    /// Returns a JSON array of newly drawn tile kind IDs, or empty string on error.
+    #[func]
+    pub fn exchange_tiles(&mut self, kinds_json: GString) -> GString {
+        let st = match self.state.as_mut() {
+            Some(s) => s,
+            None => {
+                godot_error!("exchange_tiles called before new_game");
+                return GString::from("");
+            }
+        };
+        let kinds: Vec<String> = match serde_json::from_str(&kinds_json.to_string()) {
+            Ok(v) => v,
+            Err(e) => {
+                godot_error!("invalid kinds JSON: {}", e);
+                return GString::from("");
+            }
+        };
+        match st.exchange_tiles(&kinds) {
+            Ok(drawn) => GString::from(serde_json::to_string(&drawn).unwrap()),
+            Err(e) => {
+                godot_error!("exchange_tiles failed: {}", e);
+                GString::from("")
+            }
+        }
+    }
+
     /// Serialize the current game state as JSON snapshot.
     #[func]
     pub fn snapshot_json(&self) -> GString {

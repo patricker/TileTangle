@@ -471,6 +471,20 @@ impl Game {
         Ok(())
     }
 
+    /// Pass the current player's turn without placing tiles.
+    fn pass_turn(&mut self) {
+        self.state.pass_turn();
+    }
+
+    /// Exchange tiles from the current player's rack.
+    /// `kinds` is a list of tile kind IDs to exchange, e.g. `["A", "B"]`.
+    /// Returns a list of newly drawn tile kind IDs.
+    fn exchange_tiles(&mut self, kinds: Vec<String>) -> PyResult<Vec<String>> {
+        self.state
+            .exchange_tiles(&kinds)
+            .map_err(|e| PyValueError::new_err(format!("{}", e)))
+    }
+
     fn event_log(&self, py: Python<'_>) -> PyResult<PyObject> {
         let list = PyList::empty(py);
         for ev in &self.state.event_log {

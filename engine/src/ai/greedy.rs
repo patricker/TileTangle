@@ -3,10 +3,9 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 use rayon::prelude::*;
 use std::time::Instant;
 
-use crate::{
-    GameState, MoveDraft, Rules,
-    movegen::{CandidateMove, generate_moves},
-};
+#[cfg(feature = "parallel")]
+use crate::movegen::CandidateMove;
+use crate::{GameState, MoveDraft, Rules, movegen::generate_moves};
 
 use super::heuristics::evaluate_candidate_move;
 use super::types::EvaluatedMove;
