@@ -13,7 +13,7 @@ The engine supports an opt-in plugin pipeline that wraps base crossword rules. P
 
 Core types
 
-- `Action`: `Place`, `Stack`, `SwapRack`, `RotateTile`, `SlideGroup`, `Custom(String, Value)`
+- `Action`: `Place`, `Stack`, `SwapRack`, `RotateTile` (reserved), `SlideGroup` (reserved), `Custom(String, Value)`
 - `UserMove { actions: Vec<Action> }`
 - `RulePlugin` trait with hooks: `pre_validate`, `validate`, `to_draft`, `modify_score`, `commit`
 - `PluginRules { base: CrosswordRules, plugins: Vec<Box<dyn RulePlugin>> }`

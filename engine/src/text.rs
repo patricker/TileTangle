@@ -78,3 +78,55 @@ impl Tokenizer for CharacterTokenizer {
         text.chars().map(|c| c.to_string()).collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nfc_normalizes_decomposed() {
+        let decomposed = "Cafe\u{301}"; // e + combining acute
+        let result = nfc(decomposed);
+        assert_eq!(result, "Caf\u{e9}"); // precomposed é
+    }
+
+    #[test]
+    fn nfc_passes_through_ascii() {
+        assert_eq!(nfc("HELLO"), "HELLO");
+    }
+
+    #[test]
+    fn normalize_with_mode_nfkc() {
+        let fi = "\u{FB01}"; // ﬁ ligature
+        let result = normalize_with_mode(fi, NormalizationMode::NFKC);
+        assert_eq!(result, "fi");
+    }
+
+    #[test]
+    fn grapheme_tokenizer_ascii() {
+        let tok = TokenizerRef::grapheme();
+        assert_eq!(tok.segment("ABC"), vec!["A", "B", "C"]);
+    }
+
+    #[test]
+    fn grapheme_tokenizer_combining_marks() {
+        let tok = TokenizerRef::grapheme();
+        // e + combining acute = one grapheme
+        let tokens = tok.segment("e\u{301}x");
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[1], "x");
+    }
+
+    #[test]
+    fn character_tokenizer_splits_combining() {
+        let tok = TokenizerRef::characters();
+        let tokens = tok.segment("e\u{301}");
+        assert_eq!(tokens.len(), 2);
+    }
+
+    #[test]
+    fn default_tokenizer_is_grapheme() {
+        let tok = TokenizerRef::default();
+        assert_eq!(tok.segment("AB"), vec!["A", "B"]);
+    }
+}

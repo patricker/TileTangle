@@ -1343,3 +1343,172 @@ fn context_prefix(state: &GameState, pos: Coord2D, dir: (i32, i32)) -> String {
     }
     s
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        Tile, TileKind,
+        dict::FstDictionary,
+        game::{GameConfig, RectBoardLayout},
+        inventory::Tileset,
+    };
+    use std::collections::HashMap;
+
+    fn ab_config(w: u32, h: u32) -> GameConfig {
+        let tileset = Tileset {
+            tile_kinds: vec![
+                TileKind {
+                    id: "A".into(),
+                    symbol: "A".into(),
+                    score: 1,
+                    is_blank: false,
+                    aliases: vec![],
+                },
+                TileKind {
+                    id: "B".into(),
+                    symbol: "B".into(),
+                    score: 3,
+                    is_blank: false,
+                    aliases: vec![],
+                },
+            ],
+        };
+        let mut counts = HashMap::new();
+        counts.insert("A".to_string(), 10);
+        counts.insert("B".to_string(), 10);
+        GameConfig {
+            tileset,
+            rack_size: 7,
+            board_layout: RectBoardLayout {
+                width: w,
+                height: h,
+            },
+            ruleset_id: "cross".into(),
+            dictionary_id: "en".into(),
+            rng_seed: 1,
+            tile_counts: counts,
+        }
+    }
+
+    fn setup_free_word(w: u32, h: u32) -> (GameState, CrosswordRules) {
+        let cfg = ab_config(w, h);
+        let state = GameState::new(&cfg, 2).unwrap();
+        let rules = CrosswordRules {
+            free_word_mode: true,
+            ..Default::default()
+        };
+        (state, rules)
+    }
+
+    #[test]
+    fn empty_board_generates_center_moves() {
+        let (state, rules) = setup_free_word(5, 5);
+        let rack = vec!["A".to_string(), "B".to_string()];
+        let moves = generate_moves(&state, &rules, &rack, 7);
+        assert!(
+            !moves.is_empty(),
+            "should generate at least one move on empty board"
+        );
+        // All moves must touch center
+        let center = CrosswordRules::center_cell(&state.board.geom);
+        for m in &moves {
+            let cells: Vec<CellId> = m.placements.iter().map(|(c, _)| *c).collect();
+            assert!(
+                cells.contains(&center),
+                "move {:?} should include center",
+                m.word
+            );
+        }
+    }
+
+    #[test]
+    fn empty_rack_generates_no_moves() {
+        let (state, rules) = setup_free_word(5, 5);
+        let rack: Vec<String> = vec![];
+        let moves = generate_moves(&state, &rules, &rack, 7);
+        assert!(moves.is_empty());
+    }
+
+    #[test]
+    fn dictionary_filters_invalid_words() {
+        let cfg = ab_config(5, 5);
+        let mut state = GameState::new(&cfg, 2).unwrap();
+        state.dictionary = Some(Box::new(FstDictionary::from_words(
+            vec!["AB".to_string()],
+            true,
+        )));
+        let rules = CrosswordRules {
+            free_word_mode: false,
+            ..Default::default()
+        };
+        let rack = vec!["A".to_string(), "B".to_string()];
+        let moves = generate_moves(&state, &rules, &rack, 7);
+        for m in &moves {
+            assert_eq!(
+                m.word, "AB",
+                "only valid word AB should appear, got {:?}",
+                m.word
+            );
+        }
+    }
+
+    #[test]
+    fn second_move_must_touch_existing_tile() {
+        let (mut state, rules) = setup_free_word(5, 5);
+        // Place AB at center
+        let center = CrosswordRules::center_cell(&state.board.geom);
+        let cc = state.board.geom.from_cell_id(center).unwrap();
+        let right = state
+            .board
+            .geom
+            .to_cell_id(Coord2D {
+                x: cc.x + 1,
+                y: cc.y,
+            })
+            .unwrap();
+        state.board.cells[center.0 as usize].stack.push(Tile {
+            kind_id: "A".into(),
+            mark: None,
+        });
+        state.board.cells[right.0 as usize].stack.push(Tile {
+            kind_id: "B".into(),
+            mark: None,
+        });
+
+        let rack = vec!["A".to_string(), "B".to_string()];
+        let moves = generate_moves(&state, &rules, &rack, 7);
+        assert!(
+            !moves.is_empty(),
+            "should generate moves adjacent to existing tiles"
+        );
+        for m in &moves {
+            let cells: Vec<CellId> = m.placements.iter().map(|(c, _)| *c).collect();
+            let adjacent = CrosswordRules::adjacent_to_existing(&state.board, &cells);
+            assert!(
+                adjacent,
+                "move {:?} should be adjacent to existing tiles",
+                m.word
+            );
+        }
+    }
+
+    #[test]
+    fn max_len_limits_move_length() {
+        let (state, rules) = setup_free_word(7, 7);
+        let rack = vec![
+            "A".to_string(),
+            "B".to_string(),
+            "A".to_string(),
+            "B".to_string(),
+        ];
+        let moves_short = generate_moves(&state, &rules, &rack, 2);
+        for m in &moves_short {
+            assert!(
+                m.placements.len() <= 2,
+                "move length {} exceeds max_len 2",
+                m.placements.len()
+            );
+        }
+    }
+}

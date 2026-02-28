@@ -9,6 +9,7 @@ use std::slice;
 
 thread_local! {
     static LAST_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
+    static LAST_ERROR_CSTRING: RefCell<Option<CString>> = const { RefCell::new(None) };
 }
 
 fn set_error(msg: impl ToString) {
@@ -1134,18 +1135,16 @@ pub extern "C" fn tt_string_free(ptr: *mut c_char) {
     }
 }
 
-/// Return the last error message for the current thread (pointer is valid until next call).
+/// Return the last error message for the current thread.
+/// The returned pointer is valid until the next call to any `tt_*` function on this thread.
 #[no_mangle]
 pub extern "C" fn tt_last_error_message() -> *const c_char {
     LAST_ERROR.with(|e| {
         if let Some(ref s) = *e.borrow() {
-            // store string in thread local again to keep owned CString memory
-            // We avoid allocating per call by caching CString bytes in another TLS if needed.
-            // Simpler: allocate a new CString each call; caller copies string immediately.
             let cs = CString::new(s.as_str()).unwrap_or_else(|_| CString::new("error").unwrap());
             let ptr = cs.as_ptr();
-            // Leak the CString; caller should not free this (valid until next process end). For simplicity.
-            std::mem::forget(cs);
+            // Cache in thread-local so the pointer stays valid until the next call.
+            LAST_ERROR_CSTRING.with(|c| *c.borrow_mut() = Some(cs));
             ptr
         } else {
             std::ptr::null()

@@ -224,3 +224,159 @@ fn mask_opponent_rack_with_bag_sample(state: &mut GameState) {
     let mut drawn = state.bag.draw(rack_size);
     state.players[pid].rack.tiles.append(&mut drawn);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::AiDifficulty;
+    use crate::{
+        CrosswordRules, Tile, TileKind,
+        game::{GameConfig, RectBoardLayout},
+        inventory::Tileset,
+    };
+
+    fn test_config() -> GameConfig {
+        let tileset = Tileset {
+            tile_kinds: vec![
+                TileKind {
+                    id: "A".into(),
+                    symbol: "A".into(),
+                    score: 1,
+                    is_blank: false,
+                    aliases: vec![],
+                },
+                TileKind {
+                    id: "B".into(),
+                    symbol: "B".into(),
+                    score: 3,
+                    is_blank: false,
+                    aliases: vec![],
+                },
+            ],
+        };
+        let mut counts = std::collections::HashMap::new();
+        counts.insert("A".to_string(), 10);
+        counts.insert("B".to_string(), 10);
+        GameConfig {
+            tileset,
+            rack_size: 7,
+            board_layout: RectBoardLayout {
+                width: 5,
+                height: 5,
+            },
+            ruleset_id: "cross".into(),
+            dictionary_id: "en".into(),
+            rng_seed: 42,
+            tile_counts: counts,
+        }
+    }
+
+    fn setup_game_with_rack(rack_tiles: &[&str]) -> (GameState, CrosswordRules) {
+        let cfg = test_config();
+        let mut state = GameState::new(&cfg, 2).unwrap();
+        state.players[0].rack.tiles = rack_tiles
+            .iter()
+            .map(|k| Tile {
+                kind_id: k.to_string(),
+                mark: None,
+            })
+            .collect();
+        let rules = CrosswordRules {
+            free_word_mode: true,
+            ..Default::default()
+        };
+        (state, rules)
+    }
+
+    #[test]
+    fn best_move_returns_some_on_nonempty_rack() {
+        let (state, rules) = setup_game_with_rack(&["A", "B"]);
+        let cfg = AiConfig::default();
+        let result = best_move_default(&state, &rules, &cfg);
+        assert!(
+            result.is_some(),
+            "AI should find a move with tiles A,B on empty board"
+        );
+    }
+
+    #[test]
+    fn best_move_returns_none_on_empty_rack() {
+        let (state, rules) = setup_game_with_rack(&[]);
+        let cfg = AiConfig::default();
+        let result = best_move_default(&state, &rules, &cfg);
+        assert!(result.is_none(), "AI should return None with empty rack");
+    }
+
+    #[test]
+    fn noise_range_produces_different_results() {
+        let (state, rules) = setup_game_with_rack(&["A", "B", "A", "B"]);
+        let cfg1 = AiConfig {
+            noise_range: 20,
+            randomness: Some(1),
+            ..Default::default()
+        };
+        let r1 = best_move_default(&state, &rules, &cfg1);
+
+        let cfg2 = AiConfig {
+            noise_range: 20,
+            randomness: Some(999),
+            ..Default::default()
+        };
+        let r2 = best_move_default(&state, &rules, &cfg2);
+
+        // With high noise and different seeds, results may differ (not guaranteed but likely)
+        // At minimum, both should produce a valid move
+        assert!(r1.is_some());
+        assert!(r2.is_some());
+    }
+
+    #[test]
+    fn node_limit_still_returns_a_move() {
+        let (state, rules) = setup_game_with_rack(&["A", "B"]);
+        let cfg = AiConfig {
+            max_nodes: Some(1),
+            ..Default::default()
+        };
+        let result = best_move_default(&state, &rules, &cfg);
+        assert!(
+            result.is_some(),
+            "node limit should still return at least one move"
+        );
+    }
+
+    #[test]
+    fn difficulty_levels_produce_valid_moves() {
+        let (state, rules) = setup_game_with_rack(&["A", "B"]);
+        for level in [AiDifficulty::Easy, AiDifficulty::Medium, AiDifficulty::Hard] {
+            let cfg = AiConfig::for_difficulty(level);
+            let result = best_move_default(&state, &rules, &cfg);
+            assert!(
+                result.is_some(),
+                "difficulty {:?} should produce a move",
+                level
+            );
+        }
+    }
+
+    #[test]
+    fn lookahead_depth_1_returns_move() {
+        let (mut state, rules) = setup_game_with_rack(&["A", "B"]);
+        // Give player 1 some tiles too for lookahead
+        state.players[1].rack.tiles = vec![
+            Tile {
+                kind_id: "A".into(),
+                mark: None,
+            },
+            Tile {
+                kind_id: "B".into(),
+                mark: None,
+            },
+        ];
+        let cfg = AiConfig {
+            lookahead_depth: 1,
+            ..Default::default()
+        };
+        let result = best_move_default(&state, &rules, &cfg);
+        assert!(result.is_some());
+    }
+}

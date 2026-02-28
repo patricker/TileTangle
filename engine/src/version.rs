@@ -8,9 +8,26 @@ pub struct EngineVersion {
 }
 
 pub fn engine_version() -> EngineVersion {
+    let parts: Vec<u32> = env!("CARGO_PKG_VERSION")
+        .split('.')
+        .map(|s| s.parse().unwrap_or(0))
+        .collect();
     EngineVersion {
-        major: 0,
-        minor: 1,
-        patch: 0,
+        major: parts.first().copied().unwrap_or(0),
+        minor: parts.get(1).copied().unwrap_or(0),
+        patch: parts.get(2).copied().unwrap_or(0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_matches_cargo_toml() {
+        let v = engine_version();
+        let expected = env!("CARGO_PKG_VERSION");
+        let actual = format!("{}.{}.{}", v.major, v.minor, v.patch);
+        assert_eq!(actual, expected);
     }
 }

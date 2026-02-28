@@ -99,6 +99,13 @@ impl Dictionary for SetDictionary {
         }
         self.words.contains(&s)
     }
+    fn has_prefix(&self, prefix: &str) -> bool {
+        let mut p = normalize_with_mode(prefix, self.norm);
+        if self.case_fold {
+            p = p.to_lowercase();
+        }
+        self.words.iter().any(|w| w.starts_with(&p))
+    }
     fn as_any(&self) -> &dyn Any {
         self
     }
