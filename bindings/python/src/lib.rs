@@ -9,6 +9,8 @@ use std::time::Duration;
 struct Game {
     state: engine::GameState,
     rules: engine::CrosswordRules,
+    history: Vec<Vec<u8>>,
+    future: Vec<Vec<u8>>,
 }
 
 #[derive(Deserialize)]
@@ -150,7 +152,13 @@ impl Game {
                 }
             }
         }
-        Ok(Self { state, rules })
+        let initial_snap = state.snapshot_cbor().unwrap_or_default();
+        Ok(Self {
+            state,
+            rules,
+            history: vec![initial_snap],
+            future: Vec::new(),
+        })
     }
 
     fn play_move(&mut self, placements_json: &str, py: Python<'_>) -> PyResult<PyObject> {
@@ -180,9 +188,13 @@ impl Game {
         if score.main_score < 0 {
             return Err(PyValueError::new_err("invalid word(s)"));
         }
+        self.future.clear();
         self.rules
             .commit(&mut self.state, validated, &score)
             .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+        if let Ok(snap) = self.state.snapshot_cbor() {
+            self.history.push(snap);
+        }
         let dict = PyDict::new(py);
         dict.set_item("total", score.total)?;
         dict.set_item("main_word", score.main_word)?;
@@ -473,16 +485,62 @@ impl Game {
 
     /// Pass the current player's turn without placing tiles.
     fn pass_turn(&mut self) {
+        self.future.clear();
         self.state.pass_turn();
+        if let Ok(snap) = self.state.snapshot_cbor() {
+            self.history.push(snap);
+        }
     }
 
     /// Exchange tiles from the current player's rack.
     /// `kinds` is a list of tile kind IDs to exchange, e.g. `["A", "B"]`.
     /// Returns a list of newly drawn tile kind IDs.
     fn exchange_tiles(&mut self, kinds: Vec<String>) -> PyResult<Vec<String>> {
-        self.state
+        self.future.clear();
+        let result = self
+            .state
             .exchange_tiles(&kinds)
-            .map_err(|e| PyValueError::new_err(format!("{}", e)))
+            .map_err(|e| PyValueError::new_err(format!("{}", e)))?;
+        if let Ok(snap) = self.state.snapshot_cbor() {
+            self.history.push(snap);
+        }
+        Ok(result)
+    }
+
+    /// Undo the last action. Returns True if successful, False if nothing to undo.
+    fn undo(&mut self) -> bool {
+        if self.history.len() <= 1 {
+            return false;
+        }
+        let current = self.history.pop().unwrap();
+        self.future.push(current);
+        let prev = self.history.last().unwrap();
+        let dict = self.state.dictionary.take();
+        match engine::GameState::from_snapshot_cbor(prev) {
+            Ok(mut restored) => {
+                restored.dictionary = dict;
+                self.state = restored;
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Redo a previously undone action. Returns True if successful, False if nothing to redo.
+    fn redo(&mut self) -> bool {
+        let Some(next) = self.future.pop() else {
+            return false;
+        };
+        let dict = self.state.dictionary.take();
+        match engine::GameState::from_snapshot_cbor(&next) {
+            Ok(mut restored) => {
+                restored.dictionary = dict;
+                self.state = restored;
+                self.history.push(next);
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     fn event_log(&self, py: Python<'_>) -> PyResult<PyObject> {

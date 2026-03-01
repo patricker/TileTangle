@@ -11,6 +11,8 @@ pub struct WordEngine {
     base: Base<RefCounted>,
     state: Option<engine::GameState>,
     rules: engine::CrosswordRules,
+    history: Vec<Vec<u8>>,
+    future: Vec<Vec<u8>>,
 }
 
 #[godot_api]
@@ -20,6 +22,8 @@ impl IRefCounted for WordEngine {
             base,
             state: None,
             rules: engine::CrosswordRules::default(),
+            history: Vec::new(),
+            future: Vec::new(),
         }
     }
 }
@@ -237,7 +241,10 @@ impl WordEngine {
                     }
                 }
                 self.rules.free_word_mode = parsed.free_word_mode;
+                let initial_snap = state.snapshot_cbor().unwrap_or_default();
                 self.state = Some(state);
+                self.history = vec![initial_snap];
+                self.future.clear();
                 true
             }
             Err(e) => {
@@ -295,9 +302,13 @@ impl WordEngine {
             godot_error!("invalid word(s)");
             return GString::from("");
         }
+        self.future.clear();
         if let Err(e) = rules.commit(st, validated, &score) {
             godot_error!("{}", e);
             return GString::from("");
+        }
+        if let Ok(snap) = st.snapshot_cbor() {
+            self.history.push(snap);
         }
         let json = serde_json::json!({
             "total": score.total,
@@ -608,7 +619,11 @@ impl WordEngine {
                 return;
             }
         };
+        self.future.clear();
         st.pass_turn();
+        if let Ok(snap) = st.snapshot_cbor() {
+            self.history.push(snap);
+        }
     }
 
     /// Exchange tiles from the current player's rack.
@@ -631,10 +646,68 @@ impl WordEngine {
             }
         };
         match st.exchange_tiles(&kinds) {
-            Ok(drawn) => GString::from(serde_json::to_string(&drawn).unwrap()),
+            Ok(drawn) => {
+                self.future.clear();
+                if let Ok(snap) = st.snapshot_cbor() {
+                    self.history.push(snap);
+                }
+                GString::from(serde_json::to_string(&drawn).unwrap())
+            }
             Err(e) => {
                 godot_error!("exchange_tiles failed: {}", e);
                 GString::from("")
+            }
+        }
+    }
+
+    /// Undo the last action. Returns true if successful.
+    #[func]
+    pub fn undo(&mut self) -> bool {
+        if self.history.len() <= 1 {
+            return false;
+        }
+        let current = self.history.pop().unwrap();
+        self.future.push(current);
+        let prev = self.history.last().unwrap();
+        let st = match self.state.as_mut() {
+            Some(s) => s,
+            None => return false,
+        };
+        let dict = st.dictionary.take();
+        match engine::GameState::from_snapshot_cbor(prev) {
+            Ok(mut restored) => {
+                restored.dictionary = dict;
+                *st = restored;
+                true
+            }
+            Err(e) => {
+                godot_error!("undo failed: {}", e);
+                false
+            }
+        }
+    }
+
+    /// Redo a previously undone action. Returns true if successful.
+    #[func]
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.future.pop() else {
+            return false;
+        };
+        let st = match self.state.as_mut() {
+            Some(s) => s,
+            None => return false,
+        };
+        let dict = st.dictionary.take();
+        match engine::GameState::from_snapshot_cbor(&next) {
+            Ok(mut restored) => {
+                restored.dictionary = dict;
+                *st = restored;
+                self.history.push(next);
+                true
+            }
+            Err(e) => {
+                godot_error!("redo failed: {}", e);
+                false
             }
         }
     }

@@ -39,6 +39,8 @@ pub struct GameHandle {
 struct FfiGame {
     state: engine::GameState,
     rules: engine::CrosswordRules,
+    history: Vec<Vec<u8>>,
+    future: Vec<Vec<u8>>,
 }
 
 #[derive(Deserialize)]
@@ -271,7 +273,13 @@ pub extern "C" fn tt_new_game(config_json: *const c_char, players: c_uint) -> *m
         free_word_mode: cfg.free_word_mode,
         ..Default::default()
     };
-    let boxed = Box::new(FfiGame { state, rules });
+    let initial_snap = state.snapshot_cbor().unwrap_or_default();
+    let boxed = Box::new(FfiGame {
+        state,
+        rules,
+        history: vec![initial_snap],
+        future: Vec::new(),
+    });
     Box::into_raw(boxed) as *mut GameHandle
 }
 
@@ -350,9 +358,13 @@ pub extern "C" fn tt_play_move(
         set_error("invalid word(s)");
         return std::ptr::null_mut();
     }
+    g.future.clear();
     if let Err(e) = g.rules.commit(&mut g.state, validated, &score) {
         set_error(format!("{}", e));
         return std::ptr::null_mut();
+    }
+    if let Ok(snap) = g.state.snapshot_cbor() {
+        g.history.push(snap);
     }
     let val = serde_json::json!({
         "total": score.total,
@@ -1298,7 +1310,11 @@ pub extern "C" fn tt_pass_turn(game: *mut GameHandle) {
         return;
     }
     let g = unsafe { &mut *(game as *mut FfiGame) };
+    g.future.clear();
     g.state.pass_turn();
+    if let Ok(snap) = g.state.snapshot_cbor() {
+        g.history.push(snap);
+    }
 }
 
 /// Exchange tiles from the current player's rack.
@@ -1333,7 +1349,65 @@ pub extern "C" fn tt_exchange_tiles(game: *mut GameHandle, kinds_json: *const c_
         }
     };
     match g.state.exchange_tiles(&kinds) {
-        Ok(_) => 1,
+        Ok(_) => {
+            g.future.clear();
+            if let Ok(snap) = g.state.snapshot_cbor() {
+                g.history.push(snap);
+            }
+            1
+        }
+        Err(e) => {
+            set_error(format!("{}", e));
+            0
+        }
+    }
+}
+
+/// Undo the last action. Returns 1 on success, 0 if nothing to undo.
+#[no_mangle]
+pub extern "C" fn tt_undo(game: *mut GameHandle) -> c_uint {
+    if game.is_null() {
+        return 0;
+    }
+    let g = unsafe { &mut *(game as *mut FfiGame) };
+    if g.history.len() <= 1 {
+        return 0;
+    }
+    let current = g.history.pop().unwrap();
+    g.future.push(current);
+    let prev = g.history.last().unwrap();
+    let dict = g.state.dictionary.take();
+    match engine::GameState::from_snapshot_cbor(prev) {
+        Ok(mut restored) => {
+            restored.dictionary = dict;
+            g.state = restored;
+            1
+        }
+        Err(e) => {
+            set_error(format!("{}", e));
+            0
+        }
+    }
+}
+
+/// Redo a previously undone action. Returns 1 on success, 0 if nothing to redo.
+#[no_mangle]
+pub extern "C" fn tt_redo(game: *mut GameHandle) -> c_uint {
+    if game.is_null() {
+        return 0;
+    }
+    let g = unsafe { &mut *(game as *mut FfiGame) };
+    let Some(next) = g.future.pop() else {
+        return 0;
+    };
+    let dict = g.state.dictionary.take();
+    match engine::GameState::from_snapshot_cbor(&next) {
+        Ok(mut restored) => {
+            restored.dictionary = dict;
+            g.state = restored;
+            g.history.push(next);
+            1
+        }
         Err(e) => {
             set_error(format!("{}", e));
             0

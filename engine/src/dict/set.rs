@@ -7,6 +7,7 @@ use super::{Dictionary, DictionaryOptions};
 #[derive(Debug, Clone, Default)]
 pub struct SetDictionary {
     words: std::collections::HashSet<String>,
+    prefixes: std::collections::HashSet<String>,
     pub(crate) case_fold: bool,
     pub(crate) norm: NormalizationMode,
 }
@@ -43,8 +44,10 @@ impl SetDictionary {
             }
             set.insert(w);
         }
+        let prefixes = build_prefix_set(&set);
         Ok(Self {
             words: set,
+            prefixes,
             case_fold: opts.case_fold,
             norm: opts.norm,
         })
@@ -63,8 +66,10 @@ impl SetDictionary {
             }
             set.insert(s);
         }
+        let prefixes = build_prefix_set(&set);
         Self {
             words: set,
+            prefixes,
             case_fold,
             norm: NormalizationMode::NFC,
         }
@@ -83,12 +88,28 @@ impl SetDictionary {
             }
             set.insert(s);
         }
+        let prefixes = build_prefix_set(&set);
         Self {
             words: set,
+            prefixes,
             case_fold: opts.case_fold,
             norm: opts.norm,
         }
     }
+}
+
+fn build_prefix_set(
+    words: &std::collections::HashSet<String>,
+) -> std::collections::HashSet<String> {
+    let mut prefixes = std::collections::HashSet::new();
+    for w in words {
+        for i in 0..=w.len() {
+            if w.is_char_boundary(i) {
+                prefixes.insert(w[..i].to_string());
+            }
+        }
+    }
+    prefixes
 }
 
 impl Dictionary for SetDictionary {
@@ -104,7 +125,7 @@ impl Dictionary for SetDictionary {
         if self.case_fold {
             p = p.to_lowercase();
         }
-        self.words.iter().any(|w| w.starts_with(&p))
+        self.prefixes.contains(&p)
     }
     fn as_any(&self) -> &dyn Any {
         self
@@ -129,6 +150,26 @@ mod tests {
         let dict_no = SetDictionary::from_words(vec!["café".to_string()], false);
         assert!(!dict_no.contains("CAFÉ"));
     }
+    #[test]
+    fn has_prefix_returns_true_for_valid_prefixes() {
+        let dict = SetDictionary::from_words(vec!["HELLO", "HELP", "WORLD"], false);
+        assert!(dict.has_prefix("HEL"));
+        assert!(dict.has_prefix("HELL"));
+        assert!(dict.has_prefix("HELLO"));
+        assert!(dict.has_prefix("W"));
+        assert!(dict.has_prefix("")); // empty prefix matches everything
+        assert!(!dict.has_prefix("HEX"));
+        assert!(!dict.has_prefix("HELLOO"));
+    }
+
+    #[test]
+    fn has_prefix_respects_case_fold() {
+        let dict = SetDictionary::from_words(vec!["Hello"], true);
+        assert!(dict.has_prefix("hel"));
+        assert!(dict.has_prefix("HEL"));
+        assert!(!dict.has_prefix("xyz"));
+    }
+
     #[test]
     fn dictionary_loader_from_file() {
         let dir = std::env::temp_dir();
